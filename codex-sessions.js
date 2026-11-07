@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { reasoningText } = require('./codex-engine');
+const { messageTimestamp, annotateMessageTimings } = require('./message-timing');
 
 // Reads Codex CLI rollout files (~/.codex/sessions/YYYY/MM/DD/rollout-*-<id>.jsonl).
 // Newer files wrap records as {timestamp, type, payload}; older ones store the
@@ -125,17 +126,25 @@ function createCodexSessions({ home } = {}) {
       if (prev?.role === 'assistant') return prev;
       const msg = { role: 'assistant', text: '', tools: [] }; out.push(msg); return msg;
     };
-    for (const { kind, p } of records(fp)) {
+    for (const { ts, kind, p } of records(fp)) {
       if (kind === 'session_meta' && !project) project = p.cwd || '';
       if (kind === 'turn_context' && !project) project = p.cwd || '';
+      const timestamp = messageTimestamp(ts || p.timestamp);
+      if (kind === 'event_msg' && p.type === 'task_complete') {
+        const last = out.at(-1);
+        if (last?.role === 'assistant') {
+          if (timestamp) last.timestamp = timestamp;
+          if (typeof p.duration_ms === 'number' && p.duration_ms >= 0) last.durationMs = p.duration_ms;
+        }
+      }
       if (kind !== 'response_item') continue;
       if (p.type === 'message' && p.role === 'user') {
         const text = codexUserText(p.content), images = codexImages(p.content);
-        if (text || images.length) out.push({ role: 'user', text, images });
+        if (text || images.length) out.push({ role: 'user', text, images, ...(timestamp ? { timestamp } : {}) });
       } else if (p.type === 'message' && p.role === 'assistant') {
         const text = (p.content || []).filter(b => b?.type === 'output_text').map(b => b.text || '').join('');
         if (!text) continue;
-        const msg = assistant(); msg.text += (msg.text ? '\n\n' : '') + text;
+        const msg = assistant(); msg.text += (msg.text ? '\n\n' : '') + text; if (timestamp) msg.timestamp = timestamp;
       } else if (p.type === 'reasoning') {
         const text = reasoningText(p);
         if (text) { const message = assistant(); (message.reasoning ||= []).push({ id: p.id || `reasoning-${message.reasoning?.length || 0}`, text }); }
@@ -154,7 +163,7 @@ function createCodexSessions({ home } = {}) {
         tools.set(id, tool); assistant().tools.push(tool);
       }
     }
-    return { id, engine: 'codex', project, messages: out };
+    return { id, engine: 'codex', project, messages: annotateMessageTimings(out) };
   }
   // Token usage per day/model plus the most recent subscription quota snapshot.
   const statsCache = new Map();

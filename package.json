@@ -70,7 +70,8 @@
     "docs/migration.md",
     "upstream-network.js",
     "codex-profile.js",
-    "history-worker.js"
+    "history-worker.js",
+    "message-timing.js"
   ],
   "optionalDependencies": {
     "@larksuiteoapi/node-sdk": "1.76.0"

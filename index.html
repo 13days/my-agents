@@ -2359,7 +2359,7 @@ function renderChat() {
   if (!v.messages.length) box.innerHTML = `<div class="chat-welcome"><span class="empty-icon">${icon('sessions')}</span><h3>${esc(existing ? rt('这个会话里还没有可显示的对话', 'No messages to show in this session') : rt(`和 ${engineName} 开始一段新会话`, `Start a new ${engineName} session`))}</h3><p>${esc(codex ? rt('由本机 Codex CLI 执行，沿用你的 ChatGPT 订阅或 API Key 登录；开启抓包时请求经面板透传记录。发出后会出现在左侧会话列表，之后可随时回来接续。', 'Runs on the local Codex CLI with your ChatGPT subscription or API key login; with capture on, requests pass through the panel for inspection. It appears in the session list so you can come back and continue.') : rt('由本机 Claude Code 执行，有启用的代理账号时经账号路由；发出后会出现在左侧会话列表，之后可随时回来接续。', 'Runs on the local Claude Code CLI (through account routing when enabled). It appears in the session list so you can come back and continue.'))}</p></div>`;
   else {
     if (v.truncated) box.innerHTML = `<button type="button" class="btn chat-older" id="chat-older">${esc(rt('加载更早的消息', 'Load earlier messages'))}</button>`;
-    v.messages.forEach(m => { const body = appendChatMessage(box, m.role, m.text); paintChatImages(body, m.images || []); paintChatReasoning(body, m.reasoning || []); (m.tools || []).forEach(tool => paintChatTool(body, tool)); });
+    v.messages.forEach(m => { const body = appendChatMessage(box, m.role, m.text, m); paintChatImages(body, m.images || []); paintChatReasoning(body, m.reasoning || []); (m.tools || []).forEach(tool => paintChatTool(body, tool)); });
   }
   $('#chat-older')?.addEventListener('click', () => loadOlderChat(v));
   box.scrollTop = box.scrollHeight;
@@ -2424,7 +2424,7 @@ async function loadOlderChat(v) {
     if (chatView !== v || !button.isConnected) return;
     const box = $('#chat-messages'), top = box.scrollTop, height = box.scrollHeight;
     const older = document.createElement('div');
-    d.messages.forEach(m => { const body = appendChatMessage(older, m.role, m.text); paintChatImages(body, m.images || []); paintChatReasoning(body, m.reasoning || []); (m.tools || []).forEach(tool => paintChatTool(body, tool)); });
+    d.messages.forEach(m => { const body = appendChatMessage(older, m.role, m.text, m); paintChatImages(body, m.images || []); paintChatReasoning(body, m.reasoning || []); (m.tools || []).forEach(tool => paintChatTool(body, tool)); });
     button.after(...older.childNodes);
     v.messages.unshift(...d.messages); v.historyBefore = d.historyBefore; v.truncated = d.truncated;
     if (!d.truncated) button.remove();
@@ -2483,9 +2483,9 @@ function registerChatInSidebar(v, prompt) {
 }
 function createChatTurn(v, prompt, images, id = crypto.randomUUID()) {
   const box = $('#chat-messages');
-  const user = { role: 'user', text: prompt, images }, answer = { role: 'assistant', text: '', tools: [] };
+  const user = { role: 'user', text: prompt, images, timestamp: new Date().toISOString() }, answer = { role: 'assistant', text: '', tools: [] };
   v.messages.push(user, answer);
-  const userBody = appendChatMessage(box, 'user', prompt); paintChatImages(userBody, images);
+  const userBody = appendChatMessage(box, 'user', prompt, user); paintChatImages(userBody, images);
   const node = appendChatMessage(box, 'assistant', ''), article = node.parentElement;
   article.classList.add('is-waiting'); article.setAttribute('aria-busy', 'true');
   const activity = document.createElement('div'); activity.className = 'chat-activity'; activity.setAttribute('role', 'status');
@@ -2493,11 +2493,14 @@ function createChatTurn(v, prompt, images, id = crypto.randomUUID()) {
   const dots = document.createElement('span'); dots.className = 'chat-activity-dots'; dots.setAttribute('aria-hidden', 'true');
   for (let i = 0; i < 3; i++) dots.append(document.createElement('i'));
   activity.append(label, dots); article.append(activity); box.scrollTop = box.scrollHeight; box.updateScrollControls?.();
-  const turn = { id, answer, node, article, activity, label, box, finished: false, phase: rt('正在思考', 'Thinking'), startedAt: Date.now() };
+  const turn = { id, user, userNode: userBody, answer, node, article, activity, label, box, finished: false, phase: rt('正在思考', 'Thinking'), startedAt: Date.now() };
   let paintFrame = 0;
   const paintNow = () => { paintFrame = 0; if (node.isConnected) updateChatContent(box, () => { node.innerHTML = md(answer.text); article.classList.toggle('is-waiting', !answer.text && !turn.finished); }); };
   turn.paint = () => { if (!paintFrame) paintFrame = requestAnimationFrame(paintNow); };
-  turn.finish = (reason = '') => {
+  turn.finish = (reason = '', timing = {}) => {
+    answer.timestamp = timing.timestamp || answer.timestamp || new Date().toISOString();
+    answer.durationMs = Number.isFinite(timing.durationMs) ? timing.durationMs : Math.max(0, Date.now() - turn.startedAt);
+    paintChatTiming(node, answer);
     if (turn.finished) return;
     if (paintFrame) { cancelAnimationFrame(paintFrame); paintFrame = 0; }
     turn.finished = true; article.classList.remove('is-streaming', 'is-waiting'); article.removeAttribute('aria-busy'); activity.remove();
@@ -2547,10 +2550,12 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
     let payload; try { payload = JSON.parse(data); } catch { return; }
     if (kind === 'input') {
       if (!run.turns.has(payload.id)) run.turns.set(payload.id, createChatTurn(v, payload.prompt || '', payload.images || [], payload.id));
+      const current = run.turns.get(payload.id);
+      if (current && payload.timestamp) { current.user.timestamp = payload.timestamp; paintChatTiming(current.userNode, current.user); }
       updateChatSendState(v); return;
     }
     if (kind === 'stopped') {
-      run.turns.forEach(item => { if (!item.finished) item.finish(rt('已停止', 'Stopped')); });
+      run.turns.forEach(item => { if (!item.finished) item.finish(rt('已停止', 'Stopped'), payload); });
       run.activeId = ''; run.lastStatus = rt('已停止', 'Stopped'); updateChatSendState(v); updateStatus(); return;
     }
     if (kind === 'meta') {
@@ -2577,7 +2582,7 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
     if (kind === 'turn') {
       run.activeId = payload.id;
       const current = run.turns.get(payload.id);
-      if (current) { current.startedAt = Date.now(); current.label.textContent = rt('正在思考', 'Thinking'); current.article.classList.add('is-streaming'); }
+      if (current) { current.startedAt = Date.parse(payload.timestamp) || current.startedAt; current.label.textContent = rt('正在思考', 'Thinking'); current.article.classList.add('is-streaming'); }
       updateChatSendState(v); updateStatus(); return;
     }
     if (kind === 'idle') { run.activeId = ''; updateChatSendState(v); updateStatus(); return; }
@@ -2630,11 +2635,11 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
     }
     if (kind === 'text') { answer.text += payload.text || ''; current.phase = rt('正在输出', 'Responding'); current.paint(); }
     if (kind === 'done') {
-      current.finish(payload.interrupted ? rt('已按补充消息继续', 'Continued with follow-up input') : payload.isError ? '⚠ ' + (payload.error || rt('本轮执行失败', 'Turn failed')) : ''); run.activeId = '';
+      current.finish(payload.interrupted ? rt('已按补充消息继续', 'Continued with follow-up input') : payload.isError ? '⚠ ' + (payload.error || rt('本轮执行失败', 'Turn failed')) : '', payload); run.activeId = '';
       run.lastStatus = payload.isError ? rt('请求失败', 'Request failed') : rt('完成', 'Done') + (payload.cost ? ` · $${Number(payload.cost).toFixed(4)}` : '');
       updateChatSendState(v); refreshSessionList();
     }
-    if (kind === 'error') { current.finish('⚠ ' + (payload.error || 'Error')); run.lastStatus = rt('请求失败', 'Request failed'); }
+    if (kind === 'error') { current.finish('⚠ ' + (payload.error || 'Error'), payload); run.lastStatus = rt('请求失败', 'Request failed'); }
     updateStatus();
   };
   try {
@@ -2699,12 +2704,30 @@ function paintChatTool(body, tool) {
   detail.querySelector('.chat-tool-input').textContent = tool.partialInput ?? format(tool.input);
   detail.querySelector('.chat-tool-output').textContent = tool.output === undefined ? (tool.state === 'running' ? rt('等待工具返回…', 'Waiting for result…') : labels[tool.state]) : format(tool.output);
 }
-function appendChatMessage(box, role, text) {
+function paintChatTiming(body, message) {
+  const label = body.parentElement.querySelector('.chat-message-label');
+  let meta = label.querySelector('.chat-message-meta');
+  if (!meta) { meta = document.createElement('span'); meta.className = 'chat-message-meta'; label.append(meta); }
+  meta.replaceChildren();
+  const timestamp = message.timestamp && new Date(message.timestamp);
+  if (timestamp && Number.isFinite(timestamp.getTime())) {
+    const time = document.createElement('time'); time.dateTime = timestamp.toISOString();
+    time.textContent = timestamp.toLocaleString(lang === 'en' ? 'en-GB' : lang === 'ja' ? 'ja-JP' : 'zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    time.title = (message.role === 'user' ? rt('发送时间：', 'Sent at: ') : rt('回复时间：', 'Replied at: ')) + timestamp.toLocaleString(); meta.append(time);
+  }
+  if (message.role === 'assistant' && Number.isFinite(message.durationMs) && message.durationMs >= 0) {
+    const duration = document.createElement('span'); const seconds = message.durationMs / 1000;
+    duration.textContent = rt('耗时 ', 'Took ') + (seconds >= 60 ? `${Math.floor(seconds / 60)}${rt('分', 'm ')}${Math.floor(seconds % 60)}${rt('秒', 's')}` : `${seconds.toFixed(1)}${rt('秒', 's')}`);
+    meta.append(duration);
+  }
+  meta.hidden = !meta.childNodes.length;
+}
+function appendChatMessage(box, role, text, timing = {}) {
   box.querySelector('.chat-welcome')?.remove();
   const article = document.createElement('article'); article.className = 'chat-message ' + role;
   const label = document.createElement('div'); label.className = 'chat-message-label'; label.textContent = role === 'user' ? rt('你', 'You') : (chatView?.engine === 'codex' ? 'Codex' : 'Claude Code');
   const body = document.createElement('div'); body.className = 'chat-message-body'; body.innerHTML = role === 'assistant' ? md(text) : esc(text).replace(/\n/g, '<br>');
-  article.append(label, body); box.append(article); return body;
+  article.append(label, body); box.append(article); paintChatTiming(body, { role, ...timing }); return body;
 }
 
 // ---------- Runtime account routing ----------

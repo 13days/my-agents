@@ -22,6 +22,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
+const { messageTimestamp, annotateMessageTimings } = require('./message-timing');
 const crypto = require('crypto');
 const { chooseFolder } = require('./folder-picker');
 const { createSessionStore, normalizeTitle, isManualTitle, autoTitlePatch } = require('./session-store');
@@ -683,7 +684,13 @@ function sessionMessages(id, options = {}) {
   const toolsById = new Map();
   for (const line of lines) {
     let d; try { d = JSON.parse(line); } catch { continue; }
-    if (d.isSidechain || d.isMeta || !d.message) continue;
+    if (d.isSidechain || d.isMeta) continue;
+    if (d.type === 'system' && d.subtype === 'turn_duration') {
+      const last = messages.at(-1); const duration = d.durationMs ?? d.duration_ms;
+      if (last?.role === 'assistant' && typeof duration === 'number' && duration >= 0) last.durationMs = duration;
+    }
+    if (!d.message) continue;
+    const timestamp = messageTimestamp(d.timestamp);
     if (d.type === 'user') {
       for (const block of Array.isArray(d.message.content) ? d.message.content : []) {
         const tool = block.type === 'tool_result' && toolsById.get(block.tool_use_id);
@@ -691,7 +698,7 @@ function sessionMessages(id, options = {}) {
       }
       const t = transcriptUserText(d.message.content);
       const images = (Array.isArray(d.message.content) ? d.message.content : []).filter(b => b?.type === 'image' && b.source?.type === 'base64' && ['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(b.source.media_type)).map(b => ({ mimeType: b.source.media_type, data: b.source.data }));
-      if (t || images.length) messages.push({ role: 'user', text: t, images });
+      if (t || images.length) messages.push({ role: 'user', text: t, images, ...(timestamp ? { timestamp } : {}) });
     } else if (d.type === 'assistant' && Array.isArray(d.message.content)) {
       let add = ''; const tools = [];
       for (const b of d.message.content) {
@@ -704,11 +711,11 @@ function sessionMessages(id, options = {}) {
       }
       if (!add && !tools.length) continue;
       const prev = messages[messages.length - 1];
-      if (prev && prev.role === 'assistant') { if (add) prev.text = prev.text + '\n\n' + add; prev.tools.push(...tools); }
-      else messages.push({ role: 'assistant', text: add, tools });
+      if (prev && prev.role === 'assistant') { if (add) prev.text = prev.text + '\n\n' + add; prev.tools.push(...tools); if (timestamp) prev.timestamp = timestamp; }
+      else messages.push({ role: 'assistant', text: add, tools, ...(timestamp ? { timestamp } : {}) });
     }
   }
-  const value = { id, project, messages };
+  const value = { id, project, messages: annotateMessageTimings(messages) };
   sessionMessageCache.delete(fp);
   sessionMessageCache.set(fp, { revision, value });
   while (sessionMessageCache.size > 2) sessionMessageCache.delete(sessionMessageCache.keys().next().value);
@@ -1794,7 +1801,7 @@ async function startCodexChat({ res, input, prompt, gatewayContext, cwd, request
   const buffered = [];
   let job = null, running = null, idleTimer;
   const emit = (event, data) => {
-    const payload = { ...data, ...(runner.currentId ? { messageId: runner.currentId } : {}) };
+    const payload = { timestamp: new Date().toISOString(), ...data, ...(runner.currentId ? { messageId: runner.currentId } : {}) };
     if (!job) return buffered.push([event, payload]);
     if (job.closed) return;
     job.publish(event, payload);

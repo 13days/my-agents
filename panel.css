@@ -788,3 +788,8 @@ body[data-nav-collapsed="true"] .resource-engine-switch button { padding: 5px 1p
 .chat-reasoning { margin: 8px 0 12px; border: 1px solid var(--border); border-radius: 7px; background: #ffffff02; }
 .chat-reasoning summary { cursor: pointer; padding: 9px 12px; font-size: 11px; color: var(--muted); }
 .chat-reasoning pre { margin: 0; padding: 0 12px 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font: 12px/1.7 var(--font); max-height: 320px; overflow-y: auto; }
+
+.chat-message-label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.chat-message.user .chat-message-label { justify-content: flex-end; }
+.chat-message-meta { display: inline-flex; flex-wrap: wrap; gap: 9px; color: var(--muted); font-size: 10px; font-weight: 400; }
+.chat-message-meta[hidden] { display: none; }
