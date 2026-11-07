@@ -20,7 +20,7 @@ function createCodexEngine({ sessions, capture = () => null, env = process.env }
     meta: { label: 'Codex', short: 'Codex', emblem: '◎', color: '#10a37f', aliases: ['openai-codex'], upstreamHint: '可停止任务后检查网络或登录状态' },
     capabilities: {
       sessionId: 'discovered', steer: 'restart', streamingText: false, reasoning: true, permissions: 'none',
-      accounts: false, images: true, resources: ['skills', 'config', 'commands', 'agents', 'plugins', 'workflows'],
+      accounts: false, images: true, resources: ['skills', 'config'],
       usage: { cost: false }, search: false, wrapped: false, capture: true,
     },
     detect: () => resolveCodex({ env }),

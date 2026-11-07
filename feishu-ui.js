@@ -1,4 +1,11 @@
 let feishuStatusTimer = null;
+// Older services don't report defaultEngine; then engine settings stay read-only until the panel restarts.
+function feishuEngineSupported(c) { return typeof c.defaultEngine === 'string' && !!c.defaultEngine; }
+function feishuEngineOptions(c) {
+  const engines = ENGINES.map(engine => [engine.id, engine.label]);
+  if (feishuEngineSupported(c) && !hasEngine(c.defaultEngine)) engines.push([c.defaultEngine, engineLabel(c.defaultEngine)]);
+  return engines.map(([id, label]) => `<option value="${esc(id)}">${esc(label)}</option>`).join('');
+}
 function stopFeishuPolling() { clearInterval(feishuStatusTimer); feishuStatusTimer = null; }
 async function renderFeishuGateway() {
   stopFeishuPolling();
@@ -25,8 +32,8 @@ async function renderFeishuGateway() {
         <label>App ID<input id="feishu-app-id" value="${esc(c.appId)}" autocomplete="off" placeholder="cli_…"></label>
         <label>App Secret<span class="gateway-secret-field"><input id="feishu-app-secret" type="password" autocomplete="new-password" placeholder="${esc(c.hasSecret ? rt('已保存，留空保持不变', 'Saved; leave blank to keep it') : rt('填写自建应用的 Secret', 'Enter your custom app secret'))}"><button id="feishu-secret-toggle" class="btn" type="button" aria-controls="feishu-app-secret" aria-pressed="false">${esc(rt('显示', 'Show'))}</button></span></label>
         </details>
-        <div class="gateway-form-row"><label>${esc(rt('服务', 'Service'))}<select id="feishu-domain"><option value="feishu">飞书</option><option value="lark">Lark</option></select></label><label>${esc(rt('默认启动引擎', 'Default engine'))}<select id="feishu-default-engine" ${['claude', 'codex'].includes(c.defaultEngine) ? '' : 'disabled'}><option value="claude">Claude Code</option><option value="codex">Codex</option></select></label></div>
-        <p class="gateway-engine-hint route-muted">${esc(['claude', 'codex'].includes(c.defaultEngine) ? rt('新话题首次发送消息，或 /new 未指定引擎时，使用此默认值。已有话题继续使用各自绑定的引擎。', 'Used for the first message in an unbound topic and /new without an engine. Existing topics retain their engine.') : rt('当前运行的服务尚未加载引擎设置，请重启面板后使用默认引擎和 /engine 命令。', 'Restart the panel service to enable default-engine settings and /engine commands.'))}</p>
+        <div class="gateway-form-row"><label>${esc(rt('服务', 'Service'))}<select id="feishu-domain"><option value="feishu">飞书</option><option value="lark">Lark</option></select></label><label>${esc(rt('默认启动引擎', 'Default engine'))}<select id="feishu-default-engine" ${feishuEngineSupported(c) ? '' : 'disabled'}>${feishuEngineOptions(c)}</select></label></div>
+        <p class="gateway-engine-hint route-muted">${esc(feishuEngineSupported(c) ? rt('新话题首次发送消息，或 /new 未指定引擎时，使用此默认值。已有话题继续使用各自绑定的引擎。', 'Used for the first message in an unbound topic and /new without an engine. Existing topics retain their engine.') : rt('当前运行的服务尚未加载引擎设置，请重启面板后使用默认引擎和 /engine 命令。', 'Restart the panel service to enable default-engine settings and /engine commands.'))}</p>
         <label>${esc(rt('Claude Code 模型（选填）', 'Claude Code model (optional)'))}<input id="feishu-model" value="${esc(c.model)}" placeholder="${esc(rt('沿用 Claude Code 默认模型', 'Use Claude Code default'))}"></label>
         <label>${esc(rt('默认项目', 'Default project'))}<div class="gateway-project"><input id="feishu-project" readonly value="${esc(c.defaultProject)}" placeholder="${esc(rt('未选择时，飞书里用 /new 选择项目', 'Use /new in Feishu when no default is selected'))}"><button type="button" class="btn" id="feishu-project-pick">${esc(rt('选择文件夹', 'Choose folder'))}</button></div></label>
         <details id="feishu-access" class="gateway-access" open><summary>${esc(rt('访问权限 · 自动发现的用户与群', 'Access · discovered users and groups'))}</summary>
@@ -79,8 +86,8 @@ async function renderFeishuGateway() {
   reference.querySelector('h3').after(intro);
   referenceDetails.append(referenceSummary, reference.querySelector('.gateway-command-list'), reference.lastElementChild); reference.append(referenceDetails);
   const engineGuide = document.createElement('section'); engineGuide.className = 'gateway-engine-guide';
-  engineGuide.innerHTML = `<h4>${esc(rt('话题与引擎', 'Topics & engines'))}</h4><p class="route-muted">${esc(rt('每个私聊、群和话题独立绑定会话，可分别使用 Claude Code 或 Codex。同一话题内成员共用绑定，重启后保留。', 'Private chats, groups and topics have independent sessions and engines. Members of a topic share its binding, which survives restarts.'))}</p><dl><dt><code>/engine</code></dt><dd>${esc(rt('查看当前引擎与切换选项', 'View the engine and choices'))}</dd><dt><code>/codex</code></dt><dd>${esc(rt('切到 Codex，可在后面直接带问题', 'Use Codex, optionally followed by a prompt'))}</dd><dt><code>/claude</code></dt><dd>${esc(rt('切到 Claude，可在后面直接带问题', 'Use Claude, optionally followed by a prompt'))}</dd><dt><code>/new</code></dt><dd>${esc(rt('使用默认项目与默认引擎', 'Use the default project and engine'))}</dd><dt><code>/current</code></dt><dd>${esc(rt('查看当前位置的会话与引擎', 'View this session and engine'))}</dd></dl><p class="route-muted">${esc(rt('切换时各引擎分别接续上下文；/new codex 或 /new claude 强制新建。简洁模式同样支持引擎命令，并在回复末尾标注引擎；群内请 @机器人发送。', 'Each engine resumes its own context. /new codex or /new claude starts fresh. Simple mode supports engine commands and labels replies. @mention the bot in groups.'))}</p>`;
-  if (!['claude', 'codex'].includes(c.defaultEngine)) { const notice = document.createElement('p'); notice.className = 'gateway-access-warning'; notice.textContent = rt('当前服务需要重启后才能使用下列新引擎命令。', 'Restart the service before using the new engine commands below.'); engineGuide.prepend(notice); }
+  engineGuide.innerHTML = `<h4>${esc(rt('话题与引擎', 'Topics & engines'))}</h4><p class="route-muted">${esc(rt(`每个私聊、群和话题独立绑定会话，可分别使用 ${ENGINES.map(engine => engine.label).join(' 或 ')}。同一话题内成员共用绑定，重启后保留。`, 'Private chats, groups and topics have independent sessions and engines. Members of a topic share its binding, which survives restarts.'))}</p><dl><dt><code>/engine</code></dt><dd>${esc(rt('查看当前引擎与切换选项', 'View the engine and choices'))}</dd><dt><code>/codex</code></dt><dd>${esc(rt('切到 Codex，可在后面直接带问题', 'Use Codex, optionally followed by a prompt'))}</dd><dt><code>/claude</code></dt><dd>${esc(rt('切到 Claude，可在后面直接带问题', 'Use Claude, optionally followed by a prompt'))}</dd><dt><code>/new</code></dt><dd>${esc(rt('使用默认项目与默认引擎', 'Use the default project and engine'))}</dd><dt><code>/current</code></dt><dd>${esc(rt('查看当前位置的会话与引擎', 'View this session and engine'))}</dd></dl><p class="route-muted">${esc(rt('切换时各引擎分别接续上下文；/new codex 或 /new claude 强制新建。简洁模式同样支持引擎命令，并在回复末尾标注引擎；群内请 @机器人发送。', 'Each engine resumes its own context. /new codex or /new claude starts fresh. Simple mode supports engine commands and labels replies. @mention the bot in groups.'))}</p>`;
+  if (!feishuEngineSupported(c)) { const notice = document.createElement('p'); notice.className = 'gateway-access-warning'; notice.textContent = rt('当前服务需要重启后才能使用下列新引擎命令。', 'Restart the service before using the new engine commands below.'); engineGuide.prepend(notice); }
   referenceDetails.before(engineGuide);
   const journey = document.createElement('div'); journey.className = 'gateway-journey';
   journey.innerHTML = [['01', rt('连接机器人', 'Connect bot'), rt('扫码创建或填写应用凭证', 'Scan or enter app credentials')], ['02', rt('设置权限', 'Set access'), rt('配对账号，选择允许的群', 'Pair users and allow groups')], ['03', rt('开始对话', 'Start chatting'), rt('发送消息，在这里查看记录', 'Send messages and inspect the log')]].map(([n, title, note]) => `<div><span class="gateway-step">${n}</span><span><strong>${esc(title)}</strong><small>${esc(note)}</small></span></div>`).join('');
@@ -115,7 +122,7 @@ async function renderFeishuGateway() {
   selectTab(localStorage.getItem('panel-gateway-tab') || 'connection');
 
   $('#feishu-domain').value = c.domain;
-  $('#feishu-default-engine').value = c.defaultEngine || 'claude';
+  $('#feishu-default-engine').value = c.defaultEngine || ENGINE_DEFAULT;
   $('#feishu-cli-brand').value = c.domain;
   let setupWasActive = ['starting', 'waiting', 'completing'].includes(cliSetup.phase), hasCredentials = c.hasSecret, recoverExisting = false, callbackReady = !!c.cardCallbacksReady;
   let autoStart = data.runtime.autoStart, owners = c.allowedUserIds.join('\n');
@@ -295,7 +302,7 @@ async function renderFeishuGateway() {
     $('#feishu-phase').textContent = (d.phase === 'connected' ? '● ' : '') + (labels[d.phase] || d.phase);
     $('#feishu-phase').className = 'route-badge' + (d.phase === 'connected' ? '' : ' is-muted');
     const connectionError = typeof d.lastError === 'string' && !d.lastError.includes('[object Object]') ? d.lastError : rt('连接异常，请查看本机服务日志。', 'Connection issue. Check the local service log.');
-    $('#feishu-connection-note').textContent = d.phase !== 'connected' && d.lastError ? connectionError : (d.bot ? `${d.bot} · ${rt('长连接接入', 'Long connection')}` : rt('连接后，可在飞书接续 Claude Code 与 Codex 会话。', 'Connect to continue Claude Code and Codex sessions from Feishu.'));
+    $('#feishu-connection-note').textContent = d.phase !== 'connected' && d.lastError ? connectionError : (d.bot ? `${d.bot} · ${rt('长连接接入', 'Long connection')}` : rt(`连接后，可在飞书接续 ${ENGINES.map(engine => engine.label).join(' 与 ')} 会话。`, `Connect to continue ${ENGINES.map(engine => engine.label).join(' and ')} sessions from Feishu.`));
     $('#feishu-runtime').title = d.runtime.claudeCli || '';
     $('#feishu-runtime').textContent = `${d.runtime.claudeVersion ? 'Claude Code ' + d.runtime.claudeVersion + ' · ' : ''}${d.runtime.keepAwake ? rt('Mac 保活中', 'Mac kept awake') : rt('未启用保活', 'Keep-awake off')} · ${d.runtime.autoStart ? rt('已配置登录启动', 'Login startup configured') : rt('未配置登录启动', 'Login startup off')}${d.runtime.backgroundService ? ' · ' + rt('后台服务运行中', 'Background service running') : ''}`;
     $('#feishu-paired-count').textContent = d.config.allowAllUsers ? rt('当前放行所有私聊用户（禁用账号除外）', 'All private-chat users allowed except disabled accounts') : `${rt('已授权账号：', 'Allowed accounts: ')}${d.config.allowedUserIds.length}`;

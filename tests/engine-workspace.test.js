@@ -21,7 +21,7 @@ test('model preferences stay with their engine, including explicit defaults and 
 test('session engine filtering includes legacy Claude sessions and rejects stale filter values', () => {
   const source = html.slice(html.indexOf('let sessionEngine ='), html.indexOf('function renderSessionEngines()'));
   for (const [saved, expected] of [['all', [true, true]], ['claude', [true, false]], ['codex', [false, true]], ['removed-engine', [true, true]]]) {
-    const ctx = context({ 'panel-session-engine': saved }); vm.runInContext(source, ctx);
+    const ctx = context({ 'panel-session-engine': saved }); ctx.hasEngine = id => ['claude', 'codex'].includes(id); vm.runInContext(source, ctx);
     assert.deepEqual(Array.from(vm.runInContext("[matchesSessionEngine({}), matchesSessionEngine({engine: 'codex'})]", ctx)), expected);
   }
 });

@@ -84,10 +84,122 @@ const $ = s => document.querySelector(s);
 
 const ICONS = {feishu: '<path d="m21 3-7 18-4-7-7-4 18-7ZM10 14l5-5"/>', "terminal": "<path d=\"m5 6 6 6-6 6M13 18h6\"/>", "stats": "<path d=\"M4 19V5m0 14h16M8 15v-4m5 4V7m5 8v-6\"/>", "proxy": "<rect x=\"3\" y=\"4\" width=\"18\" height=\"6\" rx=\"2\"/><rect x=\"3\" y=\"14\" width=\"18\" height=\"6\" rx=\"2\"/><path d=\"M7 7h.01M7 17h.01M12 10v4\"/>", "inspector": "<path d=\"M3 12h4l3-7 4 14 3-7h4\"/>", "sessions": "<path d=\"M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z\"/>", "voyage": "<path d=\"m3 17 9 4 9-4M5 15l7-3 7 3M12 3v9M12 3l7 6h-7M5 15v3m14-3v3\"/>", "commands": "<path d=\"m5 6 6 6-6 6M13 18h6\"/>", "skills": "<path d=\"m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4L12 3Z\"/>", "agents": "<rect x=\"4\" y=\"7\" width=\"16\" height=\"14\" rx=\"3\"/><path d=\"M12 3v4M8 12h.01M16 12h.01M9 17h6M1 12v5m22-5v5\"/>", "plugins": "<path d=\"M9 3v4m6-4v4M7 7h10v5a5 5 0 0 1-10 0V7Zm5 10v4\"/>", "workflows": "<rect x=\"8\" y=\"2\" width=\"8\" height=\"5\" rx=\"1\"/><rect x=\"2\" y=\"17\" width=\"7\" height=\"5\" rx=\"1\"/><rect x=\"15\" y=\"17\" width=\"7\" height=\"5\" rx=\"1\"/><path d=\"M12 7v5M5.5 17v-5h13v5\"/>", "config": "<path d=\"M4 7h16M4 17h16M8 4v6m8 4v6\"/>", "chat": "<path d=\"M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z\"/>", "folder": "<path d=\"M3 8a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9H3V8Z\"/>", "arrow": "<path d=\"M5 12h14m-6-6 6 6-6 6\"/>"};
 function icon(type) { return `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[type] || ICONS.folder}</svg>`; }
-function ui(zh, en, ja = en) { return lang === 'zh' ? zh : lang === 'ja' ? ja : en; }
+// ---------- i18n lookup ----------
+// One lookup for inline copy in every supported language: current language → en → zh.
+function ui(zh, en, ja) { const copy = { zh, en, ja }; return copy[lang] ?? copy.en ?? copy.zh; }
+// Older name kept for call sites (and feishu-ui.js); identical to ui().
+function rt(zh, en, ja) { return ui(zh, en, ja); }
+
+// ---------- engine registry ----------
+// Engine metadata and capabilities come from GET /api/engines. UI code asks the
+// registry (engineMeta / can / engineLabel) instead of testing engine ids.
+const LEGACY_ENGINE = 'claude'; // sessions, captures and settings written before multi-engine support carry no engine id
+const FALLBACK_ENGINES = { default: LEGACY_ENGINE, nodes: [], engines: [{ id: LEGACY_ENGINE, label: 'Claude Code', short: 'Claude', emblem: '✳', color: '#d97757', aliases: [], cli: null, default: true, nodes: [],
+  capabilities: { sessionId: 'assigned', steer: 'inject', streamingText: true, reasoning: true, permissions: 'auto', accounts: true, images: true, resources: ['commands', 'skills', 'agents', 'plugins', 'workflows', 'config'], usage: { cost: true }, search: true, wrapped: true, capture: true } }] };
+let ENGINES = [], ENGINE_DEFAULT = LEGACY_ENGINE, ENGINE_NODES = [], enginesLoaded = false;
+function setEngines(data) {
+  const list = Array.isArray(data?.engines) && data.engines.length ? data.engines : FALLBACK_ENGINES.engines;
+  ENGINES = list.filter(engine => engine && typeof engine.id === 'string').map(engine => ({ ...engine, label: engine.label || engine.id, short: engine.short || engine.label || engine.id, emblem: engine.emblem || (engine.short || engine.id).charAt(0).toUpperCase(), color: engine.color || '', capabilities: engine.capabilities || {}, nodes: engine.nodes || [] }));
+  ENGINE_DEFAULT = ENGINES.some(engine => engine.id === data?.default) ? data.default : (ENGINES.find(engine => engine.default) || ENGINES[0]).id;
+  ENGINE_NODES = Array.isArray(data?.nodes) ? data.nodes : [];
+}
+setEngines(FALLBACK_ENGINES);
+async function loadEngines() {
+  try {
+    const res = await fetch('/api/engines');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    setEngines(await res.json()); enginesLoaded = true;
+  } catch { setEngines(FALLBACK_ENGINES); enginesLoaded = false; }
+}
+function engineIds() { return ENGINES.map(engine => engine.id); }
+function hasEngine(id) { return ENGINES.some(engine => engine.id === id); }
+// Unknown ids (e.g. an engine removed since a session was recorded) still get a readable label.
+function engineMeta(id) {
+  const name = String(id || LEGACY_ENGINE);
+  return ENGINES.find(engine => engine.id === name) || { id: name, label: name.charAt(0).toUpperCase() + name.slice(1), short: name.charAt(0).toUpperCase() + name.slice(1), emblem: name.charAt(0).toUpperCase(), color: '', capabilities: {}, nodes: [], cli: null, unknown: true };
+}
+function knownEngine(id, fallback = ENGINE_DEFAULT) { return hasEngine(id) ? id : fallback; }
+function engineLabel(id, short = false) { const meta = engineMeta(id); return short ? meta.short : meta.label; }
+// can(id, 'accounts'), can(id, 'usage.cost'), can(id, 'resources', 'skills'), can(id, 'steer', 'inject')
+function can(id, path, value) {
+  let current = engineMeta(id).capabilities;
+  for (const key of path.split('.')) current = current?.[key];
+  if (value !== undefined) return Array.isArray(current) ? current.includes(value) : current === value;
+  return Array.isArray(current) ? current.length > 0 : !!current && current !== 'none';
+}
+function enginesWith(path, value) { return ENGINES.filter(engine => can(engine.id, path, value)); }
+function engineClass(id) { return String(id || '').replace(/[^\w-]/g, ''); }
+function engineStyle(id) { const color = engineMeta(id).color; return /^#[0-9a-f]{3,8}$/i.test(color) ? `--engine-color:${color}` : ''; }
+function engineTag(id, text = engineLabel(id, true), className = 'tag engine-tag') {
+  const tag = document.createElement('span'); tag.className = className + ' ' + engineClass(id); tag.textContent = text;
+  const style = engineStyle(id); if (style) tag.setAttribute('style', style);
+  return tag;
+}
+function engineEmblem(id) { return `<span class="engine-emblem ${engineClass(id)}" style="${engineStyle(id)}">${esc(engineMeta(id).emblem)}</span>`; }
+// Engine-specific wording (file locations, login and capture setup differ per engine).
+// Engines without an entry fall back to generic copy built from registry metadata.
+const ENGINE_COPY = {
+  claude: {
+    connectionNote: ['多账号路由 · 故障转移', 'Account routing · Failover'],
+    welcome: ['由本机 Claude Code 执行，有启用的代理账号时经账号路由；发出后会出现在左侧会话列表，之后可随时回来接续。', 'Runs on the local Claude Code CLI (through account routing when enabled). It appears in the session list so you can come back and continue.'],
+  },
+  codex: {
+    connectionNote: ['本机登录 · 透传抓包', 'Local login · Request capture'],
+    welcome: ['由本机 Codex CLI 执行，沿用你的 ChatGPT 订阅或 API Key 登录；开启抓包时请求经面板透传记录。发出后会出现在左侧会话列表，之后可随时回来接续。', 'Runs on the local Codex CLI with your ChatGPT subscription or API key login; with capture on, requests pass through the panel for inspection. It appears in the session list so you can come back and continue.'],
+    replayCaptured: ['本会话的 Codex 请求已被抓取，下方显示实际捕获的提示词与工具。', 'Codex requests were captured. Captured prompts and tools appear below.'],
+    replayNotCaptured: ['这个 Codex 会话没有可关联的抓包记录。请在「引擎与接入 → Codex」开启抓包；终端会话需先生成配置，并用 codex -p my-agents 启动。历史请求无法补抓。', 'No captured requests are linked to this Codex session. Enable capture in Engines & connections → Codex. For terminal sessions, install the profile and launch codex -p my-agents. Past requests cannot be captured retroactively.'],
+    captureSetup: ['面板新建的 Codex 会话可在接入页开启抓包。终端使用前，请先生成抓包配置。', 'Enable capture for panel sessions in Connections. For terminal sessions, install the capture profile first.'],
+    statsSource: ['数据来源：~/.codex/sessions · 输入包含缓存；订阅额度和 API 费用分别计算，不折算为 Claude 费用。', 'Source: ~/.codex/sessions · Input includes cached tokens. Subscription quotas and API billing are separate from Claude costs.'],
+    resources: {
+      skills: ['管理 Codex 的个人与项目技能，识别共享技能和只读安装项。', 'Manage personal and project Codex skills, including shared and installed skills.'],
+      config: ['管理 Codex 的 AGENTS.md 指令与 config.toml 配置。', 'Manage Codex AGENTS.md instructions and config.toml settings.'],
+      globalScope: ['全局（Codex + 共享技能）', 'Global (Codex + shared skills)'],
+      installedNote: [' · 安装项或系统资源（只读）', ' · Installed or system resource (read-only)'],
+      skillHint: scope => (scope ? scope + '/.agents/skills' : '~/.agents/skills') + '/<name>/SKILL.md',
+      sharedSource: 'agents', installedReadOnly: true, bundle: false,
+    },
+  },
+};
+function engineCopy(id, key) { const copy = ENGINE_COPY[id]?.[key]; return Array.isArray(copy) ? ui(...copy) : copy; }
+function resourceCopy(key, id = state.resourceEngine) { const copy = ENGINE_COPY[id]?.resources?.[key]; return Array.isArray(copy) ? ui(...copy) : copy; }
+// Engines with manageable resources, and the one the resource pages use when none is chosen.
+function resourceEngines() { return enginesWith('resources'); }
+function defaultResourceEngine() { return can(ENGINE_DEFAULT, 'resources') ? ENGINE_DEFAULT : (resourceEngines()[0]?.id || ENGINE_DEFAULT); }
+function isResourceType(type) { return SCOPED.includes(type) || type === 'plugins'; }
+function firstResourceType(engine = state.resourceEngine) { const types = engineMeta(engine).capabilities.resources || []; return [...SCOPED, 'plugins'].find(type => types.includes(type)) || 'skills'; }
+// Transcript-indexed engines feed /api/stats, /api/usage and full-text search.
+function statsRoute(id) { return id === LEGACY_ENGINE ? 'stats' : encodeURIComponent(id) + '/stats'; }
+
+// ---------- network errors ----------
+// Turn fetch failures into something a person can act on instead of "Failed to fetch".
+function friendlyError(error, status) {
+  if (error?.friendly) return error;
+  if (error?.name === 'AbortError') return error;
+  const code = status ?? error?.status;
+  let message, network = false;
+  if (!code && (error instanceof TypeError || /failed to fetch|networkerror|load failed|network ?error/i.test(error?.message || ''))) {
+    network = true;
+    message = typeof navigator !== 'undefined' && navigator.onLine === false
+      ? ui('网络已断开，请检查网络连接后重试', 'You appear to be offline. Check your network connection and try again.', 'ネットワークに接続されていません。接続を確認して再試行してください。')
+      : ui('无法连接面板服务，它可能正在重启，请稍后重试', 'Cannot reach the panel service. It may be restarting; try again shortly.', 'パネルサービスに接続できません。再起動中の可能性があります。しばらくしてから再試行してください。');
+  } else if ([502, 503, 504].includes(code) && !error?.serverMessage) {
+    message = ui(`面板服务暂不可用（HTTP ${code}），可能正在重启`, `Panel service unavailable (HTTP ${code}); it may be restarting`, `パネルサービスが利用できません（HTTP ${code}）。再起動中の可能性があります`);
+  } else if (code >= 500) {
+    message = ui(`服务器出错（HTTP ${code}）`, `Server error (HTTP ${code})`, `サーバーエラー（HTTP ${code}）`) + (error?.serverMessage ? '：' + error.serverMessage : '');
+  } else if (error instanceof SyntaxError) {
+    message = ui('服务器返回了无法识别的响应', 'The server returned an unreadable response', 'サーバーから解釈できない応答が返されました') + (code ? ` (HTTP ${code})` : '');
+  } else message = error?.serverMessage || error?.message || String(error || ui('未知错误', 'Unknown error', '不明なエラー'));
+  const friendly = new Error(message); friendly.friendly = true; friendly.status = code; friendly.network = network; friendly.retryable = network || [502, 503, 504].includes(code); friendly.cause = error;
+  return friendly;
+}
+async function responseError(res) {
+  const data = await res.json().catch(() => ({}));
+  const error = new Error(data.error || res.statusText || 'HTTP ' + res.status); error.status = res.status; if (data.error) error.serverMessage = data.error;
+  return friendlyError(error, res.status);
+}
+
 function viewDescription(type) {
-  if (state.resourceEngine === 'codex' && type === 'skills') return ui('管理 Codex 的个人与项目技能，识别共享技能和只读安装项。', 'Manage personal and project Codex skills, including shared and installed skills.');
-  if (state.resourceEngine === 'codex' && type === 'config') return ui('管理 Codex 的 AGENTS.md 指令与 config.toml 配置。', 'Manage Codex AGENTS.md instructions and config.toml settings.');
+  if (isResourceType(type) && resourceCopy(type)) return resourceCopy(type);
   const descriptions = {
     stats: ['两个引擎，一个工作空间。随时掌握你的使用情况。', 'Two engines, one workspace. Keep your work and usage in view.'],
     feishu: ['通过飞书，接续本机的 Claude Code 与 Codex 会话。', 'Continue local Claude Code and Codex sessions from Feishu.'],
@@ -112,9 +224,11 @@ function updateWorkspaceChrome() {
   const dashboard = !!CAPS[state.type].dashboard;
   document.body.dataset.view = dashboard ? 'dashboard' : 'library';
   document.body.dataset.section = state.type;
-  $('#sectionCrumb').textContent = (SCOPED.includes(state.type) || state.type === 'plugins' ? (state.resourceEngine === 'codex' ? 'Codex' : 'Claude Code') : state.type === 'voyage' ? 'Claude Code' : ui('工作空间', 'Workspace', 'ワークスペース')) + ' / ' + t('tabs')[state.type];
+  // Voyage reads the legacy (Claude Code) transcripts only.
+  const scopeLabel = isResourceType(state.type) ? engineLabel(state.resourceEngine) : state.type === 'voyage' ? engineLabel(LEGACY_ENGINE) : '';
+  $('#sectionCrumb').textContent = (scopeLabel || ui('工作空间', 'Workspace', 'ワークスペース')) + ' / ' + t('tabs')[state.type];
   $('#libraryTitle').textContent = t('tabs')[state.type];
-  $('#workspaceScope').textContent = SCOPED.includes(state.type) || state.type === 'plugins' ? (state.resourceEngine === 'codex' ? 'Codex' : 'Claude Code') : state.type === 'voyage' ? 'Claude Code' : 'Claude Code + Codex';
+  $('#workspaceScope').textContent = scopeLabel || ENGINES.map(engine => engine.label).join(' + ');
   renderResourceEngines();
   renderSessionEngines();
   $('#projbar').hidden = !SCOPED.includes(state.type);
@@ -143,9 +257,9 @@ function emptyState() {
 //              2) I18N 里加同名字典（可只翻译一部分，缺失 key 自动回退 en → 默认语言）
 //              3) 后端 server.js 的 STRINGS 里加同名字典（同样支持部分翻译）
 const LANGS = [
-  { code: 'zh', label: '中文' },
-  { code: 'en', label: 'English' },
-  { code: 'ja', label: '日本語' },
+  { code: 'zh', label: '中文', locale: 'zh-CN' },
+  { code: 'en', label: 'English', locale: 'en-GB' },
+  { code: 'ja', label: '日本語', locale: 'ja-JP' },
 ];
 const DEFAULT_LANG = 'zh';
 const I18N = {
@@ -313,6 +427,7 @@ const I18N = {
   },
 };
 let lang = localStorage.getItem('panel-lang');
+if (/^zh\b/i.test(lang || '')) lang = 'zh'; // older builds stored zh-CN
 if (!LANGS.some(l => l.code === lang)) lang = DEFAULT_LANG;
 // 取字符串：当前语言 → en → 默认语言，逐级回退（部分翻译的语言也能正常工作）
 const t = k => I18N[lang]?.[k] ?? I18N.en[k] ?? I18N[DEFAULT_LANG][k] ?? k;
@@ -334,24 +449,26 @@ const CAPS = {
 };
 // 支持项目作用域的专区
 const SCOPED = ['commands', 'skills', 'agents', 'workflows', 'config'];
-let state = { resourceEngine: localStorage.getItem('panel-resource-engine') === 'codex' ? 'codex' : 'claude', type: 'commands', items: [], current: null, editing: false, keyword: '', origin: 'user', scope: '', projects: [] };
+// resourceEngine is validated against the registry once /api/engines has loaded (see init).
+let state = { resourceEngine: localStorage.getItem('panel-resource-engine') || LEGACY_ENGINE, type: 'commands', items: [], current: null, editing: false, keyword: '', origin: 'user', scope: '', projects: [] };
 
 function renderResourceEngines() {
   const label = document.querySelector('[data-nav-group="资源管理"]');
   let host = $('#resource-engines');
   if (!host) { host = document.createElement('div'); host.id = 'resource-engines'; host.className = 'resource-engine-switch'; host.setAttribute('role', 'group'); label.after(host); }
   host.setAttribute('aria-label', ui('资源引擎', 'Resource engine'));
-  host.innerHTML = [['claude', 'Claude'], ['codex', 'Codex']].map(([engine, name]) => `<button type="button" data-resource-engine="${engine}" aria-pressed="${state.resourceEngine === engine}">${name}</button>`).join('');
+  const engines = resourceEngines();
+  host.hidden = engines.length < 2;
+  host.innerHTML = engines.map(engine => `<button type="button" data-resource-engine="${esc(engine.id)}" class="${engineClass(engine.id)}" style="${engineStyle(engine.id)}" aria-pressed="${state.resourceEngine === engine.id}">${esc(engine.short)}</button>`).join('');
   host.querySelectorAll('button').forEach(button => button.onclick = async () => {
     if (state.resourceEngine === button.dataset.resourceEngine) return;
     if (state.editing && !confirm(t('unsaved'))) return;
     state.editing = false; state.resourceEngine = button.dataset.resourceEngine; localStorage.setItem('panel-resource-engine', state.resourceEngine);
     renderProjOptions();
-    await switchType(['skills', 'config'].includes(state.type) ? state.type : 'skills'); loadCounts();
+    await switchType(isResourceType(state.type) && can(state.resourceEngine, 'resources', state.type) ? state.type : firstResourceType()); loadCounts();
   });
   document.querySelectorAll('.tab').forEach(tab => {
-    const resource = SCOPED.includes(tab.dataset.type) || tab.dataset.type === 'plugins';
-    tab.hidden = resource && state.resourceEngine === 'codex' && !['skills', 'config'].includes(tab.dataset.type);
+    tab.hidden = isResourceType(tab.dataset.type) && !can(state.resourceEngine, 'resources', tab.dataset.type);
   });
 }
 
@@ -360,7 +477,7 @@ let routeView = '', routeRevision = 0, detailRevision = 0;
 function routePath(type = state.type, key = state.current, view = routeView) {
   const query = new URLSearchParams();
   if (SCOPED.includes(type) && state.scope) query.set('scope', state.scope);
-  if ((SCOPED.includes(type) || type === 'plugins') && state.resourceEngine === 'codex') query.set('engine', 'codex');
+  if ((SCOPED.includes(type) || type === 'plugins') && state.resourceEngine && state.resourceEngine !== defaultResourceEngine()) query.set('engine', state.resourceEngine);
   if (type === 'sessions' && key && view) query.set('view', view);
   return '/' + type + (key ? '/' + encodeURIComponent(key) : '') + (query.size ? '?' + query : '');
 }
@@ -375,9 +492,10 @@ function readRoute() {
   const query = new URLSearchParams(location.search);
   const view = query.get('view') || '';
   if (view && !['detail', 'replay'].includes(view)) throw new Error(ui('页面不存在', 'Page not found'));
-  if (query.has('engine') && !['claude', 'codex'].includes(query.get('engine'))) throw new Error(ui('页面不存在', 'Page not found'));
-  if (query.get('engine') === 'codex' && !['skills', 'config'].includes(parts[0])) throw new Error(ui('Codex 当前支持技能与配置管理', 'Codex supports skills and configuration here'));
-  return { ...(query.get('engine') === 'codex' ? { engine: 'codex' } : {}), type: parts[0], key: parts[1] ? decodeURIComponent(parts[1]) : null, scope: query.get('scope') || '', view };
+  const engine = query.get('engine');
+  if (engine !== null && !hasEngine(engine)) throw new Error(ui('页面不存在', 'Page not found'));
+  if (engine && !can(engine, 'resources', parts[0])) throw new Error(ui(`${engineLabel(engine)} 不支持此页面`, `${engineLabel(engine)} does not support this page`));
+  return { ...(engine ? { engine } : {}), type: parts[0], key: parts[1] ? decodeURIComponent(parts[1]) : null, scope: query.get('scope') || '', view };
 }
 async function restoreRoute() {
   const revision = ++routeRevision;
@@ -386,7 +504,7 @@ async function restoreRoute() {
   state.editing = false;
   try {
     const target = readRoute() || { type: Object.hasOwn(CAPS, localStorage.getItem('panel-section')) ? localStorage.getItem('panel-section') : 'stats', key: null, scope: '', view: '', engine: state.resourceEngine };
-    if (SCOPED.includes(target.type) || target.type === 'plugins') { state.resourceEngine = target.engine || 'claude'; localStorage.setItem('panel-resource-engine', state.resourceEngine); }
+    if (isResourceType(target.type)) { state.resourceEngine = knownEngine(target.engine, defaultResourceEngine()); localStorage.setItem('panel-resource-engine', state.resourceEngine); }
     state.scope = SCOPED.includes(target.type) ? target.scope : '';
     renderProjOptions();
     await switchType(target.type, false);
@@ -410,15 +528,16 @@ function matchOrigin(it, type) {
 
 const pendingApiReads = new Map();
 async function api(method, path, body) {
-  const resource = SCOPED.includes(path.split(/[/?]/)[0]) || path.split(/[/?]/)[0] === 'plugins';
-  const q = 'lang=' + lang + (state.scope ? '&scope=' + encodeURIComponent(state.scope) : '') + (resource && state.resourceEngine === 'codex' ? '&engine=codex' : '');
+  const resource = isResourceType(path.split(/[/?]/)[0]);
+  const q = 'lang=' + lang + (state.scope ? '&scope=' + encodeURIComponent(state.scope) : '') + (resource && state.resourceEngine !== defaultResourceEngine() ? '&engine=' + encodeURIComponent(state.resourceEngine) : '');
   const url = '/api/' + path + (path.includes('?') ? '&' : '?') + q;
   if (method === 'GET' && pendingApiReads.has(url)) return pendingApiReads.get(url);
   const request = (async () => {
-    const res = await fetch(url, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
-    const data = await res.json();
-    if (!res.ok) { const error = new Error(data.error || res.statusText); error.status = res.status; throw error; }
-    return data;
+    let res;
+    try { res = await fetch(url, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined }); }
+    catch (error) { throw friendlyError(error); }
+    if (!res.ok) throw await responseError(res);
+    try { return await res.json(); } catch (error) { throw friendlyError(error, res.status); }
   })();
   if (method !== 'GET') return request;
   pendingApiReads.set(url, request);
@@ -435,7 +554,8 @@ function toast(msg, ok = true) {
 }
 
 function hydrateResourceUsage(items, type, engine, scope, pending) {
-  if (!pending || engine !== 'claude' || scope || !['commands', 'skills', 'agents', 'workflows'].includes(type)) return;
+  // Usage counts come from the transcripts indexed for search (the default resource path only).
+  if (!pending || !can(engine, 'search') || engine !== defaultResourceEngine() || scope || !['commands', 'skills', 'agents', 'workflows'].includes(type)) return;
   api('GET', 'usage').then(counts => {
     for (const item of items) item.uses = counts[type]?.[item.name] || 0;
     if (state.type === type && state.resourceEngine === engine && state.scope === scope && state.items === items) renderList();
@@ -444,7 +564,7 @@ function hydrateResourceUsage(items, type, engine, scope, pending) {
 async function loadCounts() {
   const resourceEngine = state.resourceEngine, scope = state.scope;
   for (const type of Object.keys(CAPS)) {
-    if (state.resourceEngine === 'codex' && (SCOPED.includes(type) || type === 'plugins') && !['skills', 'config'].includes(type)) continue;
+    if (isResourceType(type) && !can(resourceEngine, 'resources', type)) continue;
     if (CAPS[type].dashboard) continue; // 统计页无列表计数
     try {
       const { items, usagePending } = await api('GET', type);
@@ -457,7 +577,7 @@ async function loadCounts() {
 }
 
 async function switchType(type, updateRoute = true) {
-  if (state.resourceEngine === 'codex' && (SCOPED.includes(type) || type === 'plugins') && !['skills', 'config'].includes(type)) type = 'skills';
+  if (isResourceType(type) && !can(state.resourceEngine, 'resources', type)) type = firstResourceType();
   clearCaptureSearch();
   if (state.editing && !confirm(t('unsaved'))) return;
   closeExpandedWindow();
@@ -480,7 +600,7 @@ async function switchType(type, updateRoute = true) {
   renderCaptureFilters();
   $('#search').value = '';
   $('#search').placeholder = type === 'sessions' ? t('searchSessionsPh') : t('search');
-  $('#footerBtns').style.display = type === 'config' && state.resourceEngine !== 'codex' ? 'flex' : 'none';
+  $('#footerBtns').style.display = type === 'config' && resourceCopy('bundle') !== false && state.resourceEngine === defaultResourceEngine() ? 'flex' : 'none';
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.type === type));
   $('#newbtn').style.display = CAPS[type].new ? 'block' : 'none';
   $('#newbtn').textContent = newBtnLabel(type);
@@ -505,12 +625,19 @@ async function switchType(type, updateRoute = true) {
   } catch (e) { toast(t('loadFail') + e.message, false); }
 }
 
-let sessionEngine = ['claude', 'codex'].includes(localStorage.getItem('panel-session-engine')) ? localStorage.getItem('panel-session-engine') : 'all';
-function matchesSessionEngine(item) { return sessionEngine === 'all' || (item.engine || 'claude') === sessionEngine; }
+let sessionEngine = localStorage.getItem('panel-session-engine') || 'all';
+// Stale filter values (engine removed or registry unavailable) behave as "all".
+// Sessions recorded before multi-engine support have no engine field and belong to Claude.
+// The registry may not exist when this block is evaluated on its own (tests), hence the pre-registry id list.
+function sessionEngineKnown(id) { return hasEngine(id); }
+function selectedSessionEngine() { return sessionEngineKnown(sessionEngine) ? sessionEngine : 'all'; }
+function matchesSessionEngine(item) { const selected = selectedSessionEngine(); return selected === 'all' || (item.engine || 'claude') === selected; }
 function renderSessionEngines() {
   const host = $('#session-engines'); host.hidden = state.type !== 'sessions';
   if (host.hidden) return;
-  host.innerHTML = '<div class="engine-filter">' + [['all', ui('全部', 'All')], ['claude', 'Claude'], ['codex', 'Codex']].map(([id, label]) => `<button type="button" data-session-engine="${id}" aria-pressed="${sessionEngine === id}">${label}</button>`).join('') + '</div><p class="session-search-hint">' + esc(ui('按名称筛选 · 回车全文搜索仅支持 Claude Code', 'Filter by name · Enter searches Claude Code transcripts')) + '</p>';
+  const selected = selectedSessionEngine(), searchable = enginesWith('search').map(engine => engine.label).join(' / ');
+  const filters = ENGINES.length > 1 ? '<div class="engine-filter">' + [['all', ui('全部', 'All', 'すべて')], ...ENGINES.map(engine => [engine.id, engine.short])].map(([id, label]) => `<button type="button" data-session-engine="${esc(id)}" aria-pressed="${selected === id}">${esc(label)}</button>`).join('') + '</div>' : '';
+  host.innerHTML = filters + '<p class="session-search-hint">' + esc(searchable ? ui(`按名称筛选 · 回车全文搜索仅支持 ${searchable}`, `Filter by name · Enter searches ${searchable} transcripts`) : ui('按名称筛选', 'Filter by name')) + '</p>';
   host.querySelectorAll('button').forEach(button => button.onclick = () => {
     sessionEngine = button.dataset.sessionEngine; localStorage.setItem('panel-session-engine', sessionEngine); renderSessionEngines(); renderList();
   });
@@ -558,11 +685,11 @@ function renderList({ revealCurrent = false } = {}) {
         div.querySelector('.nm').replaceChildren(sequence, name);
       }
       if (state.type === 'sessions') {
-        const tag = document.createElement('span'); tag.className = 'tag engine-tag ' + (it.engine === 'codex' ? 'codex' : 'claude'); tag.textContent = it.engine === 'codex' ? 'Codex' : 'Claude';
-        div.querySelector('.nm').appendChild(tag);
+        div.querySelector('.nm').appendChild(engineTag(it.engine || LEGACY_ENGINE));
       }
-      if (state.resourceEngine === 'codex' && state.type === 'skills') {
-        const tag = document.createElement('span'); tag.className = 'tag engine-tag codex'; tag.textContent = it.source === 'agents' ? ui('共享', 'Shared') : 'Codex'; div.querySelector('.nm').appendChild(tag);
+      if (state.type === 'skills' && state.resourceEngine !== defaultResourceEngine()) {
+        const shared = resourceCopy('sharedSource') && it.source === resourceCopy('sharedSource');
+        div.querySelector('.nm').appendChild(engineTag(state.resourceEngine, shared ? ui('共享', 'Shared', '共有') : engineLabel(state.resourceEngine, true)));
       }
       if (state.origin === 'all' && it.origin === 'installed') {
         const tag = document.createElement('span');
@@ -582,7 +709,7 @@ function renderList({ revealCurrent = false } = {}) {
       }
       div.querySelector('.ds').textContent = it.description || '';
       if (state.type === 'inspector') {
-        const tag = document.createElement('span'); const engine = captureEngine(it); tag.className = 'tag engine-tag ' + engine; tag.textContent = engine === 'codex' ? 'Codex' : 'Claude Code'; div.querySelector('.ds').prepend(tag, document.createTextNode(' '));
+        const engine = captureEngine(it); div.querySelector('.ds').prepend(engineTag(engine, engineLabel(engine)), document.createTextNode(' '));
       }
       div.onclick = () => openItem(key, it.name);
       if (state.type === 'sessions') {
@@ -693,10 +820,10 @@ async function openItem(key, displayName) {
     const note = d.builtin ? t('noteBuiltin')
       : readonlyCmd ? t('notePluginCmd')
       : d.plugin ? t('notePlugin')
-      : d.origin === 'installed' ? (state.resourceEngine === 'codex' ? ui(' · 安装项或系统资源（只读）', ' · Installed or system resource (read-only)') : t('noteInstalled')) : '';
+      : d.origin === 'installed' ? (resourceCopy('installedNote') || t('noteInstalled')) : '';
     $('#fpath').textContent = d.path.replace(/^\/Users\/[^/]+/, '~') + note;
     $('#editBtn').disabled = !caps.edit || d.origin === 'installed';
-    $('#delBtn').disabled = !caps.del || readonlyCmd || (state.resourceEngine === 'codex' && d.origin === 'installed');
+    $('#delBtn').disabled = !caps.del || readonlyCmd || (!!resourceCopy('installedReadOnly') && d.origin === 'installed');
     setEditMode(false);
     renderDoc(d);
     if (state.type === 'sessions' && d.session && d.hasTranscript) {
@@ -792,7 +919,7 @@ $('#delBtn').onclick = async () => {
 $('#newbtn').onclick = () => {
   if (state.type === 'sessions') return openNewChat();
   $('#modalTitle').textContent = fmt(t('newTitle'), { label: t('typeLabel')[state.type] });
-  $('#modalHint').textContent = state.resourceEngine === 'codex' && state.type === 'skills' ? (state.scope ? state.scope + '/.agents/skills/<name>/SKILL.md' : '~/.agents/skills/<name>/SKILL.md') : state.type === 'skills' ? t('hintSkills')
+  $('#modalHint').textContent = state.type === 'skills' && resourceCopy('skillHint') ? resourceCopy('skillHint')(state.scope) : state.type === 'skills' ? t('hintSkills')
     : state.type === 'workflows' ? t('hintWorkflows')
     : fmt(t('hintFlat'), { type: state.type });
   $('#newName').value = '';
@@ -821,7 +948,9 @@ $('#search').addEventListener('keydown', async e => {
   if (e.key !== 'Enter' || state.type !== 'sessions') return;
   const q = e.target.value.trim();
   if (q.length < 2) return;
-  if (sessionEngine === 'codex') { toast(ui('Codex 当前支持按名称筛选；全文搜索暂仅支持 Claude Code', 'Codex supports name filtering. Transcript search currently supports Claude Code.'), false); return; }
+  const filtered = selectedSessionEngine(), searchable = enginesWith('search').map(engine => engine.label).join(' / ');
+  if (filtered !== 'all' && !can(filtered, 'search')) { toast(ui(`${engineLabel(filtered)} 当前支持按名称筛选；全文搜索暂仅支持 ${searchable || '—'}`, `${engineLabel(filtered)} supports name filtering. Transcript search currently supports ${searchable || 'no engine'}.`), false); return; }
+  if (!searchable) return;
   const searchEpoch = sessionListEpoch;
   try {
     const { results } = await api('GET', 'search?q=' + encodeURIComponent(q));
@@ -849,7 +978,7 @@ function renderSearchResults(results) {
     const ds = document.createElement('div'); ds.className = 'ds';
     ds.textContent = r.snippet;
     div.append(nm, ds);
-    const engine = document.createElement('span'); engine.className = 'tag engine-tag claude'; engine.textContent = 'Claude'; nm.appendChild(engine);
+    nm.appendChild(engineTag(r.engine || enginesWith('search')[0]?.id || LEGACY_ENGINE));
     div.onclick = () => openItem(r.session);
     list.appendChild(div);
   }
@@ -875,13 +1004,13 @@ async function loadReplay(id) {
     if (r.captured) {
       const banner = document.createElement('div');
       banner.style.cssText = 'margin-bottom:14px;padding:10px 14px;border:1px solid rgba(144,133,233,.4);border-radius:10px;background:rgba(144,133,233,.08);font-size:12px;color:#a99ff0';
-      banner.textContent = r.engine === 'codex' ? ui('本会话的 Codex 请求已被抓取，下方显示实际捕获的提示词与工具。', 'Codex requests were captured. Captured prompts and tools appear below.') : '🕵️ ' + fmt(t('replayCaptured'), { v: r.clientVersion || '?' });
+      banner.textContent = engineCopy(r.engine, 'replayCaptured') || '🕵️ ' + fmt(t('replayCaptured'), { v: r.clientVersion || '?' });
       wrap.appendChild(banner);
     } else {
       const note = document.createElement('div');
       note.style.cssText = 'margin-bottom:14px;padding:12px 16px;border:1px dashed var(--border);border-radius:10px;background:var(--panel);font-size:12.5px;color:var(--muted);line-height:1.6';
-      if (r.engine === 'codex') {
-        note.textContent = ui('这个 Codex 会话没有可关联的抓包记录。请在「引擎与接入 → Codex」开启抓包；终端会话需先生成配置，并用 codex -p my-agents 启动。历史请求无法补抓。', 'No captured requests are linked to this Codex session. Enable capture in Engines & connections → Codex. For terminal sessions, install the profile and launch codex -p my-agents. Past requests cannot be captured retroactively.');
+      if (engineCopy(r.engine, 'replayNotCaptured')) {
+        note.textContent = engineCopy(r.engine, 'replayNotCaptured');
         wrap.appendChild(note);
       } else if (r.proxyInstalled) {
         // 代理已装：历史会话补不回，新会话自动抓——不再叫用户装
@@ -1157,8 +1286,8 @@ function renderInspectorEmpty() {
     <p style="color:var(--muted);font-size:13.5px;margin-bottom:12px">${esc(t('insEmpty'))}</p>
     <pre style="background:var(--code-bg);border:1px solid var(--border);border-radius:10px;padding:14px;font-family:ui-monospace,monospace;font-size:13px">${esc(cmd)}</pre>
     <div style="margin-top:12px"><button class="btn primary" id="insCopyBtn">${esc(t('insCopy'))}</button></div>
-    <p style="color:var(--muted);font-size:11.5px;margin-top:12px">${esc(t('insHint'))}</p></div><div class="chart"><h3>Codex</h3><p class="route-muted">${esc(ui('面板新建的 Codex 会话可在接入页开启抓包。终端使用前，请先生成抓包配置。', 'Enable capture for panel sessions in Connections. For terminal sessions, install the capture profile first.'))}</p><button type="button" class="btn" id="insCodexSetup">${esc(ui('配置 Codex 接入', 'Configure Codex'))} →</button></div>`;
-  $('#insCodexSetup').onclick = () => { localStorage.setItem('panel-connection-engine', 'codex'); switchType('proxy'); };
+    <p style="color:var(--muted);font-size:11.5px;margin-top:12px">${esc(t('insHint'))}</p></div>${enginesWith('capture').filter(engine => engine.id !== LEGACY_ENGINE).map(engine => `<div class="chart"><h3>${esc(engine.label)}</h3><p class="route-muted">${esc(engineCopy(engine.id, 'captureSetup') || ui(`在接入页为 ${engine.label} 开启抓包。`, `Enable capture for ${engine.label} in Connections.`))}</p><button type="button" class="btn" data-capture-setup="${esc(engine.id)}">${esc(ui(`配置 ${engine.label} 接入`, `Configure ${engine.label}`))} →</button></div>`).join('')}`;
+  document.querySelectorAll('[data-capture-setup]').forEach(button => button.onclick = () => { localStorage.setItem('panel-connection-engine', button.dataset.captureSetup); switchType('proxy'); });
   const cb = $('#insCopyBtn');
   if (cb) cb.onclick = () => { navigator.clipboard.writeText(cmd); toast('✓'); };
 }
@@ -1271,7 +1400,7 @@ function renderCaptureDetail(wrap, r) {
   const searchBlocks = [];
   wrap.classList.add('capture-detail');
   const summary = document.createElement('div'); summary.className = 'capture-summary';
-  for (const [label, ok] of [[captureEngine(r) === 'codex' ? 'Codex' : 'Claude Code', false], [String(r.status || '—'), r.status >= 200 && r.status < 300], [r.upstreamName, false], [r.model, false], [Math.round((r.durationMs || 0) / 100) / 10 + 's', false]]) {
+  for (const [label, ok] of [[engineLabel(captureEngine(r)), false], [String(r.status || '—'), r.status >= 200 && r.status < 300], [r.upstreamName, false], [r.model, false], [Math.round((r.durationMs || 0) / 100) / 10 + 's', false]]) {
     if (!label) continue; const badge = document.createElement('span'); badge.textContent = label; if (ok) badge.className = 'capture-ok'; summary.append(badge);
   }
   wrap.append(summary);
@@ -1387,7 +1516,8 @@ function renderCaptureDetail(wrap, r) {
 }
 
 function captureEngine(item) {
-  if (item.engine) return item.engine === 'codex' ? 'codex' : 'claude';
+  if (item.engine) return item.engine;
+  // Records from before captures carried an engine id: only proxy provenance identifies Codex.
   return ['codex-chatgpt', 'codex-api'].includes(item.upstreamId) || /^(?:Codex 订阅|Codex API Key)\s*·/.test(item.description || '') ? 'codex' : 'claude';
 }
 function matchesCaptureContext(item) { return (!state.inspectorEngine || captureEngine(item) === state.inspectorEngine) && (!state.inspectorSession || item.sessionId === state.inspectorSession); }
@@ -1414,7 +1544,7 @@ function renderCaptureFilters() {
   const host = $('#capture-filters'); host.hidden = state.type !== 'inspector'; host.replaceChildren();
   if (host.hidden) return;
   const engines = document.createElement('div'); engines.className = 'engine-filter capture-engine-filter'; engines.setAttribute('role', 'group'); engines.setAttribute('aria-label', ui('抓包引擎', 'Capture engine'));
-  for (const [value, label] of [['', ui('全部', 'All')], ['claude', 'Claude Code'], ['codex', 'Codex']]) {
+  for (const [value, label] of [['', ui('全部', 'All', 'すべて')], ...enginesWith('capture').map(engine => [engine.id, engine.label])]) {
     const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.dataset.captureEngine = value; button.setAttribute('aria-pressed', String((state.inspectorEngine || '') === value));
     button.onclick = () => { state.inspectorEngine = value; renderCaptureFilters(); renderList(); }; engines.append(button);
   }
@@ -1480,24 +1610,30 @@ async function openInspect(key) {
 }
 // ---------- Live 实时监控 ----------
 
-let liveES = null;
+// One stream per page visit: stats re-renders (range buttons, background loads) reuse it and repaint the last sample.
+let liveES = null, liveLast = null, liveUrl = '';
+function paintLive(d = liveLast) {
+  const bar = $('#liveBar');
+  if (!bar || !d) return;
+  bar.classList.toggle('over', !!d.overBudget);
+  $('#lvCost').textContent = '$' + Number(d.cost || 0).toFixed(2);
+  $('#lvBurn').textContent = '$' + Number(d.burnPerHour || 0).toFixed(2) + '/h';
+  $('#lvAct').textContent = String(d.activeSessions ?? 0);
+  const bi = $('#lvBudget');
+  if (bi && document.activeElement !== bi && !bi.dataset.set) {
+    bi.value = d.budget || '';
+    bi.dataset.set = '1';
+  }
+}
 function connectLive() {
+  const url = '/api/live?lang=' + lang;
+  if (liveES && liveUrl === url && liveES.readyState !== EventSource.CLOSED) { paintLive(); return; }
   disconnectLive();
-  liveES = new EventSource('/api/live?lang=' + lang);
+  liveUrl = url; liveES = new EventSource(url);
   liveES.onmessage = e => {
     let d;
     try { d = JSON.parse(e.data); } catch { return; }
-    const bar = $('#liveBar');
-    if (!bar) return;
-    bar.classList.toggle('over', !!d.overBudget);
-    $('#lvCost').textContent = '$' + d.cost.toFixed(2);
-    $('#lvBurn').textContent = '$' + d.burnPerHour.toFixed(2) + '/h';
-    $('#lvAct').textContent = String(d.activeSessions);
-    const bi = $('#lvBudget');
-    if (bi && document.activeElement !== bi && !bi.dataset.set) {
-      bi.value = d.budget || '';
-      bi.dataset.set = '1';
-    }
+    liveLast = d; paintLive(d);
   };
 }
 function disconnectLive() { if (liveES) { liveES.close(); liveES = null; } }
@@ -1654,7 +1790,7 @@ function renderProjOptions() {
   const sel = $('#projSel');
   const cur = state.scope;
   sel.innerHTML = '';
-  sel.add(new Option(state.resourceEngine === 'codex' ? ui('全局（Codex + 共享技能）', 'Global (Codex + shared skills)') : t('scopeGlobal'), ''));
+  sel.add(new Option(resourceCopy('globalScope') || t('scopeGlobal'), ''));
   for (const p of state.projects) {
     const o = new Option('📁 ' + p.name, p.path);
     o.title = p.path;
@@ -1676,26 +1812,29 @@ const CHART_COLORS = ['#7c9fbe', '#87b29e', '#b9a17e', '#a499be', '#c48e8b', '#b
 
 let statsRange = 42; // 每日图展示的天数，0 = 全部
 
-let statsEngine = localStorage.getItem('panel-stats-engine') === 'codex' ? 'codex' : 'claude';
+// Overview tabs come from the registry; each engine's usage loads from its own stats route.
+let statsEngine = localStorage.getItem('panel-stats-engine') || '';
 async function renderStatsTab() {
   const revision = (state.statsRevision || 0) + 1; state.statsRevision = revision;
-  state.statsLoading = [true, true]; state.statsErrors = ['', ''];
+  statsEngine = knownEngine(statsEngine);
+  state.engineStats ||= {}; state.statsLoading = Object.fromEntries(engineIds().map(id => [id, true])); state.statsErrors = {};
   $('#empty').style.display = 'none'; $('#render').style.display = 'block'; $('#render').classList.add('wide');
   $('#title').firstChild.textContent = t('tabs').stats; $('#fpath').textContent = '';
   renderStatsNow();
-  await Promise.allSettled(['stats', 'codex/stats'].map(async (route, index) => {
-    const field = index ? 'codexStats' : 'statsData';
-    try { const result = await api('GET', route); if (state.statsRevision === revision) state[field] = result; }
-    catch (error) { if (state.statsRevision === revision) state.statsErrors[index] = error.status === 404 ? '' : error.message; }
-    finally { if (state.statsRevision === revision) { state.statsLoading[index] = false; if (state.type === 'stats') renderStatsNow(); } }
+  await Promise.allSettled(engineIds().map(async id => {
+    try { const result = await api('GET', statsRoute(id)); if (state.statsRevision === revision) state.engineStats[id] = result; }
+    catch (error) { if (state.statsRevision === revision) state.statsErrors[id] = error.status === 404 ? '' : error.message; }
+    finally { if (state.statsRevision === revision) { state.statsLoading[id] = false; if (state.type === 'stats') renderStatsNow(); } }
   }));
 }
-function codexStatsHTML(d) {
-  if (!d) return `<div class="route-empty"><h3>${esc(ui('暂无 Codex 用量记录', 'No Codex usage yet'))}</h3><p class="route-muted">${esc(ui('使用 Codex 开始对话后，这里会显示本机会话的 Token 用量。', 'Start a Codex conversation to see local token usage here.'))}</p></div>`;
-  const total = d.totals;
+// Token-only usage (engines without cost data).
+function tokenStatsHTML(d, id) {
+  const label = engineLabel(id);
+  if (!d) return `<div class="route-empty"><h3>${esc(ui(`暂无 ${label} 用量记录`, `No ${label} usage yet`))}</h3><p class="route-muted">${esc(ui(`使用 ${label} 开始对话后，这里会显示本机会话的 Token 用量。`, `Start a ${label} conversation to see local token usage here.`))}</p></div>`;
+  const total = d.totals || {};
   const metrics = [[d.sessions, ui('会话', 'Sessions')], [total.input, ui('输入 Token', 'Input tokens')], [total.output, ui('输出 Token', 'Output tokens')], [total.cached, ui('缓存 Token', 'Cached tokens')]];
   let h = `<div class="cards">${metrics.map(([value, label]) => `<div class="card"><div class="v">${fmtNum(value)}</div><div class="k">${esc(label)}</div></div>`).join('')}</div>`;
-  h += `<p class="data-source">${esc(ui('数据来源：~/.codex/sessions · 输入包含缓存；订阅额度和 API 费用分别计算，不折算为 Claude 费用。', 'Source: ~/.codex/sessions · Input includes cached tokens. Subscription quotas and API billing are separate from Claude costs.'))}</p>`;
+  if (engineCopy(id, 'statsSource')) h += `<p class="data-source">${esc(engineCopy(id, 'statsSource'))}</p>`;
   const limits = d.rateLimits;
   if (limits) {
     h += `<div class="chart"><h3>${esc(ui('订阅额度快照', 'Subscription quota snapshot'))}</h3><div class="codex-quotas">${[limits.primary, limits.secondary].filter(Boolean).map(w => {
@@ -1703,24 +1842,29 @@ function codexStatsHTML(d) {
       return `<div class="codex-quota"><span>${esc(label)} · ${esc(ui('已用', 'used'))} <b>${Math.round(w.used_percent)}%</b></span><div class="codex-bar"><i style="width:${Math.min(100, Math.max(0, w.used_percent))}%"></i></div><small>${w.resets_at ? esc(ui('重置于 ', 'Resets ') + new Date(w.resets_at * 1000).toLocaleString()) : ''}</small></div>`;
     }).join('')}</div><p class="data-source">${esc(ui('最近记录于 ', 'Last recorded ') + (d.rateLimitsAt ? new Date(d.rateLimitsAt).toLocaleString() : '—'))}</p></div>`;
   }
-  const table = (title, rows) => `<div class="chart"><h3>${esc(title)}</h3><div class="table-scroll"><table class="usage"><thead><tr><th>${esc(ui('名称', 'Name'))}</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cached</th></tr></thead><tbody>${rows.length ? rows.map(r => `<tr><td>${esc(r.key)}</td>${[r.input, r.output, r.cached].map(v => `<td class="num">${Number(v || 0).toLocaleString()}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="4">${esc(ui('暂无记录', 'No records yet'))}</td></tr>`}</tbody></table></div></div>`;
-  return h + table(ui('模型用量', 'Usage by model'), d.models) + table(ui('每日用量 · 最近 30 天记录', 'Daily usage · Latest 30 recorded days'), d.daily.slice(-30).reverse());
+  const table = (title, rows = []) => `<div class="chart"><h3>${esc(title)}</h3><div class="table-scroll"><table class="usage"><thead><tr><th>${esc(ui('名称', 'Name'))}</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cached</th></tr></thead><tbody>${rows.length ? rows.map(r => `<tr><td>${esc(r.key)}</td>${[r.input, r.output, r.cached].map(v => `<td class="num">${Number(v || 0).toLocaleString()}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="4">${esc(ui('暂无记录', 'No records yet'))}</td></tr>`}</tbody></table></div></div>`;
+  return h + table(ui('模型用量', 'Usage by model'), d.models) + table(ui('每日用量 · 最近 30 天记录', 'Daily usage · Latest 30 recorded days'), (d.daily || []).slice(-30).reverse());
 }
 function renderStatsNow() {
-  disconnectLive();
-  const c = state.statsData, x = state.codexStats;
-  const engines = [['claude', 'Claude Code', c ? fmtNum(c.totalSessions) + ui(' 个会话', ' sessions') : ui('暂无记录', 'No records')], ['codex', 'Codex', x ? fmtNum(x.sessions) + ui(' 个会话', ' sessions') : ui('暂无记录', 'No records')]];
+  statsEngine = knownEngine(statsEngine);
+  const stats = state.engineStats || {}, current = stats[statsEngine], label = engineLabel(statsEngine);
+  const sessionsOf = d => d ? fmtNum(d.totalSessions ?? d.sessions) + ui(' 个会话', ' sessions', ' セッション') : ui('暂无记录', 'No records', '記録なし');
   const intro = viewHeading('stats', `<div class="workspace-actions"><button type="button" class="btn" id="overview-connect">${esc(ui('管理接入', 'Connections'))}</button><button type="button" class="btn primary" id="overview-chat">＋ ${esc(ui('新建会话', 'New conversation'))}</button></div>`);
-  const tabs = `<div class="engine-tabs overview-engines" role="group" aria-label="${esc(ui('查看引擎用量', 'View engine usage'))}">${engines.map(([id, name, note]) => `<button type="button" data-stats-engine="${id}" aria-pressed="${statsEngine === id}"><span class="engine-emblem ${id}">${id === 'codex' ? 'O' : '✳'}</span><span><strong>${name}</strong><small>${esc(note)}</small></span><span class="engine-tab-action">${esc(ui('查看用量', 'View usage'))} ${icon('arrow')}</span></button>`).join('')}</div>`;
-  const loading = state.statsLoading?.[statsEngine === 'codex' ? 1 : 0] && !(statsEngine === 'codex' ? x : c);
-  const detail = loading ? `<div class="route-empty" role="status"><h3>${esc(ui('正在读取用量…', 'Loading usage…'))}</h3><p>${esc(ui('历史记录在后台统计，你可以继续切换页面。', 'History is being processed in the background. You can keep browsing.'))}</p></div>` : statsEngine === 'codex' ? codexStatsHTML(x) : c ? statsHTML(c) : `<div class="route-empty"><h3>${esc(ui('暂无 Claude Code 用量记录', 'No Claude Code usage yet'))}</h3><p class="route-muted">${esc(ui('接入账号并开始对话后，这里会显示用量和费用趋势。', 'Connect an account and start a conversation to see usage and spending.'))}</p></div>`;
-  $('#render').innerHTML = intro + tabs + `<div class="engine-detail"><div class="engine-detail-heading"><h3>${statsEngine === 'codex' ? 'Codex' : 'Claude Code'} · ${esc(ui('用量详情', 'Usage details'))}</h3>${statsEngine === 'claude' && c ? `<button class="btn" id="wrappedBtn">${esc(t('wrappedBtn').replace(/^🎁\s*/, ''))}</button>` : ''}</div>${state.statsErrors?.[statsEngine === 'codex' ? 1 : 0] ? `<p class="data-source" role="status">${esc(t('loadFail') + state.statsErrors[statsEngine === 'codex' ? 1 : 0])}</p>` : ''}${detail}</div>`;
+  const tabs = `<div class="engine-tabs overview-engines" role="group" aria-label="${esc(ui('查看引擎用量', 'View engine usage'))}">${ENGINES.map(engine => `<button type="button" data-stats-engine="${esc(engine.id)}" style="${engineStyle(engine.id)}" aria-pressed="${statsEngine === engine.id}">${engineEmblem(engine.id)}<span><strong>${esc(engine.label)}</strong><small>${esc(sessionsOf(stats[engine.id]))}</small></span><span class="engine-tab-action">${esc(ui('查看用量', 'View usage'))} ${icon('arrow')}</span></button>`).join('')}</div>`;
+  const costs = can(statsEngine, 'usage.cost');
+  const loading = state.statsLoading?.[statsEngine] && !current;
+  const detail = loading ? `<div class="route-empty" role="status"><h3>${esc(ui('正在读取用量…', 'Loading usage…'))}</h3><p>${esc(ui('历史记录在后台统计，你可以继续切换页面。', 'History is being processed in the background. You can keep browsing.'))}</p></div>`
+    : !costs ? tokenStatsHTML(current, statsEngine)
+    : current ? statsHTML(current) : `<div class="route-empty"><h3>${esc(ui(`暂无 ${label} 用量记录`, `No ${label} usage yet`))}</h3><p class="route-muted">${esc(ui('接入账号并开始对话后，这里会显示用量和费用趋势。', 'Connect an account and start a conversation to see usage and spending.'))}</p></div>`;
+  const error = state.statsErrors?.[statsEngine];
+  $('#render').innerHTML = intro + tabs + `<div class="engine-detail"><div class="engine-detail-heading"><h3>${esc(label)} · ${esc(ui('用量详情', 'Usage details'))}</h3>${can(statsEngine, 'wrapped') && current ? `<button class="btn" id="wrappedBtn">${esc(t('wrappedBtn').replace(/^🎁\s*/, ''))}</button>` : ''}</div>${error ? `<p class="data-source" role="status">${esc(t('loadFail') + error)}</p>` : ''}${detail}</div>`;
   $('#overview-connect').onclick = () => switchType('proxy');
   $('#overview-chat').onclick = async () => { localStorage.setItem('panel-chat-engine', statsEngine); await switchType('sessions'); openNewChat(); };
   document.querySelectorAll('[data-stats-engine]').forEach(button => button.onclick = () => { statsEngine = button.dataset.statsEngine; localStorage.setItem('panel-stats-engine', statsEngine); renderStatsNow(); });
   $('#render').querySelectorAll('.rangebtn').forEach(b => { b.onclick = () => { statsRange = +b.dataset.range; renderStatsNow(); }; });
   const wb = $('#wrappedBtn'); if (wb) wb.onclick = () => openWrapped(wrappedDays);
-  if (statsEngine === 'claude' && c) connectLive();
+  // The live bar is part of the cost view; keep its stream across re-renders instead of reconnecting each time.
+  if (costs && current && $('#liveBar')) connectLive(); else disconnectLive();
   const bi = $('#lvBudget');
   if (bi) bi.onchange = async () => {
     try { await api('PUT', 'panel-config', { dailyBudget: Number(bi.value) || 0 }); toast(t('budgetSaved')); }
@@ -2038,7 +2182,8 @@ $('#langSel').onchange = e => setLang(e.target.value);
 // ---------- 会话里的 Claude Code 对话 ----------
 // 新建对话（＋）或打开已有会话后在此接续；每条消息由本机 `claude -p [--resume]` 执行。
 let chatAbort = null, chatModel = '';
-function modelPreference(engine) { return localStorage.getItem('panel-chat-model-' + (engine || 'claude')) ?? (engine !== 'codex' ? localStorage.getItem('panel-chat-model') || '' : ''); }
+function modelPreference(engine) { const legacy = 'claude', id = engine || legacy; return localStorage.getItem('panel-chat-model-' + id) ?? (id === legacy ? localStorage.getItem('panel-chat-model') || '' : ''); } // the unsuffixed key predates multi-engine support and belonged to Claude
+function replayLabel(engine) { const name = engineLabel(engine, true); return rt(`查看 ${name} 提示词`, `View ${name} prompts`, `${name} のプロンプトを表示`); }
 let chatScrollObserver = null;
 let chatView = { sessionId: '', cwd: '', messages: [] };
 // 每个会话的代理账号：Claude Code 请求里带 session id，代理据此记录实时账号，也可把单个会话固定到某个账号
@@ -2302,7 +2447,7 @@ async function openNewChat() {
   chatAbort?.abort();
   state.current = null; routeView = ''; writeRoute(); renderList();
   sessionEngine = 'all'; localStorage.setItem('panel-session-engine', 'all'); renderSessionEngines();
-  chatView = { sessionId: '', cwd, messages: [], engine: localStorage.getItem('panel-chat-engine') === 'codex' ? 'codex' : 'claude' };
+  chatView = { sessionId: '', cwd, messages: [], engine: knownEngine(localStorage.getItem('panel-chat-engine')) };
   chatChrome(ui('新对话', 'New chat', '新しいチャット'), '');
   renderChat();
 }
@@ -2315,7 +2460,7 @@ async function openSessionChat(id) {
   try {
     const d = await api('GET', `sessions/${encodeURIComponent(id)}/messages`);
     if (state.type !== 'sessions' || state.current !== id || revision !== detailRevision) return;
-    chatView = { sessionId: id, cwd: d.project || '', messages: d.messages, truncated: d.truncated, historyBefore: d.historyBefore, revision: d.revision, engine: d.engine === 'codex' ? 'codex' : 'claude' };
+    chatView = { sessionId: id, cwd: d.project || '', messages: d.messages, truncated: d.truncated, historyBefore: d.historyBefore, revision: d.revision, engine: d.engine || LEGACY_ENGINE };
     const first = d.messages.find(m => m.role === 'user');
     chatChrome(state.items.find(item => item.key === id)?.name || (first ? first.text.replace(/\s+/g, ' ').slice(0, 60) : id.slice(0, 8)), (d.project || '').replace(/^\/Users\/[^/]+/, '~'));
     renderChat();
@@ -2325,23 +2470,23 @@ async function openSessionChat(id) {
 function renderChat() {
   chatScrollObserver?.disconnect();
   chatModel = modelPreference(chatView.engine);
-  const v = chatView, existing = !!v.sessionId, codex = v.engine === 'codex', engineName = codex ? 'Codex' : 'Claude Code';
-  const engine = existing
-    ? `<span class="chat-engine-badge${codex ? ' codex' : ''}">${esc(engineName)}</span>`
-    : `<div class="chat-engine" role="group" aria-label="${esc(rt('引擎', 'Engine'))}">${[['claude', 'Claude Code'], ['codex', 'Codex']].map(([id, label]) => `<button type="button" data-engine="${id}" aria-pressed="${v.engine === id}">${label}</button>`).join('')}</div>`;
+  const v = chatView, existing = !!v.sessionId, engineName = engineLabel(v.engine);
+  const engine = existing || ENGINES.length < 2
+    ? `<span class="chat-engine-badge ${engineClass(v.engine)}" style="${esc(engineStyle(v.engine))}">${esc(engineName)}</span>`
+    : `<div class="chat-engine" role="group" aria-label="${esc(rt('引擎', 'Engine', 'エンジン'))}">${ENGINES.map(item => `<button type="button" data-engine="${esc(item.id)}" aria-pressed="${v.engine === item.id}">${esc(item.label)}</button>`).join('')}</div>`;
   const project =`<div class="chat-field chat-project"><span>${esc(rt('项目', 'Project'))}</span><div class="chat-project-current" title="${esc(v.cwd)}">${icon('folder')}<span>${esc(v.cwd.split('/').filter(Boolean).pop() || v.cwd || rt('未知', 'Unknown'))}</span><small>${esc(v.cwd.replace(/^\/Users\/[^/]+/, '~'))}</small></div></div>`;
   const actions = existing
-    ? `<button class="btn" id="chat-detail">${esc(rt('详情', 'Details'))}</button><button class="btn" id="chat-replay">${esc(codex ? rt('查看 Codex 提示词', 'View Codex prompts') : rt('查看 Claude 提示词', 'View Claude prompts'))}</button>`
+    ? `<button class="btn" id="chat-detail">${esc(rt('详情', 'Details'))}</button><button class="btn" id="chat-replay">${esc(replayLabel(v.engine))}</button>`
     : '';
   $('#render').innerHTML = `<section class="chat-shell">
     <header class="chat-settings"><div class="chat-settings-bar">${project}${engine}<span class="chat-live" id="chat-live" hidden></span><div class="chat-top-actions">${actions}<button type="button" class="btn" id="chat-settings-toggle" aria-controls="chat-settings-panel">${esc(rt('设置', 'Settings'))} ⌄</button></div></div>
     <div class="chat-top" id="chat-settings-panel" hidden>
       <label class="chat-field chat-model">${esc(rt('模型', 'Model'))}<input id="chat-model" type="text" placeholder="${esc(rt('默认', 'Default'))}" value="${esc(chatModel)}"></label>
-      <div class="chat-field chat-route"${codex ? ' hidden' : ''}><span>${esc(rt('代理账号', 'Proxy account'))}</span><select id="chat-route" aria-label="${esc(rt('代理账号', 'Proxy account'))}" title="${esc(rt('只影响这个会话；其他会话可以走不同账号', 'Only affects this session; other sessions can use other accounts'))}">${routeOptions(existing ? ((routeInfo && routeInfo.routes[v.sessionId.toLowerCase()]) || '') : (v.accountId || ''))}</select></div>
+      <div class="chat-field chat-route"${can(v.engine, 'accounts') ? '' : ' hidden'}><span>${esc(rt('代理账号', 'Proxy account'))}</span><select id="chat-route" aria-label="${esc(rt('代理账号', 'Proxy account'))}" title="${esc(rt('只影响这个会话；其他会话可以走不同账号', 'Only affects this session; other sessions can use other accounts'))}">${routeOptions(existing ? ((routeInfo && routeInfo.routes[v.sessionId.toLowerCase()]) || '') : (v.accountId || ''))}</select></div>
     </div></header>
     <div class="chat-conversation"><div class="chat-messages" id="chat-messages"></div><div class="chat-scroll-controls" hidden><button type="button" id="chat-scroll-top" title="${esc(rt('会话顶部', 'Top of conversation'))}" aria-label="${esc(rt('会话顶部', 'Top of conversation'))}">↑</button><button type="button" id="chat-scroll-bottom" title="${esc(rt('会话底部', 'Bottom of conversation'))}" aria-label="${esc(rt('会话底部', 'Bottom of conversation'))}">↓</button></div></div>
     <form class="chat-compose" id="chat-form"><div id="chat-attachments" class="chat-attachments" hidden></div><textarea autocomplete="off" autocorrect="off" spellcheck="false" id="chat-prompt" rows="3" placeholder="${esc(existing ? rt('在这个会话里继续… 可粘贴图片', 'Continue this session… Paste images here') : rt(`问 ${engineName} 关于这个项目的问题… 可粘贴图片`, `Ask ${engineName} about this project… Paste images here`))}"></textarea>
-      <div class="chat-compose-footer"><button type="button" class="btn chat-attach" id="chat-attach">${esc(rt('＋ 图片', '+ Image'))}</button><input type="file" id="chat-image-file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden><span id="chat-status">${esc(rt('回车发送 · Shift + 回车换行', 'Enter to send · Shift + Enter for a new line'))}</span><button class="btn" type="submit" data-mode="queue" id="chat-queue" title="${esc(rt('等当前轮完成后处理', 'Process after the current turn'))}" hidden>${esc(rt('排队', 'Queue'))}</button><button class="btn primary" type="submit" id="chat-send">${esc(rt('发送', 'Send'))}</button><button class="btn" type="button" id="chat-stop" hidden>${esc(rt('停止', 'Stop'))}</button></div>
+      <div class="chat-compose-footer"><button type="button" class="btn chat-attach" id="chat-attach"${can(v.engine, 'images') ? '' : ' hidden'}>${esc(rt('＋ 图片', '+ Image'))}</button><input type="file" id="chat-image-file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden><span id="chat-status">${esc(rt('回车发送 · Shift + 回车换行', 'Enter to send · Shift + Enter for a new line'))}</span><button class="btn" type="submit" data-mode="queue" id="chat-queue" title="${esc(rt('等当前轮完成后处理', 'Process after the current turn'))}" hidden>${esc(rt('排队', 'Queue'))}</button><button class="btn primary" type="submit" id="chat-send">${esc(rt('发送', 'Send'))}</button><button class="btn" type="button" id="chat-stop" hidden>${esc(rt('停止', 'Stop'))}</button></div>
     </form>
   </section>`;
   const settingsPanel = $('#chat-settings-panel'), settingsToggle = $('#chat-settings-toggle');
@@ -2356,7 +2501,7 @@ function renderChat() {
     renderChat(); $('#chat-prompt').value = draft;
   });
   const box = $('#chat-messages');
-  if (!v.messages.length) box.innerHTML = `<div class="chat-welcome"><span class="empty-icon">${icon('sessions')}</span><h3>${esc(existing ? rt('这个会话里还没有可显示的对话', 'No messages to show in this session') : rt(`和 ${engineName} 开始一段新会话`, `Start a new ${engineName} session`))}</h3><p>${esc(codex ? rt('由本机 Codex CLI 执行，沿用你的 ChatGPT 订阅或 API Key 登录；开启抓包时请求经面板透传记录。发出后会出现在左侧会话列表，之后可随时回来接续。', 'Runs on the local Codex CLI with your ChatGPT subscription or API key login; with capture on, requests pass through the panel for inspection. It appears in the session list so you can come back and continue.') : rt('由本机 Claude Code 执行，有启用的代理账号时经账号路由；发出后会出现在左侧会话列表，之后可随时回来接续。', 'Runs on the local Claude Code CLI (through account routing when enabled). It appears in the session list so you can come back and continue.'))}</p></div>`;
+  if (!v.messages.length) box.innerHTML = `<div class="chat-welcome"><span class="empty-icon">${icon('sessions')}</span><h3>${esc(existing ? rt('这个会话里还没有可显示的对话', 'No messages to show in this session') : rt(`和 ${engineName} 开始一段新会话`, `Start a new ${engineName} session`))}</h3><p>${esc(engineCopy(v.engine, 'welcome') || rt(`由本机 ${engineName} CLI 执行；发出后会出现在左侧会话列表，之后可随时回来接续。`, `Runs on the local ${engineName} CLI. It appears in the session list so you can come back and continue.`, `ローカルの ${engineName} CLI で実行されます。送信後はセッション一覧に表示され、いつでも続きから再開できます。`))}</p></div>`;
   else {
     if (v.truncated) box.innerHTML = `<button type="button" class="btn chat-older" id="chat-older">${esc(rt('加载更早的消息', 'Load earlier messages'))}</button>`;
     v.messages.forEach(m => { const body = appendChatMessage(box, m.role, m.text, m); paintChatImages(body, m.images || []); paintChatReasoning(body, m.reasoning || []); (m.tools || []).forEach(tool => paintChatTool(body, tool)); });
@@ -2388,7 +2533,7 @@ function renderChat() {
     catch (err) { toast(err.message, false); refreshRoutes(); }
   };
   paintRoutes();
-  $('#chat-model').onchange = e => { chatModel = e.target.value.trim(); localStorage.setItem('panel-chat-model-' + (chatView.engine || 'claude'), chatModel); };
+  $('#chat-model').onchange = e => { chatModel = e.target.value.trim(); localStorage.setItem('panel-chat-model-' + (chatView.engine || LEGACY_ENGINE), chatModel); };
   $('#chat-stop').onclick = async () => {
     try { await api('POST', `chat/${encodeURIComponent(v.sessionId)}/stop`, {}); }
     catch (e) { toast(e.message, false); }
@@ -2515,7 +2660,7 @@ async function sendChat(mode = 'steer') {
   const v = chatView, prompt = $('#chat-prompt').value.trim();
   if ((!prompt && !v.attachments?.length) || v.readingImages) return;
   const images = (v.attachments || []).slice();
-  chatModel = $('#chat-model').value.trim(); localStorage.setItem('panel-chat-model-' + (chatView.engine || 'claude'), chatModel);
+  chatModel = $('#chat-model').value.trim(); localStorage.setItem('panel-chat-model-' + (chatView.engine || LEGACY_ENGINE), chatModel);
   document.querySelectorAll('.chat-engine button').forEach(button => { button.disabled = true; });
   registerChatInSidebar(v, prompt);
   const turn = createChatTurn(v, prompt, images);
@@ -2535,66 +2680,72 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
   const abort = new AbortController(); chatAbort = abort;
   let resolveReady, rejectReady;
   const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; }); ready.catch(() => {});
-  const run = v.run = { abort, turns: new Map(turn ? [[turn.id, turn]] : []), activeId: turn?.id || '', ready, inputChain: Promise.resolve(), lastStatus: '', permissions: new Map() };
+  const run = v.run = { abort, turns: new Map(turn ? [[turn.id, turn]] : []), activeId: turn?.id || '', ready, inputChain: Promise.resolve(), lastStatus: '', permissions: new Map(), metaSeen: false, ended: false };
   const status = $('#chat-status');
+  const visible = () => chatView === v && !!$('#chat-messages');
   const updateStatus = () => {
     const active = run.turns.get(run.activeId) || Array.from(run.turns.values()).find(turn => !turn.finished);
-    if (active && !active.finished) status.textContent = `${v.engine === 'codex' ? 'Codex' : 'Claude Code'} ${active.phase}… · ${Math.floor((Date.now() - active.startedAt) / 1000)}s`;
+    if (active && !active.finished) status.textContent = `${engineLabel(v.engine)} ${active.phase}… · ${Math.floor((Date.now() - active.startedAt) / 1000)}s`;
     else if (run.lastStatus) status.textContent = run.lastStatus;
   };
   const timer = setInterval(updateStatus, 1000); updateChatSendState(v); updateStatus();
+  // State events always apply, even while another view is open; only DOM work is skipped when the chat isn't on screen.
   const receive = raw => {
-    if (chatView !== v || !$('#chat-messages')) return;
     let kind = '', data = '';
     for (const line of raw.split('\n')) { if (line.startsWith('event: ')) kind = line.slice(7); else if (line.startsWith('data: ')) data += line.slice(6); }
-    let payload; try { payload = JSON.parse(data); } catch { return; }
+    if (!kind) return;
+    let payload; try { payload = JSON.parse(data || '{}'); } catch { return; }
+    const shown = visible();
+    if (kind === 'end') { run.ended = true; return; }
     if (kind === 'input') {
-      if (!run.turns.has(payload.id)) run.turns.set(payload.id, createChatTurn(v, payload.prompt || '', payload.images || [], payload.id));
+      if (!run.turns.has(payload.id) && shown) run.turns.set(payload.id, createChatTurn(v, payload.prompt || '', payload.images || [], payload.id));
       const current = run.turns.get(payload.id);
       if (current && payload.timestamp) { current.user.timestamp = payload.timestamp; paintChatTiming(current.userNode, current.user); }
       updateChatSendState(v); return;
     }
     if (kind === 'stopped') {
-      run.turns.forEach(item => { if (!item.finished) item.finish(rt('已停止', 'Stopped'), payload); });
-      run.activeId = ''; run.lastStatus = rt('已停止', 'Stopped'); updateChatSendState(v); updateStatus(); return;
+      run.turns.forEach(item => { if (!item.finished) item.finish(rt('已停止', 'Stopped', '停止しました'), payload); });
+      run.activeId = ''; run.lastStatus = rt('已停止', 'Stopped', '停止しました'); updateChatSendState(v); updateStatus(); return;
     }
     if (kind === 'meta') {
-      // Codex 的线程 ID 由 CLI 生成：新会话用服务端返回的 ID 替换前端预分配的 ID
+      run.metaSeen = true;
+      // Engines may mint the thread id on the CLI side: replace the id the browser pre-allocated for a new chat.
       if (payload.sessionId && v.sessionId !== payload.sessionId) {
         const previous = v.sessionId, item = state.items.find(entry => entry.key === previous);
         v.sessionId = payload.sessionId;
         if (item) { item.key = payload.sessionId; item.engine = payload.engine; }
-        if (state.current === previous) { state.current = payload.sessionId; writeRoute(); renderList(); }
+        if (state.current === previous) { state.current = payload.sessionId; if (state.type === 'sessions') { writeRoute(); renderList(); } }
       }
       if (payload.engine) v.engine = payload.engine;
       v.liveId = payload.sessionId; v.lastReplayJobId = payload.jobId; resolveReady(); refreshRoutes();
-      const picker = chatView === v && document.querySelector('.chat-engine');
-      if (picker) { const badge = document.createElement('span'); badge.className = 'chat-engine-badge' + (v.engine === 'codex' ? ' codex' : ''); badge.textContent = v.engine === 'codex' ? 'Codex' : 'Claude Code'; picker.replaceWith(badge); }
-      if (chatView === v && !$('#chat-detail')) {
+      if (!shown) return;
+      const picker = document.querySelector('.chat-engine');
+      if (picker) { const badge = engineTag(v.engine, engineLabel(v.engine), 'chat-engine-badge'); picker.replaceWith(badge); }
+      if (!$('#chat-detail')) {
         const actions = $('.chat-top-actions'), settings = $('#chat-settings-toggle');
-        for (const [id, text, action] of [['chat-detail', rt('详情', 'Details'), () => { state.sessionDetail = true; openItem(v.sessionId); }], ['chat-replay', v.engine === 'codex' ? rt('查看 Codex 提示词', 'View Codex prompts') : rt('查看 Claude 提示词', 'View Claude prompts'), () => loadReplay(v.sessionId)]]) {
+        for (const [id, text, action] of [['chat-detail', rt('详情', 'Details', '詳細'), () => { state.sessionDetail = true; openItem(v.sessionId); }], ['chat-replay', replayLabel(v.engine), () => loadReplay(v.sessionId)]]) {
           const button = document.createElement('button'); button.type = 'button'; button.className = 'btn'; button.id = id; button.textContent = text; button.onclick = action; actions.insertBefore(button, settings);
         }
       }
       return;
     }
-    if (kind === 'replay_end') { v.restoreReplayScroll?.(); v.restoreReplayScroll = null; return; }
+    if (kind === 'replay_end') { if (shown) v.restoreReplayScroll?.(); v.restoreReplayScroll = null; return; }
     if (kind === 'turn') {
       run.activeId = payload.id;
       const current = run.turns.get(payload.id);
-      if (current) { current.startedAt = Date.parse(payload.timestamp) || current.startedAt; current.label.textContent = rt('正在思考', 'Thinking'); current.article.classList.add('is-streaming'); }
+      if (current) { current.startedAt = Date.parse(payload.timestamp) || current.startedAt; current.label.textContent = rt('正在思考', 'Thinking', '考え中'); current.article.classList.add('is-streaming'); }
       updateChatSendState(v); updateStatus(); return;
     }
     if (kind === 'idle') { run.activeId = ''; updateChatSendState(v); updateStatus(); return; }
-    if (kind === 'warning') { if (chatView === v) toast(payload.warning, false); return; }
+    if (kind === 'warning') { if (shown) toast(payload.warning, false); return; }
     if (kind === 'permission') {
-      if (run.permissions.has(payload.id)) return;
+      if (run.permissions.has(payload.id) || !shown) return;
       const card = document.createElement('section'); card.className = 'chat-permission';
-      const title = document.createElement('strong'); title.textContent = rt('需要你授权：', 'Approval needed: ') + payload.tool;
+      const title = document.createElement('strong'); title.textContent = rt('需要你授权：', 'Approval needed: ', '承認が必要です：') + payload.tool;
       const info = document.createElement('p'); info.textContent = payload.description;
       const pre = document.createElement('pre'); pre.textContent = JSON.stringify(payload.input, null, 2);
       const actions = document.createElement('div'); actions.className = 'chat-permission-actions';
-      for (const [behavior, label] of [['allow', rt('允许本次', 'Allow once')], ['deny', rt('拒绝', 'Deny')]]) {
+      for (const [behavior, label] of [['allow', rt('允许本次', 'Allow once', '今回のみ許可')], ['deny', rt('拒绝', 'Deny', '拒否')]]) {
         const button = document.createElement('button'); button.type = 'button'; button.className = 'btn' + (behavior === 'allow' ? ' primary' : ''); button.textContent = label;
         button.onclick = async () => {
           actions.querySelectorAll('button').forEach(item => item.disabled = true);
@@ -2605,7 +2756,7 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
       }
       card.append(title, info, pre, actions);
       const turn = run.turns.get(payload.messageId || run.activeId);
-      if (turn) { turn.article.append(card); turn.phase = rt('等待授权', 'Waiting for approval'); turn.label.textContent = turn.phase; }
+      if (turn) { turn.article.append(card); turn.phase = rt('等待授权', 'Waiting for approval', '承認待ち'); turn.label.textContent = turn.phase; }
       else $('#chat-messages').append(card);
       run.permissions.set(payload.id, card); updateStatus(); return;
     }
@@ -2615,14 +2766,19 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
       return;
     }
     const current = run.turns.get(payload.messageId || run.activeId);
-    if (!current) return;
+    if (kind === 'done' || kind === 'error') {
+      run.activeId = '';
+      run.lastStatus = kind === 'error' || payload.isError ? rt('请求失败', 'Request failed', 'リクエストに失敗しました') : rt('完成', 'Done', '完了') + (payload.cost ? ` · $${Number(payload.cost).toFixed(4)}` : '');
+    }
+    if (!current) { if (kind === 'done') { updateChatSendState(v); refreshSessionList(); } updateStatus(); return; }
     const answer = current.answer;
+    // Reasoning is engine-neutral: any engine that streams it gets the same collapsible summary.
     if (kind === 'reasoning') {
       answer.reasoning ||= [];
       const item = answer.reasoning.find(item => item.id === payload.id);
       if (item) item.text = payload.text; else answer.reasoning.push({ id: payload.id, text: payload.text });
-      current.phase = rt('正在思考', 'Thinking'); current.label.textContent = current.phase;
-      updateChatContent(current.box, () => paintChatReasoning(current.node, answer.reasoning));
+      current.phase = rt('正在思考', 'Thinking', '考え中'); current.label.textContent = current.phase;
+      if (current.node.isConnected) updateChatContent(current.box, () => paintChatReasoning(current.node, answer.reasoning));
     }
     if (kind === 'tool' || kind === 'tool_input' || kind === 'tool_result') {
       let tool = answer.tools.find(item => item.id === payload.id);
@@ -2630,42 +2786,85 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
       if (kind === 'tool') { tool.name = payload.name; tool.input = payload.input; if (!payload.partial) delete tool.partialInput; }
       if (kind === 'tool_input') tool.partialInput = (tool.partialInput || '') + payload.text;
       if (kind === 'tool_result') { tool.output = payload.output; tool.state = payload.isError ? 'error' : 'done'; }
-      current.phase = rt('正在执行工具', 'Running tools'); current.label.textContent = current.phase;
-      updateChatContent(current.box, () => paintChatTool(current.node, tool));
+      current.phase = rt('正在执行工具', 'Running tools', 'ツールを実行中'); current.label.textContent = current.phase;
+      if (current.node.isConnected) updateChatContent(current.box, () => paintChatTool(current.node, tool));
     }
-    if (kind === 'text') { answer.text += payload.text || ''; current.phase = rt('正在输出', 'Responding'); current.paint(); }
+    if (kind === 'text') { answer.text += payload.text || ''; current.phase = rt('正在输出', 'Responding', '応答中'); current.paint(); }
     if (kind === 'done') {
-      current.finish(payload.interrupted ? rt('已按补充消息继续', 'Continued with follow-up input') : payload.isError ? '⚠ ' + (payload.error || rt('本轮执行失败', 'Turn failed')) : '', payload); run.activeId = '';
-      run.lastStatus = payload.isError ? rt('请求失败', 'Request failed') : rt('完成', 'Done') + (payload.cost ? ` · $${Number(payload.cost).toFixed(4)}` : '');
+      current.finish(payload.interrupted ? rt('已按补充消息继续', 'Continued with follow-up input', '追加の入力で続行しました') : payload.isError ? '⚠ ' + (payload.error || rt('本轮执行失败', 'Turn failed', 'このターンは失敗しました')) : '', payload);
       updateChatSendState(v); refreshSessionList();
     }
-    if (kind === 'error') { current.finish('⚠ ' + (payload.error || 'Error'), payload); run.lastStatus = rt('请求失败', 'Request failed'); }
+    if (kind === 'error') current.finish('⚠ ' + (payload.error || 'Error'), payload);
     updateStatus();
   };
-  try {
-    const response = await fetch(reconnect ? `/api/chat/${encodeURIComponent(v.sessionId)}/events` : '/api/chat', {
-      method: reconnect ? 'GET' : 'POST', headers: reconnect ? undefined : { 'Content-Type': 'application/json' },
-      body: reconnect ? undefined : JSON.stringify({ prompt, images, cwd: v.cwd, model: chatModel, sessionId: v.sessionId, messageId: turn.id, accountId: v.engine === 'codex' ? undefined : v.accountId, engine: v.engine }), signal: abort.signal,
-    });
-    if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.error || response.statusText); }
-    const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
-    while (true) {
-      const { value, done } = await reader.read(); if (done) break;
-      buffer += decoder.decode(value, { stream: true }); let at;
-      while ((at = buffer.indexOf('\n\n')) >= 0) { receive(buffer.slice(0, at)); buffer = buffer.slice(at + 2); }
-      await new Promise(resolve => setTimeout(resolve, 0));
+  // The server replays the whole run on every subscribe, so drop what was drawn for it before reconnecting.
+  const resetRun = () => {
+    for (const item of run.turns.values()) {
+      item.finished = true;
+      item.userNode?.parentElement?.remove(); item.article?.remove();
+      for (const message of [item.user, item.answer]) { const at = v.messages.indexOf(message); if (at >= 0) v.messages.splice(at, 1); }
     }
-    if (buffer.trim()) receive(buffer);
+    run.turns.clear(); run.permissions.forEach(card => card.remove()); run.permissions.clear(); run.activeId = '';
+  };
+  const sleep = ms => new Promise(resolve => { const id = setTimeout(resolve, ms); abort.signal.addEventListener('abort', () => { clearTimeout(id); resolve(); }, { once: true }); });
+  let resume = reconnect, attempt = 0, failure = null;
+  try {
+    while (true) {
+      let lost;
+      try {
+        if (resume && attempt) resetRun();
+        const response = await fetch(resume ? `/api/chat/${encodeURIComponent(v.sessionId)}/events` : '/api/chat', {
+          method: resume ? 'GET' : 'POST', headers: resume ? undefined : { 'Content-Type': 'application/json' },
+          body: resume ? undefined : JSON.stringify({ prompt, images, cwd: v.cwd, model: chatModel, sessionId: v.sessionId, messageId: turn.id, accountId: can(v.engine, 'accounts') ? v.accountId : undefined, engine: v.engine }), signal: abort.signal,
+        });
+        if (!response.ok) throw await responseError(response);
+        const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
+        while (true) {
+          const { value, done } = await reader.read(); if (done) break;
+          buffer += decoder.decode(value, { stream: true }); let at;
+          while ((at = buffer.indexOf('\n\n')) >= 0) { receive(buffer.slice(0, at)); buffer = buffer.slice(at + 2); }
+          if (run.metaSeen) attempt = 0;
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+        if (buffer.trim()) receive(buffer);
+        if (run.ended) break;
+        // The stream closed without the job's `end` event: the panel restarted or the connection dropped.
+        lost = friendlyError(new TypeError('network error'));
+      } catch (err) {
+        if (err.name === 'AbortError') throw err;
+        lost = friendlyError(err);
+      }
+      if (abort.signal.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+      if (lost.status === 404 && resume && attempt) {
+        // The run finished while we were away: show the saved transcript instead of a half-replayed stream.
+        run.ended = true; run.lastStatus = rt('任务已结束', 'Task finished', 'タスクは終了しました');
+        if (visible() && state.type === 'sessions' && state.current === v.sessionId) setTimeout(() => openSessionChat(v.sessionId));
+        break;
+      }
+      // Only resume once the server has acknowledged the run; retrying a POST that never landed could send the prompt twice.
+      if (!run.metaSeen || !lost.retryable) { failure = lost; break; }
+      const delay = Math.min(30000, 1000 * 2 ** attempt++);
+      run.lastStatus = rt(`连接中断，${Math.round(delay / 1000)} 秒后重连…`, `Connection lost; reconnecting in ${Math.round(delay / 1000)}s…`, `接続が切れました。${Math.round(delay / 1000)} 秒後に再接続します…`);
+      if (visible()) status.textContent = run.lastStatus;
+      await sleep(delay);
+      if (abort.signal.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+      resume = true;
+    }
   } catch (err) {
-    rejectReady(err);
-    run.lastStatus = err.name === 'AbortError' ? rt('任务仍在后台运行', 'Task continues in the background') : rt('连接已断开，重新打开会话可恢复进度', 'Connection lost; reopen this session to reconnect');
-    run.turns.forEach(item => { if (!item.finished) item.finish(err.name === 'AbortError' ? '' : '⚠ ' + err.message); });
+    if (err.name !== 'AbortError') failure = friendlyError(err);
+    else { run.lastStatus = rt('任务仍在后台运行', 'Task continues in the background', 'タスクはバックグラウンドで続行中です'); run.turns.forEach(item => { if (!item.finished) item.finish(''); }); }
   } finally {
-    clearInterval(timer); rejectReady(new Error(rt('会话连接已结束', 'Session connection ended')));
-    run.turns.forEach(item => { if (!item.finished) item.finish(rt('会话连接已结束', 'Session connection ended')); });
+    clearInterval(timer);
+    if (failure) {
+      rejectReady(failure);
+      run.lastStatus = failure.message;
+      run.turns.forEach(item => { if (!item.finished) item.finish('⚠ ' + failure.message); });
+    }
+    rejectReady(new Error(rt('会话连接已结束', 'Session connection ended', 'セッション接続が終了しました')));
+    run.turns.forEach(item => { if (!item.finished) item.finish(rt('会话连接已结束', 'Session connection ended', 'セッション接続が終了しました')); });
     if (v.run === run) v.run = null;
     if (chatAbort === abort) chatAbort = null;
-    updateChatSendState(v); if (chatView === v) { status.textContent = run.lastStatus || rt('完成', 'Done'); $('#chat-prompt')?.focus(); }
+    updateChatSendState(v); if (visible()) { status.textContent = run.lastStatus || rt('完成', 'Done', '完了'); $('#chat-prompt')?.focus(); }
   }
 }
 function updateChatContent(box, paint) {
@@ -2712,7 +2911,7 @@ function paintChatTiming(body, message) {
   const timestamp = message.timestamp && new Date(message.timestamp);
   if (timestamp && Number.isFinite(timestamp.getTime())) {
     const time = document.createElement('time'); time.dateTime = timestamp.toISOString();
-    time.textContent = timestamp.toLocaleString(lang === 'en' ? 'en-GB' : lang === 'ja' ? 'ja-JP' : 'zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    time.textContent = timestamp.toLocaleString(LANGS.find(item => item.code === lang)?.locale || 'zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
     time.title = (message.role === 'user' ? rt('发送时间：', 'Sent at: ') : rt('回复时间：', 'Replied at: ')) + timestamp.toLocaleString(); meta.append(time);
   }
   if (message.role === 'assistant' && Number.isFinite(message.durationMs) && message.durationMs >= 0) {
@@ -2725,13 +2924,20 @@ function paintChatTiming(body, message) {
 function appendChatMessage(box, role, text, timing = {}) {
   box.querySelector('.chat-welcome')?.remove();
   const article = document.createElement('article'); article.className = 'chat-message ' + role;
-  const label = document.createElement('div'); label.className = 'chat-message-label'; label.textContent = role === 'user' ? rt('你', 'You') : (chatView?.engine === 'codex' ? 'Codex' : 'Claude Code');
+  const label = document.createElement('div'); label.className = 'chat-message-label'; label.textContent = role === 'user' ? rt('你', 'You', 'あなた') : engineLabel(chatView?.engine || LEGACY_ENGINE);
   const body = document.createElement('div'); body.className = 'chat-message-body'; body.innerHTML = role === 'assistant' ? md(text) : esc(text).replace(/\n/g, '<br>');
   article.append(label, body); box.append(article); paintChatTiming(body, { role, ...timing }); return body;
 }
 
 // ---------- Runtime account routing ----------
-const rt = (zh, en) => lang === 'zh' || lang === 'zh-CN' ? zh : en;
+// Claude (account routing) and Codex (login + capture) have dedicated panels; any other engine gets its CLI status.
+const DEDICATED_CONNECTION_PANELS = ['claude', 'codex'];
+function connectionCliNote(engine) { return engine.cli ? `${engine.cli.version || rt('已安装', 'Installed', 'インストール済み')}` : rt('未检测到 CLI', 'CLI not detected', 'CLI が見つかりません'); }
+function genericConnectionPanel(engine) {
+  const cli = engine.cli;
+  return `<section class="chart" data-connection-panel="${esc(engine.id)}" hidden><div class="route-heading"><div><h3>${esc(engine.label)}</h3><p class="route-muted">${esc(rt(`${engine.label} 使用本机 CLI 自己的登录，面板不保存它的凭证。`, `${engine.label} uses the local CLI's own login. The panel never stores its credentials.`, `${engine.label} はローカル CLI 自身のログインを使用します。パネルは資格情報を保存しません。`))}</p></div></div>
+    ${cli ? `<p>${esc(rt('CLI 路径', 'CLI path', 'CLI のパス'))}：<code>${esc(cli.path || '—')}</code>${cli.version ? ` · ${esc(cli.version)}` : ''}</p>` : `<p class="route-muted">${esc(rt('未在本机找到这个引擎的 CLI，安装后刷新页面。', 'This engine\'s CLI was not found on this machine. Install it and reload.', 'このエンジンの CLI が見つかりません。インストール後に再読み込みしてください。'))}</p>`}</section>`;
+}
 let routeData;
 async function renderProxyTab() {
   stopInspectorPoll();
@@ -2751,22 +2957,22 @@ async function renderProxyTab() {
     $('#route-dialog')?.remove();
     $('#render').innerHTML = `
       ${viewHeading('proxy')}
-      <div class="engine-tabs connection-tabs" role="group" aria-label="${esc(rt('选择引擎', 'Choose engine'))}">${[['claude', 'Claude Code', rt('多账号路由 · 故障转移', 'Account routing · Failover')], ['codex', 'Codex', rt('本机登录 · 透传抓包', 'Local login · Request capture')]].map(([id, name, note]) => `<button type="button" data-connection-engine="${id}" aria-pressed="false"><span class="engine-emblem ${id}">${id === 'codex' ? 'O' : '✳'}</span><span><strong>${name}</strong><small>${esc(note)}</small></span>${icon('arrow')}</button>`).join('')}</div>
-      <section id="claude-connection"><div class="connection-heading"><h3>Claude Code</h3><button class="btn primary" id="route-add">＋ ${esc(rt('添加账号', 'Add account'))}</button></div>
+      <div class="engine-tabs connection-tabs" role="group" aria-label="${esc(rt('选择引擎', 'Choose engine', 'エンジンを選択'))}"${ENGINES.length < 2 ? ' hidden' : ''}>${ENGINES.map(engine => `<button type="button" data-connection-engine="${esc(engine.id)}" style="${engineStyle(engine.id)}" aria-pressed="false">${engineEmblem(engine.id)}<span><strong>${esc(engine.label)}</strong><small>${esc(engineCopy(engine.id, 'connectionNote') || connectionCliNote(engine))}</small></span>${icon('arrow')}</button>`).join('')}</div>
+      <section id="claude-connection" data-connection-panel="claude"><div class="connection-heading"><h3>Claude Code</h3><button class="btn primary" id="route-add">＋ ${esc(rt('添加账号', 'Add account'))}</button></div>
       <div class="chart route-connect" id="route-connect"></div>
       <div id="route-notice" role="status"></div>
       <div class="route-heading route-controls"><h3>${esc(rt('我的账号', 'My accounts'))} <span id="route-count" class="route-muted"></span></h3><label>${esc(rt('使用方式', 'Strategy'))} <select id="route-mode"><option value="manual">${esc(rt('手动切换', 'Manual'))}</option><option value="failover">${esc(rt('优先使用，故障自动切换', 'Priority with failover'))}</option><option value="round-robin">${esc(rt('多个账号轮流使用', 'Round robin'))}</option></select></label></div>
       <div id="route-accounts"></div>
       <div class="route-foot"><span class="route-muted">${esc(rt('切换对下一次请求生效，正在生成的回复不受影响。', 'Changes apply to the next request. Active responses continue uninterrupted.'))}</span><button class="btn" id="route-refresh">${esc(rt('刷新', 'Refresh'))}</button><button class="btn" id="route-reset">${esc(rt('重置故障状态', 'Reset failures'))}</button></div>
       <section class="account-usage chart"><div class="route-heading"><div><h3>${esc(rt('账号用量', 'Account usage'))}</h3><p class="route-muted">${esc(rt('按本地代理抓取的最近请求统计；历史请求只从代理启用后开始记录。', 'Based on recent requests captured by the local proxy. Tracking starts when the proxy is enabled.'))}</p></div><button class="btn" id="account-usage-refresh">${esc(rt('刷新', 'Refresh'))}</button></div><div id="account-usage-list"><p class="route-muted">${esc(rt('正在读取用量…', 'Loading usage…'))}</p></div></section>
-      </section><section class="codex-panel chart" id="codex-panel"><div class="route-heading"><div><h3>Codex</h3><p class="route-muted">${esc(rt('Codex 使用你自己的 codex login；面板只负责选版本和透传抓包，不保存 Codex 凭证。', 'Codex uses your own codex login. The panel picks the CLI and passes requests through for capture; it never stores Codex credentials.'))}</p></div><button class="btn" id="codex-refresh">${esc(rt('刷新', 'Refresh'))}</button></div><div id="codex-body"><p class="route-muted">${esc(rt('正在读取…', 'Loading…'))}</p></div></section>`;
+      </section><section class="codex-panel chart" id="codex-panel" data-connection-panel="codex"><div class="route-heading"><div><h3>Codex</h3><p class="route-muted">${esc(rt('Codex 使用你自己的 codex login；面板只负责选版本和透传抓包，不保存 Codex 凭证。', 'Codex uses your own codex login. The panel picks the CLI and passes requests through for capture; it never stores Codex credentials.'))}</p></div><button class="btn" id="codex-refresh">${esc(rt('刷新', 'Refresh'))}</button></div><div id="codex-body"><p class="route-muted">${esc(rt('正在读取…', 'Loading…'))}</p></div></section>${ENGINES.filter(engine => !DEDICATED_CONNECTION_PANELS.includes(engine.id)).map(genericConnectionPanel).join('')}`;
     const selectConnection = engine => {
       localStorage.setItem('panel-connection-engine', engine);
-      $('#claude-connection').hidden = engine !== 'claude'; $('#codex-panel').hidden = engine !== 'codex';
+      document.querySelectorAll('[data-connection-panel]').forEach(panel => { panel.hidden = panel.dataset.connectionPanel !== engine; });
       document.querySelectorAll('[data-connection-engine]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.connectionEngine === engine)));
     };
     document.querySelectorAll('[data-connection-engine]').forEach(button => button.onclick = () => selectConnection(button.dataset.connectionEngine));
-    selectConnection(localStorage.getItem('panel-connection-engine') === 'codex' ? 'codex' : 'claude');
+    selectConnection(knownEngine(localStorage.getItem('panel-connection-engine')));
     const dialog = document.createElement('dialog'); dialog.id = 'route-dialog';
     const envExample = { env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:8790', ANTHROPIC_AUTH_TOKEN: 'ferry', ANTHROPIC_API_KEY: '', CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1', CLAUDE_CODE_AUTO_MODE_SERVER: '0' } };
     dialog.innerHTML = `<form id="route-form"><div class="route-heading"><h2 id="route-form-title">${esc(rt('添加账号', 'Add account'))}</h2><button class="btn" type="button" id="route-cancel" aria-label="${esc(rt('关闭', 'Close'))}">✕</button></div>
@@ -2921,7 +3127,7 @@ async function renderProxyTab() {
       } catch (e) { box.innerHTML = `<p class="route-muted">${esc(e.message)}</p>`; }
     }
     $('#codex-refresh').onclick = loadCodex;
-    loadCodex();
+    if (hasEngine('codex')) loadCodex(); // the panel only exists for a registered Codex engine
     $('#route-reset').onclick = () => run(async () => { routeData = await api('POST', 'proxy/reset', {}); draw(); });
     $('#route-accounts').onclick = e => run(async () => {
       const action = e.target.closest('[data-action]')?.dataset.action;
@@ -3010,11 +3216,19 @@ document.addEventListener('keydown', e => {
 });
 
 // ---------- 初始化 ----------
-installPanelSelects();
-applyLang();
-restoreRoute();
-loadCounts();
-loadProjects();
+// Engines load first so pickers, tabs and capability checks reflect what the server actually runs.
+(async () => {
+  await loadEngines();
+  const savedResource = localStorage.getItem('panel-resource-engine');
+  state.resourceEngine = hasEngine(savedResource) && can(savedResource, 'resources') ? savedResource : defaultResourceEngine();
+  statsEngine = knownEngine(statsEngine);
+  if (sessionEngine !== 'all' && !hasEngine(sessionEngine)) sessionEngine = 'all';
+  installPanelSelects();
+  applyLang();
+  restoreRoute();
+  loadCounts();
+  loadProjects();
+})();
 </script>
 </body>
 </html>

@@ -793,3 +793,11 @@ body[data-nav-collapsed="true"] .resource-engine-switch button { padding: 5px 1p
 .chat-message.user .chat-message-label { justify-content: flex-end; }
 .chat-message-meta { display: inline-flex; flex-wrap: wrap; gap: 9px; color: var(--muted); font-size: 10px; font-weight: 400; }
 .chat-message-meta[hidden] { display: none; }
+
+/* Engines from /api/engines carry their own color as --engine-color.
+   They skip Claude and Codex, which keep their tuned colors above; any other engine gets a tint of its own color. */
+:where(.tag.engine-tag[style*="--engine-color"]):not(.claude):not(.codex) { background: color-mix(in srgb, var(--engine-color) 12%, transparent); color: var(--engine-color); }
+:where(.engine-emblem[style*="--engine-color"]):not(.claude):not(.codex) { color: var(--engine-color); background: color-mix(in srgb, var(--engine-color) 9%, transparent); }
+:where(.chat-engine-badge[style*="--engine-color"]):not(.claude):not(.codex) { color: var(--engine-color); border-color: color-mix(in srgb, var(--engine-color) 30%, transparent); }
+:where(.resource-engine-switch button[style*="--engine-color"][aria-pressed="true"]):not(.claude):not(.codex) { color: var(--engine-color); background: color-mix(in srgb, var(--engine-color) 10%, transparent); }
+.engine-tabs > button[aria-pressed="true"][style*="--engine-color"]:not([data-stats-engine="claude"]):not([data-stats-engine="codex"]):not([data-connection-engine="claude"]):not([data-connection-engine="codex"]) { background: color-mix(in srgb, var(--engine-color) 4%, transparent); border-color: color-mix(in srgb, var(--engine-color) 50%, transparent); }
