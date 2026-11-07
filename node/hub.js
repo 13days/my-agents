@@ -16,7 +16,10 @@ const DEFAULT_COMMAND = 'my-agents node --stdio';
 // Non-interactive SSH sessions often lack the PATH from the user's shell setup
 // (nvm, nodenv, Homebrew), and the engines need it too. Run the command the way
 // the user would type it after logging in; profile noise on stdout is ignored by the RPC peer.
-const remoteCommand = command => `exec "\${SHELL:-/bin/sh}" -ilc '${command.replace(/'/g, `'\\''`)}'`;
+// The protocol stream is parked on fd 3 while the profile runs, so prompts such as
+// kinit read /dev/null instead of swallowing the hub's first request. (macOS's bash 3.2
+// closes inherited descriptors as an interactive login shell; set a custom command there.)
+const remoteCommand = command => `exec "\${SHELL:-/bin/sh}" -ilc '${`exec 0<&3 3<&-; ${command}`.replace(/'/g, `'\\''`)}' 3<&0 </dev/null`;
 
 function createNodeHub({ registry, token, dir, log = console, spawnImpl = spawn, retryMs = 30000 }) {
   const file = path.join(dir, 'panel-nodes.json');

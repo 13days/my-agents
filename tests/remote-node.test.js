@@ -145,3 +145,14 @@ test('the SSH command runs in the login shell and survives quoting', () => {
   const command = `printf '%s|%s' "it's" '$HOME'`;
   assert.equal(execFileSync('/bin/sh', ['-c', remoteCommand(command)], { env: { SHELL: '/bin/sh', HOME: '/x', PATH: process.env.PATH }, encoding: 'utf8' }), "it's|$HOME");
 });
+
+test('the login profile cannot read the protocol stream', t => {
+  const { execFileSync } = require('node:child_process');
+  const shell = ['/bin/dash', '/usr/bin/dash', '/bin/zsh', '/usr/bin/zsh'].find(file => fs.existsSync(file));
+  if (!shell) return t.skip('needs dash or zsh');
+  // A profile that tries to read a password from stdin, like kinit, must get nothing.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-profile-'));
+  for (const file of ['.profile', '.zshrc']) fs.writeFileSync(path.join(dir, file), 'read -r password; [ -z "$password" ] || echo "profile stole: $password" >&2\n');
+  const output = execFileSync('/bin/sh', ['-c', remoteCommand('read -r line; echo "got: $line"')], { input: '{"hello":1}\n', env: { SHELL: shell, HOME: dir, ZDOTDIR: dir, ENV: path.join(dir, '.profile'), PATH: process.env.PATH }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+  assert.equal(output.trim(), 'got: {"hello":1}');
+});
