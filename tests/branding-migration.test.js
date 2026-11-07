@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { stripGatewayContext } = require('../codex-sessions');
+const { stripGatewayContext } = require('../engines/codex/sessions');
 
 test('new shell setup replaces both legacy and duplicate blocks without touching user settings', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'my-agents-shell-'));

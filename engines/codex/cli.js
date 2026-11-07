@@ -1,19 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { npmGlobalPrefix, globalCliCandidates } = require('./cli-installations');
+const { npmGlobalPrefix, globalCliCandidates, parseVersion, compareVersions } = require('../../core/cli-installations');
 
 // Several Codex installs can coexist (e.g. an old Homebrew-global npm package
 // and a newer user-prefix one). Services started by launchd see a different
 // PATH than an interactive shell, so pick the newest binary explicitly.
-function parseVersion(text) {
-  const match = String(text || '').match(/(\d+)\.(\d+)\.(\d+)/);
-  return match ? match.slice(1).map(Number) : null;
-}
-function compareVersions(a, b) {
-  for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) - (b[i] || 0);
-  return 0;
-}
 function codexCandidates(env = process.env, prefix = '') {
   return [...new Set([...globalCliCandidates(prefix, 'codex'), ...String(env.PATH || '').split(path.delimiter).filter(Boolean).map(dir => path.join(dir, 'codex'))])];
 }
@@ -35,5 +27,13 @@ function resolveCodex({ env = process.env, refresh = false, probe, globalPrefix 
   cached = { path: best?.path || 'codex', version: best?.version || '', candidates: found.map(({ path: p, version: v }) => ({ path: p, version: v })) };
   return cached;
 }
+// Codex is launched by absolute path; tools it runs should resolve the same
+// installation first. Never leak Claude-specific variables into Codex.
+function codexEnvironment(env = process.env, info = resolveCodex({ env })) {
+  const { CLAUDE_CLI, MY_AGENTS_CLAUDE_VERSION, ...rest } = env;
+  if (!path.isAbsolute(info.path)) return rest;
+  const dir = path.dirname(info.path);
+  return { ...rest, PATH: [dir, ...String(env.PATH || '').split(path.delimiter).filter(entry => entry && entry !== dir)].join(path.delimiter) };
+}
 function safeReal(file) { try { return fs.realpathSync(file); } catch { return file; } }
-module.exports = { resolveCodex, parseVersion, compareVersions };
+module.exports = { resolveCodex, parseVersion, compareVersions, codexEnvironment };

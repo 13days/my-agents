@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
-const { createCodexProfile } = require('../codex-profile');
+const { createCodexProfile } = require('../engines/codex/profile');
 test('capture profile preserves user settings, registers both names, and removes only its managed block', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'my-agents-profile-'));
   try {

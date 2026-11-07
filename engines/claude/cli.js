@@ -1,8 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { npmGlobalPrefix, globalCliCandidates } = require('./cli-installations');
-const { parseVersion, compareVersions } = require('./codex-cli');
+const { npmGlobalPrefix, globalCliCandidates, parseVersion, compareVersions } = require('../../core/cli-installations');
 let cached;
 function resolveClaude({ env = process.env, refresh = false, probe, globalPrefix, platform = process.platform } = {}) {
   if (env.CLAUDE_CLI) return { path: env.CLAUDE_CLI, version: '', source: 'override', candidates: [] };

@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { npmGlobalPrefix, globalCliCandidates } = require('../cli-installations');
-const { resolveClaude } = require('../claude-cli');
+const { npmGlobalPrefix, globalCliCandidates } = require('../core/cli-installations');
+const { resolveClaude } = require('../engines/claude/cli');
 test('npm installation directories are discovered instead of assuming a home, Homebrew or system prefix', () => {
   const calls = [];
   const prefix = npmGlobalPrefix({ env: { PATH: '/custom/node/bin' }, execute: (cmd, args) => { calls.push([cmd, args]); return '/arbitrary/npm/prefix\n'; } });
@@ -22,7 +22,7 @@ test('explicit overrides work and a missing npm installation falls back to runna
 });
 
 test('tool subprocesses inherit the selected Claude install without losing other environment values', () => {
-  const { claudeEnvironment } = require('../claude-cli');
+  const { claudeEnvironment } = require('../engines/claude/cli');
   const env = { PATH: '/old/bin:/custom/npm/bin:/usr/bin', EXTRA_SETTING: 'kept' };
   const next = claudeEnvironment(env, { path: '/custom/npm/bin/claude', version: '2.1.283' });
   assert.equal(next.PATH, '/custom/npm/bin:/old/bin:/usr/bin');

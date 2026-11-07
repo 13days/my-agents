@@ -2,6 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const { createTurnQueue } = require('../../core/turn-queue');
 
 // Codex has no long-lived stdin protocol in `exec` mode, so each panel turn
 // runs `codex exec --json` (first turn) or `codex exec resume <thread>` (later
@@ -41,11 +42,10 @@ function toolResult(item) {
 }
 
 function createCodexRunner({ cli, cwd, threadId = '', model = '', config = [], env = process.env, emit, onIdle, onThread, spawnImpl = spawn, tmpDir = path.join(os.tmpdir(), 'my-agents-codex') }) {
-  const pending = [], seen = new Set();
   // 续接时先不认定线程：等 CLI 确认（thread.started）后再就绪；被终端占用时自动 fork 成新会话
   let resumeId = threadId, forked = false;
   threadId = '';
-  let current = null, child = null, stopped = false, stderr = '';
+  let child = null, stopped = false, stderr = '';
   let resolveReady, rejectReady;
   const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
   ready.catch(() => {});
@@ -59,9 +59,9 @@ function createCodexRunner({ cli, cwd, threadId = '', model = '', config = [], e
   });
 
   const run = entry => {
-    current = entry; stderr = '';
+    stderr = '';
     emit('turn', { id: entry.id });
-    const files = writeImages(entry.images);
+    const files = writeImages(entry.payload.images);
     const fork = !threadId && !!resumeId && forked;
     const args = codexArgs({ threadId: threadId || resumeId, cwd, model, config, images: files, fork });
     let proc;
@@ -109,7 +109,7 @@ function createCodexRunner({ cli, cwd, threadId = '', model = '', config = [], e
     });
     proc.stderr.on('data', chunk => { if (stderr.length < 8000) stderr += chunk.toString('utf8'); });
     proc.stdin.on('error', () => {});
-    proc.stdin.end(entry.prompt);
+    proc.stdin.end(entry.payload.prompt);
     let closed = false;
     const done = (code, signal, spawnError) => {
       if (closed) return; closed = true;
@@ -130,34 +130,32 @@ function createCodexRunner({ cli, cwd, threadId = '', model = '', config = [], e
   };
 
   const finish = ({ error = '', interrupted = false }) => {
-    const entry = current;
+    const entry = queue.current;
     error = explainCodexError(error);
     if (error) emit('error', { error });
     emit('done', { sessionId: threadId, cost: null, turns: 1, usage: entry?.usage || null, isError: !!error, error, interrupted });
-    current = null;
-    queueMicrotask(() => { if (!stopped && pending.length) run(pending.shift()); else if (!stopped) onIdle?.(); });
+    queue.finish();
   };
+  const queue = createTurnQueue({
+    start: run,
+    // Codex exec has no interrupt protocol: stop the process and resume with the new input.
+    interrupt: () => child.kill('SIGINT'),
+    canInterrupt: () => !!child && !!(threadId || resumeId),
+    onIdle: () => onIdle?.(),
+  });
 
   return {
     ready,
     get threadId() { return threadId || resumeId; },
-    get currentId() { return current?.id || ''; },
-    get pendingCount() { return pending.length; },
-    get interrupted() { return !!current?.interrupted; },
+    get currentId() { return queue.currentId; },
+    get pendingCount() { return queue.pendingCount; },
+    get interrupted() { return queue.interrupted; },
     get running() { return !!child; },
     submit(id, input, steer = false, onAccept) {
       if (stopped) throw new Error('会话连接已结束，请重新发送');
-      if (seen.has(id)) return;
-      if (pending.length >= 20) throw new Error('等待中的消息太多，请稍后再发送');
-      seen.add(id);
-      onAccept?.();
-      const entry = { id, prompt: input.prompt, images: input.images, steer };
-      const queuedAt = steer ? pending.findIndex(item => !item.steer) : -1;
-      if (queuedAt < 0) pending.push(entry); else pending.splice(queuedAt, 0, entry);
-      if (steer && current && child && !current.interrupted && (threadId || resumeId)) { current.interrupted = true; child.kill('SIGINT'); }
-      if (!current) run(pending.shift());
+      queue.submit(id, { prompt: input.prompt, images: input.images }, steer, onAccept);
     },
-    stop() { stopped = true; pending.length = 0; if (current) current.interrupted = true; },
+    stop() { stopped = true; queue.stop(); },
     kill(signal = 'SIGTERM') { child?.kill(signal); },
     get stderr() { return stderr; },
   };

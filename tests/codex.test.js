@@ -3,10 +3,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
-const { resolveCodex, parseVersion, compareVersions } = require('../codex-cli');
-const { createCodexSessions, codexUserText } = require('../codex-sessions');
-const { createCodexRunner, codexArgs, explainCodexError } = require('../codex-engine');
-const { extractResponses, codexProviderConfig, isCodexPath, normalizeUsage } = require('../codex-proxy');
+const { resolveCodex, parseVersion, compareVersions } = require('../engines/codex/cli');
+const { createCodexSessions, codexUserText } = require('../engines/codex/sessions');
+const { createCodexRunner, codexArgs, explainCodexError } = require('../engines/codex/runner');
+const { extractResponses, codexProviderConfig, isCodexPath, normalizeUsage } = require('../engines/codex/proxy');
 
 test('the newest Codex install wins regardless of PATH order, and CODEX_CLI overrides detection', () => {
   assert.deepEqual(parseVersion('codex-cli 0.167.0'), [0, 167, 0]);
@@ -227,7 +227,7 @@ test('Codex public reasoning summaries stream once per update alongside tools an
   assert.equal(events.filter(([event]) => event === 'reasoning').length, 1);
   assert.equal(events.filter(([event]) => event === 'tool_result')[0][1].output, '/work');
   assert.ok(codexArgs({ cwd: '/work' }).includes('model_reasoning_summary="auto"'));
-  const { reasoningText } = require('../codex-engine');
+  const { reasoningText } = require('../engines/codex/runner');
   assert.equal(reasoningText({ encrypted_content: 'opaque-internal-content' }), '');
   assert.equal(reasoningText({ summary: [{ type: 'summary_text', text: 'Public summary' }] }), 'Public summary');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'my-agents-reasoning-'));

@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { annotateMessageTimings, messageTimestamp } = require('../message-timing');
-const { createChatJob } = require('../chat-job');
+const { createChatJob } = require('../core/chat-job');
 test('message timing uses recorded timestamps and respects precise engine durations', () => {
   const messages = [
     { role: 'user', timestamp: '2026-11-07T12:57:00Z' },

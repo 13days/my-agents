@@ -18,7 +18,7 @@ test('external transcript updates move existing sessions ahead of stale CLI hist
     transcriptHead: () => ({ title: 'CLI print session', cwd: '/project' }),
     latestTranscriptPrompt: () => ({ title: '', at: 0 }),
     isManualTitle: require('../session-store').isManualTitle,
-    activeChats: new Map(),
+    manager: { busy: () => false },
   });
   vm.runInContext(source.slice(start, end), context);
   const sessions = vm.runInContext('listSessions()', context);

@@ -2,7 +2,7 @@ const { Worker, isMainThread, parentPort, workerData } = require('worker_threads
 
 // Rollout parsing must not block the HTTP server or Feishu connection.
 if (!isMainThread && workerData?.myAgentsStats) {
-  const sessions = require('./codex-sessions').createCodexSessions({ home: workerData.home });
+  const sessions = require('./sessions').createCodexSessions({ home: workerData.home });
   parentPort.on('message', () => {
     try { parentPort.postMessage({ value: sessions.stats() }); }
     catch (error) { parentPort.postMessage({ error: error.message }); }

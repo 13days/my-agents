@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
-const { reasoningText } = require('./codex-engine');
-const { messageTimestamp, annotateMessageTimings } = require('./message-timing');
+const { reasoningText } = require('./runner');
+const { messageTimestamp, annotateMessageTimings } = require('../../message-timing');
 
 // Reads Codex CLI rollout files (~/.codex/sessions/YYYY/MM/DD/rollout-*-<id>.jsonl).
 // Newer files wrap records as {timestamp, type, payload}; older ones store the

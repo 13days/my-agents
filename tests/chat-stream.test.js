@@ -5,30 +5,42 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { PassThrough } = require('node:stream');
 
+const { EventEmitter } = require('node:events');
+const { openClaudeSession } = require('../engines/claude/session');
+
+// A fake Claude CLI process driven through the real session adapter.
+function fakeHost() {
+  const spawned = [];
+  return {
+    spawned,
+    spawn(cmd, args) {
+      const child = new EventEmitter();
+      child.stdout = new PassThrough(); child.stderr = new PassThrough();
+      child.writes = [];
+      child.stdin = { destroyed: false, writableEnded: false, on() {}, write: data => child.writes.push(JSON.parse(data)), end() { this.writableEnded = true; } };
+      child.kills = []; child.kill = signal => child.kills.push(signal);
+      child.args = args;
+      spawned.push(child);
+      return child;
+    },
+  };
+}
+
 // Exercise the actual CLI stdout handler without starting the panel or a paid request.
-function streamHarness(history = null) {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  const start = source.indexOf("      let stdout = '', stderr = '', sentText");
-  const end = source.indexOf("      child.stderr.on('data'", start);
-  assert.ok(start >= 0 && end > start);
+function streamHarness(history = null, options = {}) {
+  const host = fakeHost();
   const frames = [];
-  const child = { stdout: new PassThrough() };
-  child.stdout.setEncoding('utf8');
-  vm.runInNewContext(source.slice(start, end), {
-    child, clientEnv: {}, cwd: '/tmp', sessionId: 'test-session', sessionMessages: () => history,
-    createInputQueue: () => ({ currentId: '', result() {}, control() {} }), activeChats: new Map(),
-    cliResultError: require('../cli-result').cliResultError,
-    createPermissionBridge: require('../chat-permissions').createPermissionBridge,
-    baseHistory: null, baseMessages: [], job: { publish: (event, data) => frames.push(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`) },
-    res: { destroyed: false, write: frame => frames.push(frame) },
+  let idle = 0;
+  const session = openClaudeSession({
+    host, cli: 'claude', env: {}, cwd: '/tmp', sessionId: 'test-session',
+    emit: (event, data) => frames.push({ type: event, data }), onIdle: () => idle++, onClosed() {},
+    transcript: () => history?.messages || [], ...options,
   });
-  const events = () => frames.map(frame => ({
-    type: frame.match(/^event: (.*)/)[1],
-    data: JSON.parse(frame.match(/\ndata: (.*)/)[1]),
-  }));
+  const child = host.spawned[0];
+  const events = () => frames.map(({ type, data }) => ({ type, data: JSON.parse(JSON.stringify(data)) }));
   const send = msg => child.stdout.write(JSON.stringify(msg) + '\n');
   const partial = event => send({ type: 'stream_event', event });
-  return { child, events, send, partial };
+  return { child, session, events, send, partial, get idle() { return idle; } };
 }
 
 test('first text delta is emitted before the assistant message or result exists', () => {
@@ -98,4 +110,27 @@ test('internal interrupt notices do not appear as user prompts in saved sessions
   assert.equal(vm.runInContext('transcriptUserText("[Request interrupted by user]")', context), '');
   assert.equal(vm.runInContext('transcriptUserText([{type:"text",text:"[Request interrupted by user for tool use]"}])', context), '');
   assert.equal(vm.runInContext('transcriptUserText("这个目录下有什么")', context), '这个目录下有什么');
+});
+
+test('steering writes a real interrupt; a refused interrupt keeps the reply and warns', async () => {
+  const h = streamHarness();
+  h.session.submit('first', { prompt: 'first' }, false);
+  h.session.submit('steer', { prompt: 'new direction' }, true);
+  const interrupt = h.child.writes.find(w => w.request?.subtype === 'interrupt');
+  assert.ok(interrupt);
+  h.send({ type: 'control_response', response: { request_id: interrupt.request_id, subtype: 'error' } });
+  assert.equal(h.events().filter(e => e.type === 'warning').length, 1);
+  h.send({ type: 'result', result: 'ok' });
+  assert.equal(h.events().find(e => e.type === 'done').data.interrupted, false);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.session.currentId, 'steer');
+  assert.equal(h.child.writes.at(-1).message.content[0].text ?? h.child.writes.at(-1).message.content, 'new direction');
+});
+
+test('thinking deltas surface as reasoning events', () => {
+  const h = streamHarness();
+  h.partial({ type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } });
+  h.partial({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'plan' } });
+  h.partial({ type: 'content_block_stop', index: 0 });
+  assert.equal(h.events().find(e => e.type === 'reasoning').data.text, 'plan');
 });

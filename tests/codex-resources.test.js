@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createCodexResources } = require('../codex-resources');
+const { createCodexResources } = require('../engines/codex/resources');
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'panel-resource-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

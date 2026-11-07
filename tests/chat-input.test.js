@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { imageContent, imageMessage } = require('../chat-input');
+const { imageContent, imageMessage } = require('../core/chat-input');
 const { chooseFolder } = require('../folder-picker');
 const { createSessionStore } = require('../session-store');
 const fs = require('node:fs');

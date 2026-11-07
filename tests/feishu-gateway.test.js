@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const { createFeishuGateway, contextKey, messageUUID } = require('../feishu-gateway');
-const { createChatJob } = require('../chat-job');
+const { createChatJob } = require('../core/chat-job');
 
 async function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'panel-feishu-test-'));

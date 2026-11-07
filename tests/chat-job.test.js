@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { createChatJob } = require('../chat-job');
+const { createChatJob } = require('../core/chat-job');
 
 function subscriber() {
   const res = new EventEmitter(); res.frames = []; res.writeHead = () => {}; res.flushHeaders = () => {};

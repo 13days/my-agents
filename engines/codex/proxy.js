@@ -1,6 +1,6 @@
 const http = require('http');
 const https = require('https');
-const { upstreamNetwork } = require('./upstream-network');
+const { upstreamNetwork } = require('../../upstream-network');
 
 // Pass-through capture for Codex. Codex keeps its own credentials (ChatGPT
 // subscription OAuth or OPENAI_API_KEY); the panel only relays the bytes and

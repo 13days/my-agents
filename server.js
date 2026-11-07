@@ -26,22 +26,20 @@ const { messageTimestamp, annotateMessageTimings } = require('./message-timing')
 const crypto = require('crypto');
 const { chooseFolder } = require('./folder-picker');
 const { createSessionStore, normalizeTitle, isManualTitle, autoTitlePatch } = require('./session-store');
-const { imageContent, imageMessage } = require('./chat-input');
-const { createInputQueue } = require('./chat-session');
-const { cliResultError } = require('./cli-result');
-const { createChatJob } = require('./chat-job');
 const { createCaptureStore } = require('./capture-store');
-const { createPermissionBridge } = require('./chat-permissions');
-const { resolveCodex } = require('./codex-cli');
-const { resolveClaude, claudeEnvironment } = require('./claude-cli');
-const { createCodexSessions } = require('./codex-sessions');
-const { createCodexRunner } = require('./codex-engine');
-const { createCodexProxy, codexProviderConfig, extractResponses, isCodexPath } = require('./codex-proxy');
+const { resolveCodex } = require('./engines/codex/cli');
+const { resolveClaude } = require('./engines/claude/cli');
+const { createCodexSessions } = require('./engines/codex/sessions');
+const { createRegistry } = require('./core/registry');
+const { createSessionManager } = require('./core/session-manager');
+const { createLocalHost } = require('./hosts/local');
+const { createClaudeEngine } = require('./engines/claude');
+const { createCodexEngine } = require('./engines/codex');
+const { createCodexProxy, codexProviderConfig, extractResponses, isCodexPath } = require('./engines/codex/proxy');
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 const codexSessions = createCodexSessions({ home: CODEX_HOME });
-const codexStats = require('./codex-stats').createCodexStats({ home: CODEX_HOME });
-const codexResources = require('./codex-resources').createCodexResources({ home: CODEX_HOME, agentsHome: process.env.AGENTS_HOME || path.join(os.homedir(), '.agents'), summarize, parseFrontmatter });
-const activeChats = new Map();
+const codexStats = require('./engines/codex/stats').createCodexStats({ home: CODEX_HOME });
+const codexResources = require('./engines/codex/resources').createCodexResources({ home: CODEX_HOME, agentsHome: process.env.AGENTS_HOME || path.join(os.homedir(), '.agents'), summarize, parseFrontmatter });
 let folderPickerBusy = false;
 
 const PORT = process.env.PORT || 4321;
@@ -202,6 +200,8 @@ if (CLI_CMD === '--help' || CLI_CMD === '-h') {
   process.exit(0);
 }
 const CLAUDE_DIR = process.env.CLAUDE_DIR || path.join(os.homedir(), '.claude');
+const BIND_HOST = process.env.MY_AGENTS_BIND || '127.0.0.1';
+const auth = HISTORY_WORKER ? null : require('./http/auth').createAuth({ port: PORT, bindHost: BIND_HOST, dir: CLAUDE_DIR, publicHosts: (process.env.MY_AGENTS_PUBLIC_HOSTS || '').split(',').filter(Boolean) });
 const sessionStore = createSessionStore(CLAUDE_DIR);
 
 const TYPES = {
@@ -772,8 +772,7 @@ function listSessions() {
   }
   return [...map.values()].filter(s => !sessionMetadata[s.id]?.deleted).map(s => {
     const meta = sessionMetadata[s.id] || {}, manual = isManualTitle(meta, s.firstTitle);
-    const running = activeChats.get(s.id);
-    const pendingInput = running && !running.job.closed && (running.queue.currentId || running.queue.pendingCount);
+    const pendingInput = manager.busy(s.id);
     const automatic = meta.autoTitle && (pendingInput || meta.autoTitleAt >= (s.promptAt || 0)) ? meta.autoTitle : s.promptAt ? s.title : meta.title || s.title;
     return { ...s, engine: s.engine || 'claude', title: manual ? meta.title : automatic || meta.title || s.id, titleSource: manual ? 'manual' : 'auto', last: Math.max(s.last, meta.lastAt || 0) };
   }).sort((a, b) => b.last - a.last);
@@ -1632,6 +1631,14 @@ function summarizeMessage(m) {
   return { role: m.role, parts };
 }
 
+// Upstream failures seen by the proxies surface as warnings in the session's active turn.
+function warnUpstream(rec) {
+  if (rec.status < 400 || !rec.sessionId) return;
+  const run = manager.get(rec.sessionId);
+  if (!run) return;
+  const meta = registry.get(run.engine)?.meta || {};
+  manager.warn(rec.sessionId, `上游返回 ${rec.status}，${meta.short || run.engine} 可能正在重试。${meta.upstreamHint || ''}。`);
+}
 function recordExchange(reqPath, status, durationMs, reqBody, resBody, isStream, reqHeaders, resEncoding, upstreamId, upstreamName, requestInfo = {}) {
   resBody = decodeBody(resBody, resEncoding);
   const ua = (reqHeaders && (reqHeaders['user-agent'] || reqHeaders['User-Agent'])) || '';
@@ -1653,6 +1660,7 @@ function recordExchange(reqPath, status, durationMs, reqBody, resBody, isStream,
     const { finished, ...extracted } = extractResponses(rec.requestBody, rec.responseBody, isStream);
     Object.assign(rec, extracted, { anthropicVersion: '', betas: '' });
     if (finished === 'response.completed') rec.incomplete = false; // 上游收到终止事件后才断开连接，不算中断
+    warnUpstream(rec);
     try { persistCapture(rec); } catch (e) { console.error('抓包保存失败：', e.message); }
     return;
   }
@@ -1688,13 +1696,7 @@ function recordExchange(reqPath, status, durationMs, reqBody, resBody, isStream,
       if (!rec.model) rec.model = r.model || '';
     }
   } catch {}
-  if (status >= 400 && rec.sessionId) {
-    const running = activeChats.get(rec.sessionId);
-    if (running && !running.job.closed && running.queue.currentId) running.job.publish('warning', {
-      messageId: running.queue.currentId,
-      warning: `上游返回 ${status}，${rec.engine === 'codex' ? 'Codex' : 'Claude'} 可能正在重试。可停止任务后${rec.engine === 'codex' ? '检查网络或登录状态' : '用 /route 切换账号'}。`,
-    });
-  }
+  warnUpstream(rec);
   try { persistCapture(rec); } catch (e) { console.error('抓包保存失败：', e.message); }
 }
 
@@ -1713,11 +1715,42 @@ function codexAuthMode() {
     return auth.tokens ? 'chatgpt' : auth.OPENAI_API_KEY ? 'apikey' : '';
   } catch { return ''; }
 }
-const codexProfile = require('./codex-profile').createCodexProfile({ home: CODEX_HOME, port: PROXY_PORT, apiKey: () => codexAuthMode() === 'apikey', format: () => require('./codex-profile').codexProfileFormat(resolveCodex().path) });
+const codexProfile = require('./engines/codex/profile').createCodexProfile({ home: CODEX_HOME, port: PROXY_PORT, apiKey: () => codexAuthMode() === 'apikey', format: () => require('./engines/codex/profile').codexProfileFormat(resolveCodex().path) });
 function codexStatus() {
   const cli = resolveCodex();
   return { cli: cli.path, version: cli.version, candidates: cli.candidates, home: CODEX_HOME, authMode: codexAuthMode(), capture: codexCaptureEnabled(), proxyPort: Number(PROXY_PORT), profile: codexProfile.status() };
 }
+// ---------- engines ----------
+const registry = createRegistry({ defaultEngine: 'claude' });
+registry.addNode({ id: 'local', label: '本机', host: createLocalHost() });
+// Registration order matters: Claude transcripts win id collisions with Codex threads.
+registry.register(createClaudeEngine({
+  accounts: accountRouter,
+  transcripts: { path: transcriptPathFor, messages: id => sessionMessages(id, { limit: 0 })?.messages || [] },
+}));
+registry.register(createCodexEngine({
+  sessions: codexSessions,
+  // Panel-started Codex runs go through the capture proxy unless disabled; resumed threads keep their provider.
+  capture: ({ provider }) => (provider ? provider === 'panel' : codexCaptureEnabled()) ? { config: codexProviderConfig(PROXY_PORT, { apiKey: codexAuthMode() === 'apikey' }) } : null,
+}));
+const manager = createSessionManager({
+  registry,
+  history: {
+    ownerOf(id) {
+      const meta = sessionStore.read()[id] || {};
+      const engine = meta.engine && registry.has(meta.engine) ? meta.engine : registry.list().find(item => item.owns(id))?.id;
+      return engine ? { engine, node: meta.node || 'local' } : null;
+    },
+    messages: id => sessionMessages(id),
+    touch(id, { engine, node, cwd, prompt }) {
+      const meta = sessionStore.read()[id] || {};
+      const fp = transcriptPathFor(id);
+      const created = engine ? { engine, ...(node && node !== 'local' ? { node } : {}), project: cwd, initialPrompt: meta.initialPrompt || prompt, createdAt: meta.createdAt || Date.now() } : {};
+      sessionStore.update(id, { ...autoTitlePatch(meta, prompt, fp ? transcriptHead(fp).title : ''), ...created, lastAt: Date.now() });
+    },
+  },
+});
+
 if (!HISTORY_WORKER) loadCaptures();
 proxyServer.on('error', e => {
   // 端口被占等情况：只关掉 Inspector，别拖垮整个面板
@@ -1726,114 +1759,37 @@ proxyServer.on('error', e => {
 if (!HISTORY_WORKER) proxyServer.listen(PROXY_PORT, '127.0.0.1');
 
 const macRuntime = require('./mac-runtime').createMacRuntime({ dir: CLAUDE_DIR, serverPath: path.join(__dirname, 'server.js'), port: PORT, proxyPort: PROXY_PORT, claudeInfo: HISTORY_WORKER ? undefined : resolveClaude() });
-const gatewayRequest = async (route, body) => {
-  // Codex 新会话要等 CLI 创建线程后才返回，留足启动时间
-  const response = await fetch(`http://127.0.0.1:${PORT}/api/${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(route === 'chat' ? 100000 : 30000) });
-  if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.error || response.statusText); }
-  if (route !== 'chat' || !response.body) { await response.body?.cancel(); return {}; }
-  // 读出首个 meta 事件拿到真实会话 ID（Codex 的线程 ID 由 CLI 生成）
-  const reader = response.body.getReader(), decoder = new TextDecoder();
-  let text = '';
-  while (!text.includes('\n\n')) { const { value, done } = await reader.read(); if (done) break; text += decoder.decode(value, { stream: true }); }
-  await reader.cancel();
-  try { return { sessionId: JSON.parse(text.match(/^data: (.*)$/m)[1]).sessionId || '' }; } catch { return {}; }
-};
 const feishuGateway = require('./feishu-gateway').createFeishuGateway({
   dir: CLAUDE_DIR, runtime: macRuntime, replyURL: `http://127.0.0.1:${PORT}/api/feishu/reply`,
   panel: {
     sessions: listSessions,
     projects: knownProjects,
-    running: id => { const run = activeChats.get(id); return !!(run && !run.job.closed && (run.queue.currentId || run.queue.pendingCount)) || !!accountRouter.sessions().items.find(item => item.id === id)?.running; },
-    submit: async input => {
-      const running = activeChats.get(input.sessionId);
-      if ((!running || running.job.closed) && accountRouter.sessions().items.some(item => item.id === input.sessionId && item.running)) throw new Error('此会话正在外部 CLI 中运行，请等本轮结束后续接；可先用 /history 查看记录');
-      const reuse = running && !running.job.closed;
-      const result = await gatewayRequest(reuse ? `chat/${encodeURIComponent(input.sessionId)}/input` : 'chat', input);
-      return { sessionId: result.sessionId || input.sessionId };
+    running: id => manager.busy(id) || !!accountRouter.sessions().items.find(item => item.id === id)?.running,
+    submit: async ({ gatewayContext, ...input }) => {
+      const run = manager.get(input.sessionId), live = run && !run.job.closed;
+      if (!live && accountRouter.sessions().items.some(item => item.id === input.sessionId && item.running)) throw new Error('此会话正在外部 CLI 中运行，请等本轮结束后续接；可先用 /history 查看记录');
+      if (live) { manager.send(input.sessionId, { ...input, context: gatewayContext }); return { sessionId: run.id }; }
+      const { sessionId } = await manager.start({ ...input, context: gatewayContext });
+      return { sessionId };
     },
     engine: id => sessionEngine(id),
-    engineInfo: engine => engine === 'codex' ? resolveCodex() : resolveClaude(),
+    engineInfo: engine => registry.get(engine)?.detect?.() || {},
     routes: () => ({ ...accountRouter.status(), pins: accountRouter.sessions().routes }),
     route: input => accountRouter.route(input),
     resetRoutes: () => accountRouter.reset(),
     pinRoute: (id, accountId) => accountRouter.setSessionRoute(id, accountId),
     codex: () => { const { version, authMode, capture } = codexStatus(); return { version, authMode, capture }; },
     setCodexCapture: capture => writePanelConfig({ ...readPanelConfig(), codexCapture: capture }),
-    watch: (id, listener) => { const run = activeChats.get(id); if (!run) throw new Error('任务未启动或已结束'); return run.job.listen(listener); },
-    permission: (id, requestId, behavior) => gatewayRequest(`chat/${encodeURIComponent(id)}/permission`, { id: requestId, behavior }),
-    pendingPermissions: id => {
-      const pending = new Map();
-      for (const { event, data } of activeChats.get(id)?.job.events || []) {
-        if (event === 'permission') pending.set(data.id, data);
-        if (event === 'permission_resolved') pending.delete(data.id);
-      }
-      return [...pending.values()];
-    },
+    watch: (id, listener) => manager.watch(id, listener),
+    permission: async (id, requestId, behavior) => manager.respondPermission(id, requestId, behavior),
+    pendingPermissions: id => manager.pendingPermissions(id),
     history: id => sessionMessages(id)?.messages || [],
     rename: (id, title) => { if (!listSessions().some(item => item.id === id)) throw new Error('会话不存在'); if (!title.trim() || title.trim().length > 80) throw new Error('名称需为 1–80 个字符'); sessionStore.update(id, { title: title.trim(), titleSource: 'manual' }); },
-    stop: async id => { const run = activeChats.get(id); if (!run || run.job.closed) throw new Error('当前没有可停止的 Panel 任务；外部 CLI 进程请在其原入口停止'); await gatewayRequest(`chat/${encodeURIComponent(id)}/stop`, {}); },
+    stop: async id => { if (!manager.stop(id)) throw new Error('当前没有可停止的 Panel 任务；外部 CLI 进程请在其原入口停止'); },
   },
 });
 
 const larkSetup = require('./lark-setup').createLarkSetup({ dir: CLAUDE_DIR, configure: input => feishuGateway.configure(input) });
-
-// ---------- Codex chat ----------
-function codexTurnInput(prompt, images, gatewayContext = '') {
-  const text = prompt || (images?.length ? '请查看这些图片。' : '');
-  return { prompt: gatewayContext ? `${gatewayContext}\n\n${text}` : text, images: images || [] };
-}
-const isClaudeModel = model => /^(claude|opus|sonnet|haiku|default)\b/i.test(model);
-async function startCodexChat({ res, input, prompt, gatewayContext, cwd, requestedId }) {
-  const previous = requestedId && activeChats.get(requestedId);
-  if (previous && !previous.job.closed) {
-    if (previous.queue.currentId || previous.queue.pendingCount) return sendJSON(res, 409, { error: '此会话正在运行，请重新打开会话接续' });
-    previous.child.kill('SIGTERM'); // 空闲连接：关闭后以新连接续接
-  }
-  // 网页端会为新会话预分配随机 ID；Codex 的线程 ID 由 CLI 生成，未知 ID 按新会话处理
-  if (requestedId && !codexSessions.pathFor(requestedId)) requestedId = '';
-  const model = typeof input.model === 'string' && /^[\w.\/:-]{1,100}$/.test(input.model.trim()) && !isClaudeModel(input.model.trim()) ? input.model.trim() : '';
-  // 续接时沿用会话原 provider：终端直连建的会话（openai）不能改走 panel，反之亦然
-  const provider = requestedId ? codexSessions.provider(requestedId) : '';
-  const capture = provider ? provider === 'panel' : codexCaptureEnabled();
-  const config = capture ? codexProviderConfig(PROXY_PORT, { apiKey: codexAuthMode() === 'apikey' }) : [];
-  const cli = resolveCodex().path;
-  const messageId = typeof input.messageId === 'string' && /^[\w-]{8,100}$/.test(input.messageId) ? input.messageId : crypto.randomUUID();
-  const buffered = [];
-  let job = null, running = null, idleTimer;
-  const emit = (event, data) => {
-    const payload = { timestamp: new Date().toISOString(), ...data, ...(runner.currentId ? { messageId: runner.currentId } : {}) };
-    if (!job) return buffered.push([event, payload]);
-    if (job.closed) return;
-    job.publish(event, payload);
-    if (event === 'done' && running?.stopped) close();
-  };
-  const close = () => {
-    clearTimeout(idleTimer);
-    if (job && !job.closed) job.close();
-    runner.stop();
-    const retention = setTimeout(() => { if (running && activeChats.get(running.id) === running) activeChats.delete(running.id); }, 5 * 60 * 1000); retention.unref();
-  };
-  const runner = createCodexRunner({ cli, cwd, threadId: requestedId, model, config, env: claudeEnvironment({ ...process.env, PWD: cwd }),
-    emit,
-    onIdle: () => { emit('idle', {}); clearTimeout(idleTimer); idleTimer = setTimeout(close, 3 * 60 * 1000); },
-  });
-  const baseHistory = requestedId ? sessionMessages(requestedId) : null;
-  emit('input', { id: messageId, prompt, images: input.images || [] });
-  runner.submit(messageId, codexTurnInput(prompt, input.images, gatewayContext));
-  let threadId;
-  try { threadId = await Promise.race([runner.ready, new Promise((_, reject) => setTimeout(() => reject(new Error('Codex 启动超时（90 秒内未创建会话）')), 90000))]); }
-  catch (e) { runner.stop(); runner.kill(); return sendJSON(res, 503, { error: e.message }); }
-  const metadata = sessionStore.read()[threadId] || {};
-  sessionStore.update(threadId, { ...autoTitlePatch(metadata, prompt, ''), engine: 'codex', project: cwd, initialPrompt: metadata.initialPrompt || prompt, createdAt: metadata.createdAt || Date.now(), lastAt: Date.now() });
-  job = createChatJob({ routed: capture, engine: 'codex', cwd, sessionId: threadId, jobId: crypto.randomUUID() });
-  const queue = { submit: (...args) => { clearTimeout(idleTimer); return runner.submit(...args); }, stop: () => runner.stop(), get currentId() { return runner.currentId; }, get pendingCount() { return runner.pendingCount; } };
-  running = { id: threadId, engine: 'codex', queue, job, baseMessages: baseHistory?.messages || [], baseHistory, stopped: false,
-    child: { kill: signal => { if (runner.running) runner.kill(signal); else close(); } },
-    permissions: { respond: () => { throw new Error('Codex 会话不需要授权确认'); }, size: 0, clear() {} } };
-  activeChats.set(threadId, running);
-  job.subscribe(res);
-  for (const [event, data] of buffered.splice(0)) job.publish(event, data);
-}
 
 // Usage annotations must never delay the resource list itself.
 let resourceUsage, resourceUsageAt = 0, resourceUsagePending;
@@ -1865,17 +1821,20 @@ const server = http.createServer(async (req, res) => {
     }
     if (parts[0] !== 'api') {
       // 静态页面
+      if (auth.login(req, res, url)) { res.writeHead(302, { Location: '/' }); return res.end(); }
+      if (!auth.pageAllowed(req)) { res.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('需要访问令牌：请用启动日志中的链接打开面板'); }
       const html = fs.readFileSync(path.join(__dirname, 'index.html'));
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(html);
     }
 
+    // Every API route shares one Host/Origin/token guard.
+    const denied = auth.check(req);
+    if (denied) return sendJSON(res, 403, { error: denied });
     const type = parts[1];
     if (type === 'claude' && req.method === 'GET') { const info = resolveClaude(); return sendJSON(res, 200, { cli: info.path, version: info.version, source: info.source, candidates: info.candidates }); }
     if (url.searchParams.get('engine') === 'codex' && ['skills', 'config', 'commands', 'agents', 'plugins', 'workflows'].includes(type)) {
       if (parts.length > 3) return sendJSON(res, 404, { error: '资源不存在' });
-      const hosts = [`localhost:${PORT}`, `127.0.0.1:${PORT}`], origin = req.headers.origin;
-      if (!hosts.includes(req.headers.host) || origin && !hosts.some(host => origin === `http://${host}`) || req.headers['sec-fetch-site'] === 'cross-site') return sendJSON(res, 403, { error: '仅允许本机页面管理资源' });
       const requestedScope = url.searchParams.get('scope') || '';
       if (requestedScope && !scope) return sendJSON(res, 400, { error: '项目不在已知工作区内' });
       try {
@@ -1886,8 +1845,6 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (type === 'feishu') {
-      const hosts = [`localhost:${PORT}`, `127.0.0.1:${PORT}`], origin = req.headers.origin;
-      if (!hosts.includes(req.headers.host) || origin && !hosts.some(host => origin === `http://${host}`) || req.headers['sec-fetch-site'] === 'cross-site') return sendJSON(res, 403, { error: '仅允许本机页面配置飞书网关' });
       res.setHeader('Cache-Control', 'no-store');
       if (req.method === 'GET' && parts[2] === 'messages') return sendJSON(res, 200, await feishuGateway.messages({ before: url.searchParams.has('before') ? url.searchParams.get('before') : undefined, userId: url.searchParams.get('userId'), chatId: url.searchParams.get('chatId') }));
       if (req.method === 'GET') return sendJSON(res, 200, { ...feishuGateway.status(), cliSetup: larkSetup.status() });
@@ -1926,11 +1883,6 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (type === 'choose-folder' && req.method === 'POST') {
-      const allowedHosts = [`localhost:${PORT}`, `127.0.0.1:${PORT}`];
-      const origin = req.headers.origin;
-      if (!allowedHosts.includes(req.headers.host) || (origin && !allowedHosts.some(h => origin === `http://${h}`)) || req.headers['sec-fetch-site'] === 'cross-site') {
-        return sendJSON(res, 403, { error: '仅允许本机页面选择文件夹' });
-      }
       if (folderPickerBusy) return sendJSON(res, 409, { error: '文件夹选择器已打开' });
       folderPickerBusy = true;
       try {
@@ -1941,243 +1893,45 @@ const server = http.createServer(async (req, res) => {
       } finally { folderPickerBusy = false; }
     }
 
-    // Chat is a local Claude Code CLI session, streamed back to the panel.
+    if (type === 'engines' && req.method === 'GET') {
+      return sendJSON(res, 200, { default: registry.defaultId(), engines: registry.list().map(registry.describe), nodes: registry.nodes().map(node => ({ id: node.id, label: node.label, remote: node.remote })) });
+    }
+
+    // Chat sessions run through the session manager, whatever the engine or node.
     if (type === 'chat' && ['POST', 'GET'].includes(req.method)) {
-      const allowedHosts = [`localhost:${PORT}`, `127.0.0.1:${PORT}`];
-      const origin = req.headers.origin;
-      if (!allowedHosts.includes(req.headers.host) || (origin && !allowedHosts.some(h => origin === `http://${h}`)) || req.headers['sec-fetch-site'] === 'cross-site') {
-        return sendJSON(res, 403, { error: '仅允许本机页面启动 Claude Code 对话' });
-      }
-      if (req.method === 'GET' && parts.length === 3 && parts[2] === 'status') {
-        return sendJSON(res, 200, { running: [...activeChats.values()].filter(run => !run.job.closed && (run.queue.currentId || run.queue.pendingCount)).map(run => run.id) });
-      }
+      const id = parts[2] ? decodeURIComponent(parts[2]) : '';
+      if (req.method === 'GET' && parts.length === 3 && id === 'status') return sendJSON(res, 200, { running: manager.running() });
       if (req.method === 'GET' && parts.length === 4 && parts[3] === 'events') {
-        const running = activeChats.get(decodeURIComponent(parts[2]));
-        if (!running) return sendJSON(res, 404, { error: '此任务已结束，请重新打开会话查看结果' });
-        return running.job.subscribe(res);
-      }
-      if (req.method === 'POST' && parts.length === 4 && parts[3] === 'permission') {
-        const running = activeChats.get(decodeURIComponent(parts[2]));
-        if (!running || running.job.closed) return sendJSON(res, 409, { error: '会话连接已结束' });
-        try {
-          const decision = JSON.parse(await readBody(req));
-          running.permissions.respond(decision.id, decision.behavior);
-          return sendJSON(res, 200, { ok: true });
-        } catch (e) { return sendJSON(res, 400, { error: e.message }); }
-      }
-      if (req.method === 'POST' && parts.length === 4 && parts[3] === 'stop') {
-        req.resume();
-        const running = activeChats.get(decodeURIComponent(parts[2]));
-        if (running && !running.job.closed) {
-          running.stopped = true; running.queue.stop();
-          running.job.publish('stopped', {}); running.child.kill('SIGTERM');
-        }
-        return sendJSON(res, 200, { ok: true });
+        const run = manager.get(id);
+        if (!run) return sendJSON(res, 404, { error: '此任务已结束，请重新打开会话查看结果' });
+        return run.job.subscribe(res);
       }
       if (req.method !== 'POST') return sendJSON(res, 405, { error: 'method not allowed' });
+      if (parts.length === 4 && parts[3] === 'stop') {
+        req.resume();
+        manager.stop(id);
+        return sendJSON(res, 200, { ok: true });
+      }
       let input;
       try { input = JSON.parse(await readBody(req, 30 * 1024 * 1024)); } catch { return sendJSON(res, 400, { error: 'JSON 格式无效或请求过大' }); }
-      const prompt = typeof input.prompt === 'string' ? input.prompt.trim() : '';
-      const gatewayContext = typeof input.gatewayContext === 'string' ? input.gatewayContext : '';
-      if (gatewayContext.length > 12000) return sendJSON(res, 400, { error: '发送上下文过长' });
-      let images;
-      try { images = imageContent(input.images); } catch (e) { return sendJSON(res, 400, { error: e.message }); }
-      if ((!prompt && !images.length) || prompt.length > 20000) return sendJSON(res, 400, { error: '请输入不超过 20000 字的内容，或附带图片' });
-      let cwd;
-      try { cwd = fs.realpathSync(typeof input.cwd === 'string' && input.cwd.trim() ? input.cwd.trim() : process.cwd()); }
-      catch { return sendJSON(res, 400, { error: '工作目录不存在' }); }
-      if (!fs.statSync(cwd).isDirectory()) return sendJSON(res, 400, { error: '工作目录必须是文件夹' });
-      const cli = resolveClaude().path;
-      if (parts.length === 4 && parts[3] === 'input') {
-        const running = activeChats.get(decodeURIComponent(parts[2]));
-        if (!running) return sendJSON(res, 409, { error: '会话连接已结束，请重新发送' });
-        const messageId = typeof input.messageId === 'string' && /^[\w-]{8,100}$/.test(input.messageId) ? input.messageId : crypto.randomUUID();
-        try {
-          const turnInput = running.engine === 'codex' ? codexTurnInput(prompt, input.images, gatewayContext) : imageMessage(prompt, images, gatewayContext);
-          running.queue.submit(messageId, turnInput, input.mode !== 'queue', () => running.job.publish('input', { id: messageId, prompt, images: input.images || [], mode: input.mode }));
-          const meta = sessionStore.read()[running.id] || {};
-          const fp = transcriptPathFor(running.id);
-          sessionStore.update(running.id, { ...autoTitlePatch(meta, prompt, fp ? transcriptHead(fp).title : ''), lastAt: Date.now() });
-          return sendJSON(res, 202, { ok: true, messageId });
-        } catch (e) { return sendJSON(res, 409, { error: e.message }); }
+      if (typeof input.gatewayContext === 'string' && input.context === undefined) input.context = input.gatewayContext;
+      try {
+        if (parts.length === 4 && parts[3] === 'permission') {
+          manager.respondPermission(id, input.id, input.behavior);
+          return sendJSON(res, 200, { ok: true });
+        }
+        if (parts.length === 4 && parts[3] === 'input') return sendJSON(res, 202, { ok: true, ...manager.send(id, input) });
+        if (parts.length !== 2) return sendJSON(res, 404, { error: '接口不存在' });
+        const { run } = await manager.start(input);
+        return run.job.subscribe(res);
+      } catch (e) {
+        if (!e.status) console.warn('会话启动失败：', e.message);
+        return sendJSON(res, e.status || 400, { error: e.message });
       }
-      const requestedId = typeof input.sessionId === 'string' && /^[a-zA-Z0-9-]{8,100}$/.test(input.sessionId) ? input.sessionId : '';
-      if (input.engine === 'codex' || (requestedId && sessionEngine(requestedId) === 'codex')) return startCodexChat({ res, input, prompt, gatewayContext, cwd, requestedId });
-      const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--dangerously-skip-permissions'];
-      // 新会话预先分配 ID，这样在第一条请求前就能把它固定到所选代理账号
-      const suppliedId = typeof input.sessionId === 'string' && /^[a-zA-Z0-9-]{8,100}$/.test(input.sessionId) ? input.sessionId : '';
-      const sessionId = suppliedId || crypto.randomUUID();
-      if (activeChats.has(sessionId) && !activeChats.get(sessionId).job.closed) return sendJSON(res, 409, { error: '此会话正在运行，请重新打开会话接续' });
-      const resuming = !!suppliedId && !!transcriptPathFor(sessionId);
-      const baseHistory = resuming ? sessionMessages(sessionId) : null;
-      const baseMessages = baseHistory?.messages || [];
-      const metadata = sessionStore.read()[sessionId] || {};
-      const fp = resuming ? transcriptPathFor(sessionId) : '';
-      sessionStore.update(sessionId, { ...autoTitlePatch(metadata, prompt, fp ? transcriptHead(fp).title : ''), project: cwd, initialPrompt: metadata.initialPrompt || prompt, createdAt: metadata.createdAt || Date.now(), lastAt: Date.now() });
-      args.push(resuming ? '--resume' : '--session-id', sessionId);
-      if (typeof input.accountId === 'string') {
-        try { accountRouter.setSessionRoute(sessionId, input.accountId); } catch (e) { return sendJSON(res, 400, { error: e.message }); }
-      }
-      if (typeof input.model === 'string' && /^[\w.\/:\[\]-]{1,100}$/.test(input.model.trim())) args.push('--model', input.model.trim());
-      let child;
-      // 有启用的代理账号就走账号路由（用量可按账号统计），否则沿用本机 Claude Code 自己的登录配置
-      const clientEnv = { ...(accountRouter.clientEnv() || {}), ...await accountRouter.modelEnvForSession(sessionId) };
-      // settings.json 的 env 优先于进程环境变量，用 --settings 才能确保这次对话经过面板代理
-      if (clientEnv.ANTHROPIC_BASE_URL) args.push('--settings', JSON.stringify({ env: clientEnv }));
-      try { child = spawn(cli, args, { cwd, env: claudeEnvironment({ ...process.env, ...clientEnv, PWD: cwd }, resolveClaude()), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }); }
-      catch (e) { return sendJSON(res, 503, { error: `无法启动 Claude Code：${e.message}` }); }
-      child.stdin.on('error', () => {});
-      const job = createChatJob({ routed: !!clientEnv.ANTHROPIC_BASE_URL, cwd, sessionId, jobId: crypto.randomUUID() });
-      job.subscribe(res);
-      child.stdout.setEncoding('utf8');
-      let stdout = '', stderr = '', sentText = false, turnStreamed = false, ended = false;
-      const streamingTools = new Map();
-      const toolAliases = new Map(), pendingTools = new Map();
-      const emit = (event, data) => { if (!ended) job.publish(event, { ...data, ...(inputQueue?.currentId ? { messageId: inputQueue.currentId } : {}) }); };
-      let idleTimer, timer;
-      const backgroundTasks = new Set();
-      const armIdleTimer = () => {
-        clearTimeout(idleTimer);
-        if (inputQueue.currentId || permissions.size || backgroundTasks.size) return;
-        idleTimer = setTimeout(() => child.stdin.end(), 3 * 60 * 1000);
-      };
-      const inputQueue = createInputQueue({ child,
-        onTurn: id => {
-          clearTimeout(idleTimer); clearTimeout(timer);
-          // 长任务默认不设时限；需要时可由启动环境显式配置。
-          const timeoutMs = Number(process.env.CCP_CHAT_TIMEOUT_MS || 0);
-          if (Number.isFinite(timeoutMs) && timeoutMs > 0) timer = setTimeout(() => {
-            emit('error', { error: `本轮已达到配置的超时时间（${Math.round(timeoutMs / 1000)} 秒）` });
-            child.kill('SIGTERM');
-          }, timeoutMs);
-          sentText = turnStreamed = false; streamingTools.clear(); toolAliases.clear(); pendingTools.clear(); emit('turn', { id });
-        },
-        onIdle: () => { clearTimeout(timer); emit('idle', {}); armIdleTimer(); },
-        onWarning: warning => emit('warning', { warning }),
-      });
-      const permissions = createPermissionBridge({ child, autoApprove: true, publish: (event, data) => {
-        if (event === 'permission') clearTimeout(idleTimer);
-        if (event === 'permission_resolved' && !inputQueue.currentId) armIdleTimer();
-        emit(event, data);
-      } });
-      const running = { id: sessionId, engine: 'claude', queue: inputQueue, job, baseMessages, baseHistory, child, permissions, stopped: false };
-      activeChats.set(sessionId, running);
-      const emitToolResult = block => {
-        const id = toolAliases.get(block.tool_use_id) || block.tool_use_id;
-        if (!pendingTools.has(id)) return;
-        pendingTools.delete(id);
-        emit('tool_result', { id, output: block.content, isError: !!block.is_error });
-      };
-      const syncToolResults = () => {
-        if (!pendingTools.size) return;
-        // Some CLI versions omit user tool_result events from stdout. The
-        // transcript is authoritative and also contains permission failures.
-        try {
-          const history = sessionMessages(sessionId, { limit: 0 });
-          for (const message of history?.messages || []) for (const tool of message.tools || []) {
-            if (tool.output !== undefined) emitToolResult({ tool_use_id: tool.id, content: tool.output, is_error: tool.state === 'error' });
-          }
-        } catch {}
-      };
-      const processLine = line => {
-        let msg; try { msg = JSON.parse(line); } catch { return; }
-        if (msg.type === 'system' && msg.subtype === 'api_retry') {
-          const status = msg.error?.status || msg.status_code || msg.error_status;
-          emit('warning', { warning: `上游请求失败${status ? `（${status}）` : ''}，Claude 正在重试${msg.attempt ? `（第 ${msg.attempt} 次）` : ''}。可停止任务后用 /route 切换账号。` });
-        }
-        if (msg.type === 'system' && msg.subtype === 'task_started' && msg.task_id) {
-          backgroundTasks.add(msg.task_id); clearTimeout(idleTimer);
-        }
-        if (msg.type === 'system' && msg.subtype === 'task_notification' && msg.task_id) {
-          backgroundTasks.delete(msg.task_id);
-          if (!inputQueue.currentId) armIdleTimer();
-        }
-        if (permissions.handle(msg)) return;
-        if (msg.type === 'control_response') inputQueue.control(msg);
-        else if (msg.type === 'stream_event') {
-          const ev = msg.event;
-          if (ev?.type === 'message_start') { turnStreamed = false; streamingTools.clear(); }
-          if (ev?.type === 'content_block_start') {
-            const block = ev.content_block;
-            if (block?.type === 'text' && block.text) { sentText = turnStreamed = true; emit('text', { text: block.text }); }
-            if (block?.type === 'tool_use') {
-              const tool = { id: block.id, name: block.name, finalized: false };
-              streamingTools.set(ev.index, tool); pendingTools.set(block.id, tool);
-              emit('tool', { id: block.id, name: block.name, input: block.input, partial: true });
-            }
-          }
-          if (ev?.type === 'content_block_delta' && ev.delta?.type === 'text_delta' && ev.delta.text) { sentText = turnStreamed = true; emit('text', { text: ev.delta.text }); }
-          if (ev?.type === 'content_block_delta' && ev.delta?.type === 'input_json_delta' && streamingTools.has(ev.index)) emit('tool_input', { id: streamingTools.get(ev.index).id, text: ev.delta.partial_json || '' });
-        } else if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
-          syncToolResults();
-          for (const block of msg.message.content) {
-            if (block.type === 'text' && block.text && !turnStreamed) { sentText = true; emit('text', { text: block.text }); }
-            else if (block.type === 'tool_use') {
-              const tool = Array.from(streamingTools.values()).find(t => t.id === block.id || (!t.finalized && t.name === block.name));
-              const known = toolAliases.has(block.id);
-              const id = toolAliases.get(block.id) || tool?.id || block.id;
-              if (tool) tool.finalized = true;
-              toolAliases.set(block.id, id);
-              if (!known || pendingTools.has(id)) pendingTools.set(id, { id, name: block.name });
-              emit('tool', { id, name: block.name, input: block.input });
-            }
-          }
-          turnStreamed = false;
-        } else if (msg.type === 'user' && Array.isArray(msg.message?.content)) {
-          for (const block of msg.message.content) {
-            if (block.type === 'tool_result') emitToolResult(block);
-          }
-        } else if (msg.type === 'result') {
-          syncToolResults();
-          const error = inputQueue.interrupted ? '' : cliResultError(msg);
-          if (error) emit('error', { error });
-          else if (!sentText && msg.result && !inputQueue.interrupted) emit('text', { text: msg.result });
-          emit('done', { sessionId: msg.session_id || sessionId, cost: msg.total_cost_usd || null, turns: msg.num_turns || 0, isError: !!error, error, interrupted: inputQueue.interrupted });
-          inputQueue.result();
-        }
-      };
-      child.stdout.on('data', chunk => {
-        stdout += chunk.toString('utf8');
-        let cut; while ((cut = stdout.indexOf('\n')) >= 0) { processLine(stdout.slice(0, cut)); stdout = stdout.slice(cut + 1); }
-      });
-      child.stderr.on('data', chunk => { if (stderr.length < 8000) stderr += chunk.toString('utf8'); });
-      const toolSyncTimer = setInterval(syncToolResults, 1000);
-      const cleanup = () => {
-        permissions.clear(); inputQueue.stop(); clearTimeout(idleTimer); clearTimeout(timer);
-        const retention = setTimeout(() => { if (activeChats.get(sessionId) === running) activeChats.delete(sessionId); }, 5 * 60 * 1000); retention.unref();
-      };
-      child.on('error', e => {
-        cleanup();
-        clearTimeout(timer);
-        clearInterval(toolSyncTimer);
-        emit('error', { error: `无法启动 Claude Code（${cli}）：${e.message}。可用环境变量 CLAUDE_CLI 指定路径。` });
-        if (!ended) { ended = true; job.close(); }
-      });
-      child.on('close', (code, signal) => {
-        clearTimeout(timer);
-        clearInterval(toolSyncTimer);
-        if (stdout.trim()) processLine(stdout.trim());
-        syncToolResults();
-        if (!ended) {
-          if (!running.stopped && (code !== 0 || inputQueue.currentId)) emit('error', { error: stderr.trim().slice(-2000) || `Claude Code 提前结束，未完成回复（${signal || `状态码 ${code}`}）` });
-          ended = true; job.close();
-        }
-        cleanup();
-      });
-      const messageId = typeof input.messageId === 'string' && /^[\w-]{8,100}$/.test(input.messageId) ? input.messageId : crypto.randomUUID();
-      job.publish('input', { id: messageId, prompt, images: input.images || [] });
-      child.stdin.write(JSON.stringify({ type: 'control_request', request_id: crypto.randomUUID(), request: { subtype: 'initialize', hooks: {} } }) + '\n');
-      inputQueue.submit(messageId, imageMessage(prompt, images, gatewayContext));
-      return;
     }
 
     // Account credentials are only available through same-origin JSON management requests.
     if (type === 'proxy') {
-      const allowedHosts = [`localhost:${PORT}`, `127.0.0.1:${PORT}`];
-      const origin = req.headers.origin;
-      if (!allowedHosts.includes(req.headers.host) || (origin && !allowedHosts.some(h => origin === `http://${h}`)) || req.headers['sec-fetch-site'] === 'cross-site') {
-        return sendJSON(res, 403, { error: '仅允许本机页面管理代理' });
-      }
       res.setHeader('Cache-Control', 'no-store');
       if (req.method === 'GET' && parts.length === 2) return sendJSON(res, 200, accountRouter.status());
       if (req.method === 'GET' && parts[2] === 'sessions') return sendJSON(res, 200, accountRouter.sessions());
@@ -2196,9 +1950,6 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store');
       if (req.method === 'GET' && parts.length === 2) return sendJSON(res, 200, codexStatus());
       if (req.method === 'GET' && parts[2] === 'stats') return sendJSON(res, 200, await codexStats.read());
-      const allowedHosts = [`localhost:${PORT}`, `127.0.0.1:${PORT}`];
-      const origin = req.headers.origin;
-      if (!allowedHosts.includes(req.headers.host) || (origin && !allowedHosts.some(h => origin === `http://${h}`)) || req.headers['sec-fetch-site'] === 'cross-site') return sendJSON(res, 403, { error: '仅允许本机页面管理 Codex' });
       if (!String(req.headers['content-type'] || '').startsWith('application/json')) return sendJSON(res, 415, { error: '需要 application/json' });
       let body; try { body = JSON.parse(await readBody(req) || '{}'); } catch { return sendJSON(res, 400, { error: 'JSON 格式无效' }); }
       if (req.method === 'PUT' && parts.length === 2) {
@@ -2363,9 +2114,6 @@ const server = http.createServer(async (req, res) => {
     // ---- 会话历史 ----
     if (type === 'sessions') {
       if ((req.method === 'PATCH' || req.method === 'DELETE') && parts.length === 3) {
-        const allowedHosts = [`localhost:${PORT}`, `127.0.0.1:${PORT}`];
-        const origin = req.headers.origin;
-        if (!allowedHosts.includes(req.headers.host) || (origin && !allowedHosts.some(h => origin === `http://${h}`)) || req.headers['sec-fetch-site'] === 'cross-site') return sendJSON(res, 403, { error: '仅允许本机页面管理会话' });
         const id = decodeURIComponent(parts[2]);
         if (!listSessions().some(s => s.id === id)) return sendJSON(res, 404, { error: T(lang, 'errNotFound') });
         if (req.method === 'DELETE') {
@@ -2393,7 +2141,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'GET' && parts.length === 4 && parts[3] === 'messages') {
         res.setHeader('Cache-Control', 'no-store');
-        const id = decodeURIComponent(parts[2]), running = activeChats.get(id);
+        const id = decodeURIComponent(parts[2]), running = manager.get(id);
         if (running && !url.searchParams.has('before')) return sendJSON(res, 200, { ...running.baseHistory, id: running.id, project: running.job.meta.cwd, messages: running.baseMessages, liveReplay: true, jobId: running.job.meta.jobId });
         const fp = transcriptPathFor(id) || codexSessions.pathFor(id);
         let revision = '';
@@ -2576,8 +2324,9 @@ server.on('error', e => {
   }
   process.exit(1); // 干净退出，不抛未捕获堆栈
 });
-if (!HISTORY_WORKER) server.listen(PORT, '127.0.0.1', () => {
+if (!HISTORY_WORKER) server.listen(PORT, BIND_HOST, () => {
   console.log(`my-agents 已启动: http://localhost:${PORT}`);
+  if (auth.requireToken) console.log(`远程访问链接（含令牌，勿外传）: http://<host>:${PORT}/?token=${auth.token}`);
   console.log(`管理目录: ${CLAUDE_DIR}`);
   console.log(`Inspector 代理: http://localhost:${PROXY_PORT}`);
   ensureProxyInstalled();
@@ -2590,7 +2339,7 @@ const stopPanel = async () => {
   codexStats.close();
   historyWorker?.close();
   await feishuGateway.stop().catch(() => {});
-  for (const running of activeChats.values()) if (!running.job.closed) running.child.kill('SIGTERM');
+  manager.shutdown();
   process.exit(0);
 };
 process.once('SIGTERM', stopPanel);

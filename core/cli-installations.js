@@ -23,4 +23,12 @@ function globalCliCandidates(prefix, name, platform = process.platform) {
   const paths = platform === 'win32' ? path.win32 : path;
   return platform === 'win32' ? [paths.join(prefix, name + '.cmd'), paths.join(prefix, name + '.exe'), paths.join(prefix, name)] : [paths.join(prefix, 'bin', name)];
 }
-module.exports = { npmGlobalPrefix, globalCliCandidates };
+function parseVersion(text) {
+  const match = String(text || '').match(/(\d+)\.(\d+)\.(\d+)/);
+  return match ? match.slice(1).map(Number) : null;
+}
+function compareVersions(a, b) {
+  for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) - (b[i] || 0);
+  return 0;
+}
+module.exports = { npmGlobalPrefix, globalCliCandidates, parseVersion, compareVersions };

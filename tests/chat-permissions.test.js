@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createPermissionBridge } = require('../chat-permissions');
+const { createPermissionBridge } = require('../engines/claude/permissions');
 
 test('tool execution waits for an explicit decision; allow preserves original input and is single-use', () => {
   const writes = [], events = [];
