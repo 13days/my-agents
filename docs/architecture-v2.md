@@ -1,6 +1,6 @@
 # my-agents 架构 v2：引擎 / 渠道 / 运行位置全面插件化
 
-> 状态：设计稿（2026-11-07）。基于对 server.js、index.html、feishu-* 及 codex-* 的完整审查。
+> 状态：P0–P5 已在 `refactor/arch-v2` 分支实现（2026-11-08）。第 1–4 节是设计稿，实际落地与设计的差异见第 6 节。
 
 ## 1. 现状诊断
 
@@ -249,7 +249,7 @@ GET    /api/v2/captures …   /api/v2/upstreams …   /api/v2/channels/:id …
   nodes.json
 ```
 
-首次启动时从 `CLAUDE_DIR` 下的旧文件自动迁移，并保留备份。
+~~首次启动时从 `CLAUDE_DIR` 下的旧文件自动迁移~~ → 实现改为显式迁移，见第 6 节。
 
 ---
 
@@ -300,9 +300,55 @@ P1 的事件日志能保证重启后**看得到**完整进度。要让任务**�
 
 ---
 
-## 5. 待决策
+## 5. 决策结果
 
-1. **旧 API 兼容期**：是否需要对外保持 `/api/*` 稳定（有没有第三方脚本或 statusline 依赖它）？
-2. **默认权限策略**：保持现在的全自动，还是飞书来源默认 `deny-dangerous`？
-3. **远程连接方式**：开发机主动连 Hub（WebSocket，适合 Hub 在笔记本、开发机在内网），还是 Hub 通过 SSH 去开发机启动 node？两种可以都支持，先做哪个？
-4. **是否允许引入少量依赖**（如 `ws`）：目前项目零运行时依赖，远程节点用原生 WebSocket 实现成本较高。
+1. **旧 API**：`/api/*` 保留，事件名不变（meta、input、turn、text、reasoning、tool、tool_input、tool_result、permission、permission_resolved、warning、error、done、idle、stopped、end），未引入 `/api/v2`。
+2. **权限**：保持全自动。
+3. **远程连接**：两种都支持——节点主动连 Hub（WebSocket），以及 Hub 通过 SSH 启动 `my-agents node --stdio`。
+4. **依赖**：引入 `ws`（此前已作为飞书 SDK 的传递依赖安装）。
+
+## 6. 实现状态与设计差异
+
+### 6.1 模块
+
+| 模块 | 职责 |
+|---|---|
+| `core/registry.js` | 节点 → 引擎；`adapter(engine, node)`、`describe`、`find`（id / 名称 / 别名） |
+| `core/session-manager.js` | 运行中会话、ID 别名（Codex 由 CLI 生成 ID）、空闲与保留计时、就绪前事件缓冲 |
+| `core/turn-queue.js` | 所有引擎共用的输入队列（排队 / 插话 / 打断） |
+| `core/upstreams.js` | 抓包代理按路径分发；各上游自带抓包解析 |
+| `core/data-dir.js` | 面板数据目录解析与迁移 |
+| `engines/claude`、`engines/codex` | 适配器：`{ id, meta, capabilities, detect, validModel, owns, open }` |
+| `hosts/local.js` | 本机 Host：spawn、resolveDir、只读文件访问 |
+| `channels/engine-catalog.js` | 渠道侧的引擎名称、别名、能力查询；飞书不再判断具体引擎 id |
+| `http/auth.js` | Host 白名单、Origin 校验、非 loopback 强制 token |
+| `node/` | 远程节点：`rpc` `transports` `agent`（节点侧） `remote`（Hub 侧代理适配器） `hub`（接入与 SSH 管理） `daemon`（CLI） |
+
+### 6.2 与设计稿的差异
+
+- **远程化在适配器层，而不是 Host 层。** 设计稿里 RemoteHost 把 spawn 和 fs 通过 RPC 转发；实际上 Hub 与节点之间传的是"会话"级 RPC（`session.open/submit/stop`，事件以通知回传）。CLI 进程、stdio 解析、引擎特有逻辑全部在节点本地跑，网络上只有事件。好处：协议小、对延迟不敏感、断线语义清晰。
+- **事件协议沿用现有事件名**，没有改成 `turn.started` 之类的点号命名。前端、飞书、测试都不用迁移。
+- **数据目录不自动迁移。** 本机上旧版面板可能仍在运行并写 `~/.claude/panel-*`，自动搬迁会让两边数据分叉。规则：`MY_AGENTS_HOME` > `~/.my-agents`（存在即启用）> 旧目录。`my-agents migrate-data` 只复制、不覆盖、保留原文件。Claude 自己的 `settings.json` 和会话记录仍在 `CLAUDE_DIR`。
+- **事件日志落盘、SSE 续传、前端 ES module 拆分、权限代理（P6）尚未实现。**
+
+### 6.3 远程节点用法
+
+```bash
+# 方式一：开发机主动连 Hub（Hub 需监听非 loopback：MY_AGENTS_BIND=0.0.0.0）
+my-agents node --hub ws://<hub 地址>:4321 --token <Hub 数据目录下 panel-token 的内容> --id devbox
+
+# 方式二：Hub 通过 SSH 启动（要求免密登录，且远端 PATH 中有 my-agents）
+curl -X POST localhost:4321/api/nodes -H 'Content-Type: application/json' \
+  -d '{"id":"devbox","label":"云端开发机","ssh":"me@devbox"}'
+```
+
+- `GET /api/nodes` 列出本机、在线节点和已保存的 SSH 节点（含状态和最近错误）；`DELETE /api/nodes/:id`；`POST /api/nodes/:id/reconnect`。
+- `POST /api/chat` 带 `"node":"devbox"` 即在该节点上启动会话；之后的接续、停止、插话自动走会话所属节点（记录在会话元数据的 `node` 字段）。
+- 节点断开时，其上运行中的会话收到 `error` 并结束；SSH 节点 30 秒后自动重连，WebSocket 节点由 daemon 指数退避重连。
+
+### 6.4 已知限制
+
+- 远程会话的历史回放、会话标题来自 Hub 的会话元数据；节点上的 transcript 不回传，重开远程会话时看不到之前的消息正文。
+- 远程节点不走 Hub 的账号路由和抓包代理（`capabilities.accounts/capture` 被置为 false），使用节点本机 CLI 的登录。
+- Claude 的工具结果补齐（transcript 同步）在远程节点上关闭。
+- Codex 工具调用 ID 在实时流与历史中不同。
