@@ -1,0 +1,58 @@
+const os = require('os');
+const VERSION = require('../package.json').version;
+
+// Node side of the hub ↔ node protocol: serves this machine's engine adapters
+// over an RPC peer. The hub owns sessions, history and channels; the node only
+// runs CLIs and streams their events back.
+//
+// Calls (hub → node): hello, engine.owns, host.resolveDir, session.open,
+// session.submit, session.stop, session.close, session.permission.
+// Notifications (node → hub): session.event, session.idle, session.ready,
+// session.failed, session.accepted, session.closed. Each carries the session
+// state so the hub can answer currentId / busy synchronously.
+function serveNode({ peer, host, engines, id = os.hostname(), label = id }) {
+  const byId = new Map(engines.map(engine => [engine.id, engine]));
+  const sessions = new Map();
+  const engineOf = name => { const engine = byId.get(name); if (!engine) throw Object.assign(new Error(`节点上没有引擎：${name}`), { status: 400 }); return engine; };
+  const sessionOf = sid => { const session = sessions.get(sid); if (!session) throw Object.assign(new Error('节点上的会话已结束'), { status: 409 }); return session; };
+  const state = session => ({ currentId: session?.currentId || '', pendingCount: session?.pendingCount || 0, busy: !!session?.busy });
+
+  peer.handle('hello', () => ({
+    id, label, platform: host.platform, version: VERSION, home: host.homeDir(),
+    engines: engines.map(engine => {
+      let cli = null;
+      try { const info = engine.detect?.(); if (info) cli = { path: info.path, version: info.version }; } catch {}
+      return { id: engine.id, meta: engine.meta, capabilities: engine.capabilities, cli };
+    }),
+  }));
+  peer.handle('engine.owns', async ({ engine, id: sessionId }) => !!await engineOf(engine).owns(sessionId));
+  peer.handle('host.resolveDir', ({ dir }) => host.resolveDir(dir));
+
+  peer.handle('session.open', async ({ sid, engine: name, sessionId, resume, cwd, model }) => {
+    const engine = engineOf(name);
+    let session = null;
+    const notify = (method, extra = {}) => peer.notify(method, { sid, ...extra, state: state(session) });
+    session = await engine.open({
+      host, sessionId, resume, cwd: host.resolveDir(cwd), model: model && engine.validModel(model) ? model : '',
+      emit: (event, data) => notify('session.event', { event, data }),
+      onIdle: () => notify('session.idle'),
+      onClosed: () => { sessions.delete(sid); notify('session.closed'); },
+    });
+    sessions.set(sid, session);
+    Promise.resolve(session.ready).then(realId => notify('session.ready', { id: realId }), e => notify('session.failed', { error: e?.message || String(e) }));
+    return { routed: !!session.routed };
+  });
+  peer.handle('session.submit', ({ sid, turnId, input, steer, accept }) => {
+    const session = sessionOf(sid);
+    session.submit(turnId, input, !!steer, accept ? () => peer.notify('session.accepted', { sid, turnId, state: state(session) }) : undefined);
+    return state(session);
+  });
+  peer.handle('session.stop', ({ sid }) => { sessions.get(sid)?.stop(); return true; });
+  peer.handle('session.close', ({ sid }) => { sessions.get(sid)?.close(); return true; });
+  peer.handle('session.permission', ({ sid, requestId, behavior }) => { sessionOf(sid).respondPermission(requestId, behavior); return true; });
+
+  // A lost hub cannot receive events any more: stop everything this node started.
+  peer.onClose(() => { for (const session of sessions.values()) { try { session.stop(); } catch {} } sessions.clear(); });
+  return { sessions };
+}
+module.exports = { serveNode };

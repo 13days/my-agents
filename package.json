@@ -62,9 +62,13 @@
     "engines/",
     "hosts/",
     "channels/",
+    "node/",
     "http/",
     "docs/architecture-v2.md"
   ],
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
   "optionalDependencies": {
     "@larksuiteoapi/node-sdk": "1.76.0"
   },

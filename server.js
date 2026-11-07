@@ -192,6 +192,8 @@ function ensureProxyInstalled() {
 }
 
 const CLI_CMD = process.argv[2];
+// `my-agents node …` runs only the remote node daemon, never the panel.
+if (CLI_CMD === 'node') { require('./node/daemon').run(process.argv.slice(3)); return; }
 if (CLI_CMD === 'install-proxy') { installProxy(); process.exit(0); }
 if (CLI_CMD === 'uninstall-proxy') { uninstallProxy(); process.exit(0); }
 if (CLI_CMD === 'migrate-data') {
@@ -206,6 +208,8 @@ if (CLI_CMD === 'migrate-data') {
 if (CLI_CMD === '--help' || CLI_CMD === '-h') {
   console.log('my-agents            start the panel + inspector proxy');
   console.log('my-agents migrate-data     copy panel data from ~/.claude to ~/.my-agents (originals kept)');
+  console.log('my-agents node --hub ws://<hub>:4321 --token <token>   serve this machine\'s engines to a hub');
+  console.log('my-agents node --stdio     same, over stdio (the hub launches it via SSH)');
   console.log('my-agents install-proxy    add a smart `claude` wrapper to your shell rc');
   console.log('my-agents uninstall-proxy  remove it');
   process.exit(0);
@@ -1759,10 +1763,12 @@ registry.register(createCodexEngine({
 const manager = createSessionManager({
   registry,
   history: {
-    ownerOf(id) {
+    async ownerOf(id) {
       const meta = sessionStore.read()[id] || {};
-      const engine = meta.engine && registry.has(meta.engine) ? meta.engine : registry.list().find(item => item.owns(id))?.id;
-      return engine ? { engine, node: meta.node || 'local' } : null;
+      if (meta.engine && registry.has(meta.engine)) return { engine: meta.engine, node: meta.node || 'local' };
+      // Unrecorded sessions (started in a terminal) can only be found on this machine.
+      for (const engine of registry.node('local').engines.values()) if (await engine.owns(id)) return { engine: engine.id, node: 'local' };
+      return null;
     },
     messages: id => sessionMessages(id),
     touch(id, { engine, node, cwd, prompt }) {
@@ -1917,6 +1923,16 @@ const server = http.createServer(async (req, res) => {
       } finally { folderPickerBusy = false; }
     }
 
+    if (type === 'nodes') {
+      if (req.method === 'GET' && parts.length === 2) return sendJSON(res, 200, { nodes: nodeHub.list(), hint: `my-agents node --hub ws://<本机地址>:${PORT} --token <panel-token>` });
+      try {
+        if (req.method === 'POST' && parts.length === 2) return sendJSON(res, 201, { node: nodeHub.add(JSON.parse(await readBody(req, 64 * 1024) || '{}')) });
+        const id = decodeURIComponent(parts[2] || '');
+        if (req.method === 'DELETE' && parts.length === 3) { req.resume(); return sendJSON(res, nodeHub.remove(id) ? 200 : 404, { ok: true }); }
+        if (req.method === 'POST' && parts.length === 4 && parts[3] === 'reconnect') { req.resume(); nodeHub.reconnect(id); return sendJSON(res, 202, { ok: true }); }
+      } catch (e) { return sendJSON(res, e.status || 400, { error: e instanceof SyntaxError ? 'JSON 格式无效' : e.message }); }
+      return sendJSON(res, 404, { error: '接口不存在' });
+    }
     if (type === 'engines' && req.method === 'GET') {
       return sendJSON(res, 200, { default: registry.defaultId(), engines: registry.list().map(registry.describe), nodes: registry.nodes().map(node => ({ id: node.id, label: node.label, remote: node.remote })) });
     }
@@ -2348,6 +2364,9 @@ server.on('error', e => {
   }
   process.exit(1); // 干净退出，不抛未捕获堆栈
 });
+// Remote nodes dial in over WebSocket on the panel port, or are launched over SSH.
+const nodeHub = require('./node/hub').createNodeHub({ registry, token: auth?.token, dir: DATA_DIR });
+server.on('upgrade', (req, socket, head) => { if (!nodeHub.upgrade(req, socket, head)) socket.destroy(); });
 if (!HISTORY_WORKER) server.listen(PORT, BIND_HOST, () => {
   console.log(`my-agents 已启动: http://localhost:${PORT}`);
   if (auth.requireToken) console.log(`远程访问链接（含令牌，勿外传）: http://<host>:${PORT}/?token=${auth.token}`);
@@ -2356,6 +2375,7 @@ if (!HISTORY_WORKER) server.listen(PORT, BIND_HOST, () => {
   console.log(`Inspector 代理: http://localhost:${PROXY_PORT}`);
   ensureProxyInstalled();
   feishuGateway.bootstrap().catch(e => console.warn('飞书网关：' + e.message));
+  nodeHub.start();
 });
 const stopPanel = async () => {
   const forceExit = setTimeout(() => process.exit(0), 8000); forceExit.unref();
@@ -2365,6 +2385,7 @@ const stopPanel = async () => {
   historyWorker?.close();
   await feishuGateway.stop().catch(() => {});
   manager.shutdown();
+  nodeHub.stop();
   process.exit(0);
 };
 process.once('SIGTERM', stopPanel);
