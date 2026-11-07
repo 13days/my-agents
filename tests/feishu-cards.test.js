@@ -48,3 +48,36 @@ test('simple group cards show tool status while withholding intermediate text, t
   view.done = true; view.text = '最终模型输出'; view.phase = '已完成';
   rendered = JSON.stringify(cards.task(options)); assert.match(rendered, /最终模型输出/);
 });
+
+test('engine choices and conversation cards expose both engines with topic-scoped callbacks', () => {
+  const picker = cards.enginePicker({ ...context, location: '当前话题', engine: 'codex', defaultEngine: 'claude', cwd: '/project' });
+  const choices = actions(picker).filter(value => value.action === 'use_engine');
+  assert.deepEqual(choices.map(value => value.engine), ['claude', 'codex']);
+  assert.ok(choices.every(value => value.key === context.key));
+  assert.match(JSON.stringify(picker), /分别保留上下文/);
+  const current = cards.currentSession({ ...context, binding: { id: 'codex-session', cwd: '/project', engine: 'codex' }, running: false });
+  assert.match(JSON.stringify(current), /Codex/);
+  assert.ok(actions(current).some(value => value.action === 'engine'));
+  const task = cards.task({ ...context, binding: { id: 'codex-session', cwd: '/project', engine: 'codex' }, title: 'Task', view: { text: 'Done', phase: '已完成', done: true, tools: new Map(), permissions: new Map() }, elapsed: 1000 });
+  assert.match(JSON.stringify(task), /Codex/);
+  assert.ok(actions(task).some(value => value.action === 'engine'));
+  const claudeProject = cards.projectList({ ...context, rows: ['/project'], total: 1, page: 0, engine: 'claude' });
+  assert.equal(actions(claudeProject).find(value => value.action === 'new').engine, 'claude');
+});
+
+test('new session cards confirm project and engine without offering nonexistent history', () => {
+  const binding = { id: 'not-started-id', cwd: '/workspace/project', engine: 'codex' };
+  const pending = cards.currentSession({ ...context, binding, running: false });
+  assert.ok(actions(pending).some(value => value.action === 'projects' && value.engine === 'codex'));
+  assert.equal(actions(pending).some(value => ['history', 'switch', 'sessions'].includes(value.action)), false);
+  assert.doesNotMatch(JSON.stringify(pending), /最近对话|not-started-id/);
+  const existing = cards.currentSession({ ...context, binding, item: { id: binding.id, title: 'Existing', engine: 'codex' }, running: false });
+  assert.ok(actions(existing).some(value => value.action === 'history'));
+  const legacy = cards.currentSession({ ...context, binding: { id: binding.id, cwd: binding.cwd }, item: { id: binding.id, engine: 'codex' }, running: false });
+  assert.equal(actions(legacy).find(value => value.action === 'projects').engine, 'codex');
+});
+
+test('detailed task cards show available Codex reasoning summaries and real tool results', () => {
+  const task = cards.task({ ...context, binding: { id: 'codex-session', cwd: '/project', engine: 'codex' }, title: 'Check file', view: { text: 'Done', phase: '已完成', done: true, reasoning: new Map([['r', 'Public summary']]), tools: new Map([['t', { name: 'shell', state: '已完成', input: 'pwd', output: '/project' }]]), permissions: new Map() }, elapsed: 1000 });
+  const text = JSON.stringify(task); assert.match(text, /思考摘要/); assert.match(text, /Public summary/); assert.match(text, /pwd/); assert.match(text, /shell/);
+});

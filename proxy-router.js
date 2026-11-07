@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const https = require('https');
+const { upstreamNetwork } = require('./upstream-network');
 const crypto = require('crypto');
 const { modelDefaults } = require('./model-defaults');
 const HOP = new Set(['host', 'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade', 'content-length']);
@@ -280,7 +281,7 @@ function createRouter({ dir, port, record = () => {}, reserveCapture = () => ({}
           const seconds = status === 429 || status === 402 ? 60 : status === 401 || status === 403 ? 300 : 15;
           health.set(account.id, { ...health.get(account.id), lastStatus: status, cooldownUntil: Date.now() + seconds * 1000 });
         };
-        const upstream = (target.protocol === 'https:' ? https : http).request({ protocol: target.protocol, hostname: target.hostname, port: target.port || undefined, path: requestPath, method: req.method, headers }, response => {
+        const upstream = (target.protocol === 'https:' ? https : http).request({ ...upstreamNetwork, timeout: 120000, protocol: target.protocol, hostname: target.hostname, port: target.port || undefined, path: requestPath, method: req.method, headers }, response => {
           if (res.destroyed) { response.destroy(); return; }
           const code = response.statusCode;
           const retry = [401, 402, 403, 429, 500, 502, 503, 504, 529].includes(code);
@@ -377,6 +378,11 @@ function createRouter({ dir, port, record = () => {}, reserveCapture = () => ({}
     config = next;
     return sessions();
   }
-  return { status, save, importSettings, setup, handle, clientEnv, modelEnvForSession, sessions, setSessionRoute, reset: () => { health.clear(); return status(); } };
+  // Switch mode / selected account without touching stored credentials (used by Feishu /route).
+  function route({ mode = config.mode, selected = config.selected } = {}) {
+    if (!config.accounts.some(a => a.id === selected && a.enabled)) selected = '';
+    return save({ mode, selected, accounts: config.accounts.map(({ token, env, ...a }) => a) });
+  }
+  return { status, save, route, importSettings, setup, handle, clientEnv, modelEnvForSession, sessions, setSessionRoute, reset: () => { health.clear(); return status(); } };
 }
 module.exports = { createRouter, parseEnvInput };

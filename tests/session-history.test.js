@@ -13,7 +13,7 @@ test('history pages preserve all long text, cover every message, and reuse uncha
   fs.writeFileSync(file, rows.map(JSON.stringify).join('\n') + '\n');
   let reads = 0;
   const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  const context = vm.createContext({ fs: { ...fs, readFileSync(...args) { reads++; return fs.readFileSync(...args); } }, path,
+  const context = vm.createContext({ codexSessions: { list: () => [], pathFor: () => '', messages: () => null }, isCodexPath: () => false, isCodexSession: () => false, fs: { ...fs, readFileSync(...args) { reads++; return fs.readFileSync(...args); } }, path,
     readHistory: () => [], transcriptPathFor: () => file, transcriptHead: () => ({ cwd: dir }),
     transcriptUserText: text => text, CLAUDE_DIR: dir,
   });

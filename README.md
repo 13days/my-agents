@@ -1,22 +1,25 @@
-# ⌘ Claude Panel
+# ⌘ my-agents
 
-**看清 Claude Code 到底给大模型发了什么——管好 `~/.claude` 里的一切——再用飞书把它带出门。**
+**Claude Code 与 Codex 的本地工作空间：统一管理会话、抓包、引擎接入和飞书网关。**
 
-Claude Code 的本地可视化面板，核心零依赖：浏览/编辑斜杠命令、技能、智能体、插件、工作流，搜索并回放历史会话，统计 token 花费；独一份地**抓出每次对话背后真实的系统提示词、工具定义和每一轮 LLM 调用**。还能多账号路由自动切换，并通过**飞书机器人**在手机上继续本机的 Claude Code 会话。
+Claude Code 的本地可视化面板，核心零依赖：浏览/编辑斜杠命令、技能、智能体、插件、工作流，搜索并回放历史会话，统计 token 花费；独一份地**抓出每次对话背后真实的系统提示词、工具定义和每一轮 LLM 调用**。还能多账号路由自动切换，并通过**飞书机器人**在手机上继续本机的 Claude Code 会话。**OpenAI Codex CLI** 也接进来了：同一个面板里查看、回放、继续 Codex 会话，订阅账号的请求同样能抓包。
 
 ```bash
-npx claude-code-panel
+git clone https://github.com/13days/my-agents.git
+cd my-agents
+npm install
+npm start
 ```
 
-[English](README.en.md) · [快速开始](#快速开始) · [功能](#功能) · [飞书网关](#飞书网关) · [多账号路由](#多账号动态路由) · [截图](#截图) · [更新日志](#更新日志)
+[English](README.en.md) · [快速开始](#快速开始) · [功能](#功能) · [飞书网关](#飞书网关) · [Codex](#codex) · [多账号路由](#多账号动态路由) · [截图](#截图) · [更新日志](#更新日志)
 
 ![core zero dependencies](https://img.shields.io/badge/核心依赖-0-brightgreen) ![node >= 18](https://img.shields.io/badge/node-%3E%3D18-blue) ![license MIT](https://img.shields.io/badge/license-MIT-orange) ![i18n](https://img.shields.io/badge/多语言-中文%20%7C%20EN%20%7C%20日本語-purple)
 
-![demo](https://raw.githubusercontent.com/13days/claude-panel/main/docs/demo.gif?v=3)
+![demo](docs/demo.gif?v=3)
 
 ## 为什么做这个
 
-Claude Code 把东西散落在 `~/.claude` 各处——命令一处、技能一处、插件藏在 JSON 清单里、用量埋在几百 MB 的会话记录里。而最有价值的东西——**到底发给大模型了什么**——根本没存。Claude Panel 解决这些：
+Claude Code 把东西散落在 `~/.claude` 各处——命令一处、技能一处、插件藏在 JSON 清单里、用量埋在几百 MB 的会话记录里。而最有价值的东西——**到底发给大模型了什么**——根本没存。my-agents 解决这些：
 
 - **查得快**：命令 / 技能 / 插件 / 历史会话不用在命令行里翻，一屏可搜、可直接编辑。
 - **找得回**：电脑卡死 / 重启后丢掉的会话，全文搜索历史内容，一键 `claude --resume`。
@@ -25,11 +28,11 @@ Claude Code 把东西散落在 `~/.claude` 各处——命令一处、技能一�
 
 ## 杀手级功能：看到每一轮 LLM 调用
 
-Claude Code 的会话记录里没有系统提示词，也没有原始请求/响应。Claude Panel 起了一层**本地代理**，让 CC 的流量从这里走，记录每次 API 调用，再按轮次精确折叠回会话回放里。
+Claude Code 的会话记录里没有系统提示词，也没有原始请求/响应。my-agents 起了一层**本地代理**，让 CC 的流量从这里走，记录每次 API 调用，再按轮次精确折叠回会话回放里。
 
 打开一个会话、展开某条提问，就会出现 **「🔁 这条提问触发了 N 轮 LLM 调用」**。展开任意一轮，能看到这一轮**发给大模型的完整上下文**（每条消息、工具调用、工具返回）、**系统提示词**、**工具定义（含完整描述）**、**思考过程**、**响应**，以及 token 用量。
 
-![llm trace](https://raw.githubusercontent.com/13days/claude-panel/main/docs/05-replay-trace.png)
+![llm trace](docs/05-replay-trace.png)
 
 一次配置即可：面板首次启动会把一个 `claude` 包装函数写进你的 shell（面板开着就走代理、关了自动直连，不影响正常使用）。凭证不会写入抓包记录，数据只保存在本机。
 
@@ -37,7 +40,7 @@ Claude Code 的会话记录里没有系统提示词，也没有原始请求/响�
 
 几百个会话不是乱账，而是你工作的航海日志。**航程**专区把它们渲染成一条连续的时间线：按项目着色的时间之河（色块 = 会话，高度 = 对话轮数），以及一段段「航段」——每段连续作业都以你出发时的那句意图命名。全部本地计算，来自 `history.jsonl`。
 
-![voyage](https://raw.githubusercontent.com/13days/claude-panel/main/docs/11-voyage.png)
+![voyage](docs/11-voyage.png)
 
 ## 功能
 
@@ -52,6 +55,7 @@ Claude Code 的会话记录里没有系统提示词，也没有原始请求/响�
 | **统计** | 与 `ccusage` 对齐的用量：每日消息、模型 token、24h 热区、`ccusage daily` 同款费用表，以及实时条（今日花费 / 燃速 / 预算告警） |
 | **多账号路由** | 一键接入当前 Claude 配置；粘贴 env 自动识别；手动切换、自动故障转移、轮询、模型映射和额外环境变量 |
 | **💬 飞书网关** | 飞书机器人长连接到本机：查看 / 切换 / 新建 / 接续会话，图片消息，排队与中途引导，私聊、群、话题各自绑定；访问控制与消息留档；Mac 保活和登录自启 |
+| **⌁ Codex** | Codex 会话与 Claude 会话同列（带 Codex 标记）；网页 / 飞书新建或接续 Codex 会话；订阅与 API Key 请求透传抓包；自动发现本机 `codex` |
 | **🚢 航程 Voyage** | 把散乱的会话重织成一条时间线，按项目着色，切分成以意图命名的「航段」 |
 | **🎁 Wrapped** | 一键生成可分享 PNG 成绩单：花费、token、最爱命令、本命模型、专属称号 |
 
@@ -61,24 +65,24 @@ Claude Code 的会话记录里没有系统提示词，也没有原始请求/响�
 - 📁 **项目作用域**：下拉框把命令 / 技能 / 智能体 / 工作流 / 配置切到任意项目的 `.claude/`
 - 🎯 **统计准确**：递归扫描、`message.id + requestId` 去重、流式取终值、区分 5m/1h 缓存价，与 ccusage 逐日校验一致
 - 🔒 **只在本机**：仅监听 `127.0.0.1`，防目录穿越，凭证不写入抓包，敏感配置文件权限 `0600`
-- ⚡ **核心零依赖**：无构建步骤，300MB 会话记录冷扫约 0.8s（热约 13ms）；只有飞书网关需要一个可选 SDK
+- ⚡ **核心零依赖**：无构建步骤；历史统计在后台处理，长列表分页显示；只有飞书网关需要一个可选 SDK
 
 ## 快速开始
 
-需要 Node.js ≥ 18。
+需要 Node.js ≥ 18。npm 包尚未发布，当前请按下方步骤从源码运行。
 
 ```bash
-npx claude-code-panel
+npm start
 # 打开 http://localhost:4321
 ```
 
-首次运行会把 `claude` 包装函数写进你的 shell，之后的会话自动被抓取。**开一个新终端**（或 `source ~/.zshrc`），照常用 `claude`；面板开着时，那次会话的完整 trace 就会出现在「会话」里。不想自动接入设 `CCP_NO_PROXY_SETUP=1`；移除用 `npx claude-code-panel uninstall-proxy`。
+首次运行会把 `claude` 包装函数写进你的 shell，之后的会话自动被抓取。**开一个新终端**（或 `source ~/.zshrc`），照常用 `claude`；面板开着时，那次会话的完整 trace 就会出现在「会话」里。不想自动接入设 `MY_AGENTS_NO_PROXY_SETUP=1`；移除用 `npx my-agents uninstall-proxy`。
 
 从源码运行：
 
 ```bash
-git clone https://github.com/13days/claude-panel.git
-cd claude-panel
+git clone https://github.com/13days/my-agents.git
+cd my-agents
 npm install        # 只有飞书网关需要；不用飞书可跳过，或 npm install --omit=optional
 node server.js
 ```
@@ -88,7 +92,7 @@ node server.js
 | `PORT` | `4321` | 面板端口 |
 | `PROXY_PORT` | `PORT+1` | 抓包 / 账号路由代理端口 |
 | `CLAUDE_DIR` | `~/.claude` | Claude 配置目录，面板自己的数据也存这里 |
-| `CCP_NO_PROXY_SETUP` | — | 设为 `1` 跳过 shell 接入 |
+| `MY_AGENTS_NO_PROXY_SETUP` | — | 设为 `1` 跳过 shell 接入 |
 
 ### 终端状态栏
 
@@ -112,7 +116,7 @@ CLAUDE_DIR="$PWD/demo-data/claude" PORT=4999 node server.js
 在飞书里私聊机器人，就能操作 Mac 上的 Claude Code。
 
 ```
-飞书 App ──官方长连接──▶ Mac 上的 Claude Panel ──▶ 本机 Claude Code CLI
+飞书 App ──官方长连接──▶ Mac 上的 my-agents ──▶ 本机 Claude Code CLI
                           （同一套进程、账号路由、会话记录）
 ```
 
@@ -120,7 +124,7 @@ CLAUDE_DIR="$PWD/demo-data/claude" PORT=4999 node server.js
 - **和网页是同一个会话**：飞书发起的任务与网页共用 Claude Code 进程、账号路由和本地会话记录，两边随时切换着用。
 - **任务卡片实时刷新**：文字、工具输入和结果约每 1.2 秒更新一次，完成后补齐最终内容，长回复分段发送。
 
-![飞书网关](https://raw.githubusercontent.com/13days/claude-panel/main/docs/15-feishu-gateway.png)
+![飞书网关](docs/15-feishu-gateway.png)
 
 ### 配置步骤
 
@@ -150,12 +154,19 @@ CLAUDE_DIR="$PWD/demo-data/claude" PORT=4999 node server.js
 |---|---|
 | `/sessions [关键词]` | 分页列出会话（每页 5 个），标出当前会话和运行状态，点卡片切换 |
 | `/switch 2` | 按上一次列表的序号切换；也可以用唯一 ID 前缀或完整名称 |
-| `/new`、`/new 1`、`/projects` | 在默认项目新建会话；`/projects` 列出项目，`/new 序号` 或已知路径指定项目 |
+| `/new`、`/new 1`、`/projects` | 在默认项目新建会话；`/projects` 列出项目，`/new 序号` 或 `/new /绝对路径` 指定项目，支持未使用过的本机已有目录及 `~/`，选用后保留在列表中 |
+| `/new codex`、`/new codex 1` | 新建 Codex 会话；项目卡片上也可以点「改用 Codex」 |
 | `/current` | 查看当前绑定的会话 |
 | `/history` | 最近 10 条对话 |
 | `/queue 内容` | 排队，当前这轮结束后再执行 |
 | `/steer 内容` | 中断当前这轮，带着补充内容继续 |
 | `/rename 名称` | 固定会话名称，网页与飞书共用 |
+| `/route` | 账号路由卡片：每个账号的状态、冷却、Codex 抓包状态，点按钮即可切换。由网关直接处理，不经过模型，账号全挂时也能用 |
+| `/route 2`、`/route 名称` | 固定使用某个账号（序号、名称或唯一片段） |
+| `/route auto`、`/route rr` | 切回故障转移 / 轮询 |
+| `/route reset` | 清除所有账号的冷却 |
+| `/route pin 2`、`/route pin off` | 只让当前会话固定走某个账号 / 取消 |
+| `/route codex direct`、`/route codex proxy` | 面板发起的 Codex 会话改为直连 / 经代理抓包 |
 | `/stop`、`/status`、`/help` | 停止本 Panel 发起的任务、查看在线状态、查看命令 |
 | `/ask /命令` | 把 Claude 的斜杠命令当正文转发，避免和网关命令冲突 |
 
@@ -177,7 +188,7 @@ CLAUDE_DIR="$PWD/demo-data/claude" PORT=4999 node server.js
 - 勾选即自动保存，对之后的新消息立即生效，不会中断正在跑的任务；被拦下的旧消息不会补执行。
 - 所有收到的消息（包括被拦截的）都留档在本地，面板里可按用户、群筛选分页查看。只记录上线后飞书推送过来的消息，不补采历史聊天。
 
-![访问权限](https://raw.githubusercontent.com/13days/claude-panel/main/docs/16-feishu-access.png)
+![访问权限](docs/16-feishu-access.png)
 
 ### 两种显示模式
 
@@ -202,13 +213,13 @@ CLAUDE_DIR="$PWD/demo-data/claude" PORT=4999 node server.js
 
 - **长连接保活**：SDK 按服务端下发的间隔（默认约 2 分钟）发送心跳；Panel 额外开启了 20 秒的心跳响应超时检测，连接假死时会主动断开并无限次自动重连。面板上显示的是真实连接状态。
 - **保持 Mac 唤醒**：用 `caffeinate` 阻止系统空闲睡眠，只在 Panel 进程存活期间生效；屏幕仍可熄灭，不改系统设置。
-- **登录后自动启动**：写入 `~/Library/LaunchAgents/io.claude-panel.gateway.plist`，**下次登录生效**，日志在 `~/.claude/panel-service.log`。源码目录需要保留。取消勾选会删除这个文件，已加载的服务到下次登录才停止。
+- **登录后自动启动**：写入 `~/Library/LaunchAgents/io.my-agents.gateway.plist`，**下次登录生效**，日志在 `~/.claude/panel-service.log`。源码目录需要保留。取消勾选会删除这个文件，已加载的服务到下次登录才停止。
 
 想立刻改成后台运行（先停掉占用同一端口的手动实例）：
 
 ```bash
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.claude-panel.gateway.plist
-launchctl print gui/$(id -u)/io.claude-panel.gateway   # 确认状态为 running
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.my-agents.gateway.plist
+launchctl print gui/$(id -u)/io.my-agents.gateway   # 确认状态为 running
 ```
 
 **限制**：Mac 需要保持供电、联网并处于登录状态，合盖、手动睡眠、关机都会让机器人离线。Panel 重启不会恢复已中断的 CLI 进程，在同一会话重新发消息即可接续。关闭网页不影响任务；禁用飞书网关只断开飞书，不会终止已经启动的任务。
@@ -224,11 +235,48 @@ launchctl print gui/$(id -u)/io.claude-panel.gateway   # 确认状态为 running
 
 状态接口不回传 Secret。消息、回复和你要求查看的工具结果会经过飞书传输，Claude 的会话记录本身只保存在 Mac 上。
 
+## Codex
+
+面板同时支持 [OpenAI Codex CLI](https://github.com/openai/codex)。Codex 沿用你自己的登录（`codex login` 的 ChatGPT 订阅，或 API Key），面板不保存、不切换 Codex 凭证。
+
+| 能力 | 说明 |
+|---|---|
+| 会话列表与回放 | 读取 `~/.codex/sessions` 下的会话记录，和 Claude 会话混排，带 Codex 标记；可全文查看、看工具调用和结果 |
+| 网页对话 | 新对话顶部切换「Claude Code / Codex」；打开已有的 Codex 会话直接接续；支持图片、排队、中途引导和停止 |
+| 飞书 | `/new codex` 新建 Codex 会话，`/sessions` 里的 Codex 会话可以切换、接续，`/history` 正常显示 |
+| 抓包 | 面板发起的 Codex 会话默认经本地代理透传：订阅走 `chatgpt.com/backend-api/codex`，API Key 走 `api.openai.com/v1`。抓包里能看到系统提示词、工具定义、完整上下文和 token 用量；回放里「查看 Codex 提示词」会按会话关联起来 |
+| 版本选择 | 通过 `npm prefix --global` 与 `PATH` 自动发现安装，比较有效候选的版本；不绑定任何固定安装路径，可用 `CODEX_CLI` 显式覆盖 |
+| 管理卡片 | 「账号路由」页的 Codex 卡片：当前 CLI 版本和路径（有被忽略的旧版本会提示）、登录方式和套餐、累计 token、订阅额度（每周 / 每天）进度条和重置时间、抓包开关、终端抓包配置的生成 / 移除 |
+
+**终端里的 Codex**：直接运行 `codex` 照常直连，不经过面板。想让终端会话也被抓包，在 Codex 卡片的「终端抓包配置」点「生成配置」（或调用下面的接口），再用 `-p` 启动：
+
+```bash
+curl -X POST http://127.0.0.1:4321/api/codex/profile -H 'Content-Type: application/json' -d '{}'
+codex -p my-agents
+```
+
+根据 CLI 版本，配置写在 `~/.codex/my-agents.config.toml`（新版）或 `~/.codex/config.toml`（兼容版），删除用 `-d '{"remove":true}'`。
+
+**续接终端里的会话**：终端里建的 Codex 会话会自动出现在会话列表里，网页和飞书都能接着聊；续接时沿用会话创建时的通道（直连建的就直连），不受抓包开关影响。Codex 同一个会话只允许一个进程写入，终端里还开着的会话要先在终端退出（`/quit` 或 Ctrl+C）才能在面板续聊，否则会提示「正在别处打开」。
+
+**说明**：
+
+- Codex 每一轮是一次 `codex exec`（接续时 `codex exec resume`），以 `--dangerously-bypass-approvals-and-sandbox` 运行，和网页 / 飞书里的 Claude Code 一样不弹授权。
+- 订阅账号只透传，不做多账号轮询和故障转移；Claude 的多账号路由不影响 Codex。
+- Codex 自己的斜杠命令和技能不在面板里管理。
+- `GET /api/codex` 查看当前选用的 CLI、版本、登录方式和抓包状态；`GET /api/codex/stats` 返回按天 / 按模型的 token 用量和最近一次订阅额度快照。
+
+| 环境变量 | 作用 |
+|---|---|
+| `CODEX_CLI` | 指定 `codex` 路径，跳过自动选择 |
+| `CODEX_HOME` | Codex 数据目录，默认 `~/.codex` |
+| `MY_AGENTS_CODEX_CAPTURE=0` | 面板发起的 Codex 会话不经代理、直连 |
+
 ## 多账号动态路由
 
-![多账号管理](https://raw.githubusercontent.com/13days/claude-panel/main/docs/12-account-routing.png)
+![多账号管理](docs/12-account-routing.png)
 
-![粘贴 env 添加账号](https://raw.githubusercontent.com/13days/claude-panel/main/docs/13-env-import.png)
+![粘贴 env 添加账号](docs/13-env-import.png)
 
 在「账号路由」页面添加多套 env。Claude Code 固定连接本地代理，由代理为每次请求选择账号。支持手动切换、按列表顺序故障转移、轮询、冷却管理，以及每个账号独立的模型映射；抓包列表会显示实际使用的账号。
 
@@ -249,25 +297,25 @@ launchctl print gui/$(id -u)/io.claude-panel.gateway   # 确认状态为 running
 
 **用量仪表盘**：实时花费条、每日消息量、模型 token、`ccusage daily` 同款费用表
 
-![stats](https://raw.githubusercontent.com/13days/claude-panel/main/docs/01-stats-dashboard.png)
+![stats](docs/01-stats-dashboard.png)
 
 **网页里直接对话**：打开会话就能续聊，工具调用折叠展示，支持贴图
 
-![web chat](https://raw.githubusercontent.com/13days/claude-panel/main/docs/17-web-chat.png)
+![web chat](docs/17-web-chat.png)
 
 **抓包 Inspector**：CC 从不保存的真实系统提示词、工具定义与响应
 
-![inspector](https://raw.githubusercontent.com/13days/claude-panel/main/docs/06-inspector.png)
+![inspector](docs/06-inspector.png)
 
 **所有命令一屏看全**：自建的、插件带的、CC 内置的，带使用次数
 
-![commands](https://raw.githubusercontent.com/13days/claude-panel/main/docs/03-commands.png)
+![commands](docs/03-commands.png)
 
 **技能认真渲染** · **🎁 Wrapped 卡片** · **说你的语言**
 
-<img src="https://raw.githubusercontent.com/13days/claude-panel/main/docs/04-skill-detail.png" width="49%" alt="skill"> <img src="https://raw.githubusercontent.com/13days/claude-panel/main/docs/10-wrapped-card.png" width="30%" alt="wrapped">
+<img src="docs/04-skill-detail.png" width="49%" alt="skill"> <img src="docs/10-wrapped-card.png" width="30%" alt="wrapped">
 
-![english](https://raw.githubusercontent.com/13days/claude-panel/main/docs/09-english-ui.png)
+![english](docs/09-english-ui.png)
 
 ## 实现
 
@@ -284,6 +332,7 @@ launchctl print gui/$(id -u)/io.claude-panel.gateway   # 确认状态为 running
 | `feishu-cards.js`、`feishu-markdown.js`、`feishu-simple-reply.js` | JSON 2.0 卡片、Markdown 富文本分段、简洁模式回复 |
 | `feishu-inbox.js`、`feishu-ui.js`、`lark-setup.js` | 消息留档、网关设置页、扫码创建机器人 |
 | `mac-runtime.js`、`folder-picker.js` | Mac 保活 / 登录自启、项目目录选择 |
+| `codex-cli.js`、`codex-sessions.js`、`codex-engine.js`、`codex-proxy.js` | Codex CLI 版本选择、会话记录解析、`codex exec` 轮次执行、透传抓包代理 |
 | `index.html`、`panel.css` | 单页应用（自带迷你 Markdown 渲染器）与全站视觉规范、响应式布局 |
 
 ### 新增语言
@@ -307,8 +356,20 @@ npm test
 - CC 会话记录约保留 30 天；系统提示词 / LLM trace 只对**走过代理被抓取的会话**存在，历史会话补不回
 - 内置命令清单是静态快照（欢迎 PR）
 - 飞书网关依赖 Mac 在线，详见[连接与常驻](#连接与常驻)
+- Codex 抓包只覆盖面板发起的会话和 `codex -p my-agents`；直接运行的 `codex` 不经过代理
 
 ## 更新日志
+
+### 0.17.0 Codex
+
+- 新增 Codex 引擎：会话列表混排、聊天式回放、`codex resume` 接续命令；网页和飞书都能新建、接续 Codex 会话，支持图片、排队、中途引导和停止。
+- Codex 请求透传抓包，支持 ChatGPT 订阅和 API Key：系统提示词、工具定义、上下文、token 用量都能看到，凭证不写入抓包。
+- 通过 npm 全局目录和 PATH 自动发现 `codex`；提供 `codex -p my-agents` 配置，让终端会话也能抓包。
+- 新增 `/api/codex`、`/api/codex/stats` 接口。
+- 「账号路由」页新增 Codex 管理卡片：版本、登录方式、订阅额度、抓包开关、终端配置。
+- 飞书新增 `/route` 命令和路由卡片：切换账号、切换故障转移 / 轮询、清除冷却、按会话固定账号、Codex 直连 / 抓包，由网关直接处理，不经过模型。
+- 修复：订阅版 Codex 抓包的 SSE 没有 `text/event-stream` 头时，用量为空且被标成未完成；账号用量不再出现 Codex 空行。
+- 修复：网页 / 飞书续接终端直连建的 Codex 会话时报 provider 不匹配；常见 Codex 报错补上中文处理提示；Codex 回复标签显示为 Codex。
 
 ### 0.16.0 飞书网关
 
@@ -341,3 +402,7 @@ npm test
 ---
 
 *用 [Claude Code](https://claude.com/claude-code) 构建，为 Claude Code 服务。*
+
+## my-agents 改名与迁移
+
+项目、npm 包和启动命令统一为 `my-agents`。新仓库为 [13days/my-agents](https://github.com/13days/my-agents)，保留原 Git 历史；npm 包尚未发布，发布后可使用 `npx my-agents`。源码目录可以改名，会话、抓包、代理账号和飞书配置仍读取原用户数据目录，不需要重置。旧环境变量、配置包和历史会话保持兼容。具体数据位置、备份、目录迁移、自启切换和发布步骤见 [迁移说明](docs/migration.md)。

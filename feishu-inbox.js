@@ -3,10 +3,13 @@ const path = require('path');
 const readline = require('readline');
 
 function createFeishuInbox(dir) {
-  const file = path.join(dir, 'panel-feishu-inbox.jsonl'), namesFile = path.join(dir, 'panel-feishu-contacts.json');
+  const file = path.join(dir, 'panel-feishu-inbox.jsonl'), namesFile = path.join(dir, 'panel-feishu-contacts.json'), labelsFile = path.join(dir, 'panel-feishu-contact-labels.json');
   const rows = [], seen = new Set(), users = new Map(), chats = new Map(), counts = new Map();
   let names = {};
   try { names = JSON.parse(fs.readFileSync(namesFile, 'utf8')); } catch (e) { if (e.code !== 'ENOENT') console.warn('飞书联系人名称索引无法读取，将从消息记录恢复'); }
+  let labels = {};
+  try { labels = JSON.parse(fs.readFileSync(labelsFile, 'utf8')); } catch (e) { if (e.code !== 'ENOENT') console.warn('飞书联系人备注无法读取'); }
+  const display = item => ({ ...item, alias: labels[key(item.appId, item.id)] || '', displayName: labels[key(item.appId, item.id)] || item.name || '' });
   const key = (appId, id) => `${appId}:${id}`;
   function index(record, offset, length) {
     const id = key(record.appId, record.messageId);
@@ -16,7 +19,7 @@ function createFeishuInbox(dir) {
     for (const [map, entityId, name, type] of [[users, record.senderId, record.senderName, 'user'], [chats, record.chatId, record.chatName, record.chatType]]) {
       const entityKey = key(record.appId, entityId);
       const item = map.get(entityKey) || { id: entityId, type, appId: record.appId, firstAt: record.receivedAt, count: 0 };
-      item.name = name || names[entityKey] || item.name || '';
+      item.name = names[entityKey] || name || item.name || '';
       if (type === 'user' && record.chatType === 'group' && record.mentionedBot) { item.mentionCount = (item.mentionCount || 0) + 1; item.lastMentionAt = record.receivedAt; }
       item.lastAt = record.receivedAt; item.count++; map.set(entityKey, item);
     }
@@ -44,7 +47,7 @@ function createFeishuInbox(dir) {
     return true;
   }
   function contacts(appId) {
-    const recent = map => [...map.values()].filter(item => item.appId === appId).sort((a, b) => b.lastAt.localeCompare(a.lastAt));
+    const recent = map => [...map.values()].filter(item => item.appId === appId).sort((a, b) => b.lastAt.localeCompare(a.lastAt)).map(display);
     return { users: recent(users), groups: recent(chats).filter(item => item.type === 'group'), messageCount: counts.get(appId) || 0 };
   }
   async function messages(appId, { before, userId, chatId, limit = 30 } = {}) {
@@ -59,8 +62,8 @@ function createFeishuInbox(dir) {
         const bytes = Buffer.alloc(entry.length); let read = 0;
         while (read < bytes.length) { const n = fs.readSync(fd, bytes, read, bytes.length - read, entry.offset + read); if (!n) break; read += n; }
         const item = JSON.parse(bytes.toString('utf8'));
-        item.senderName = users.get(key(appId, item.senderId))?.name || item.senderName;
-        item.chatName = chats.get(key(appId, item.chatId))?.name || item.chatName;
+        item.senderName = labels[key(appId, item.senderId)] || users.get(key(appId, item.senderId))?.name || item.senderName;
+        item.chatName = labels[key(appId, item.chatId)] || chats.get(key(appId, item.chatId))?.name || item.chatName;
         items.push(item);
       }
     } finally { if (fd !== null) fs.closeSync(fd); }
@@ -72,6 +75,13 @@ function createFeishuInbox(dir) {
     for (const map of [users, chats]) if (map.has(entityKey)) map.get(entityKey).name = String(name);
     const temp = namesFile + '.tmp'; fs.writeFileSync(temp, JSON.stringify(names), { mode: 0o600 }); fs.renameSync(temp, namesFile);
   }
-  return { ready, record, contacts, messages, setName, chatType: (appId, id) => chats.get(key(appId, id))?.type };
+  function setAlias(appId, id, label) {
+    if (typeof label !== 'string' || label.trim().length > 80) throw new Error('备注名称不能超过 80 个字符');
+    const entityKey = key(appId, id), value = label.trim();
+    if (value) labels[entityKey] = value; else delete labels[entityKey];
+    fs.mkdirSync(dir, { recursive: true });
+    const temp = labelsFile + '.tmp'; fs.writeFileSync(temp, JSON.stringify(labels), { mode: 0o600 }); fs.renameSync(temp, labelsFile);
+  }
+  return { ready, record, contacts, messages, setName, setAlias, groupsForUser: (appId, id) => [...new Set(rows.filter(row => row.appId === appId && row.senderId === id && chats.get(key(appId, row.chatId))?.type === 'group').map(row => row.chatId))], chatType: (appId, id) => chats.get(key(appId, id))?.type };
 }
 module.exports = { createFeishuInbox };

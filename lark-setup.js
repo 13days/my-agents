@@ -28,7 +28,7 @@ function findLarkCLI(env = process.env) {
 // Format: github.com/larksuite/cli/internal/{core/secret_resolve,keychain/keychain_darwin}.go
 async function readCreatedApp(configDir, { home = os.homedir(), platform = process.platform, env = process.env, execute = run } = {}) {
   const config = JSON.parse(fs.readFileSync(path.join(configDir, 'config.json'), 'utf8'));
-  const app = config.apps?.find(item => item.name === 'claude-panel') || config.apps?.find(item => item.appId === config.currentApp) || config.apps?.[0] || config;
+  const app = config.apps?.find(item => item.name === 'my-agents') || config.apps?.find(item => item.name === 'claude-panel') || config.apps?.find(item => item.appId === config.currentApp) || config.apps?.[0] || config;
   if (!/^[\w-]{8,100}$/.test(app.appId || '')) throw new Error('未能读取新建应用的信息');
   let secret = app.appSecret;
   if (secret?.source === 'file') secret = fs.readFileSync(path.resolve(configDir, secret.id), 'utf8').trim();
@@ -115,7 +115,7 @@ function createLarkSetup({ dir, configure, findCLI = findLarkCLI, spawnCLI = spa
       }
     };
     try {
-      const child = current.child = spawnCLI(cli, ['config', 'init', '--new', '--brand', domain, '--name', 'claude-panel'], { cwd: configDir, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' });
+      const child = current.child = spawnCLI(cli, ['config', 'init', '--new', '--brand', domain, '--name', 'my-agents'], { cwd: configDir, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' });
       child.stdout.on('data', output); child.stderr.on('data', output);
       child.on('error', () => fail('无法启动 lark-cli，请检查安装后重试'));
       child.on('close', async code => {

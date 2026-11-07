@@ -7,3 +7,13 @@ panel-config.json
 
 panel-proxy.json
 *.proxy-backup-*
+panel-*.json
+panel-*.jsonl
+*.tgz
+.env
+.env.*
+!.env.example
+backups/
+my-agents-backups/
+*.sqlite*
+auth.json

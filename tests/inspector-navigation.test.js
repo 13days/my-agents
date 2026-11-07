@@ -13,7 +13,7 @@ test('Inspector API links legacy responses to their exact transcript and navigat
   fs.writeFileSync(path.join(dir, 'panel-captures.jsonl'), [
     { id: 4, requestOrder: 4, ts: '2026-11-06T00:00:05Z', sessionId: sid, path: '/v1/messages/count_tokens', status: 200 },
     { id: 2, requestOrder: 2, ts: '2026-11-06T00:00:03Z', requestBody, path: '/v1/messages', status: 200 },
-    { id: 3, requestOrder: 3, ts: '2026-11-06T00:00:04Z', sessionId: other, path: '/v1/models', status: 200 },
+    { id: 3, engine: 'codex', requestOrder: 3, ts: '2026-11-06T00:00:04Z', sessionId: other, path: '/v1/models', status: 200 },
     { id: 1, ts: '2026-11-06T00:00:02Z', durationMs: 1000, respMsgId: 'legacy-response', path: '/v1/messages', status: 200 },
   ].map(rec => JSON.stringify(rec)).join('\n') + '\n');
   const projectDir = path.join(dir, 'projects', 'fixture'); fs.mkdirSync(projectDir, { recursive: true });
@@ -30,8 +30,16 @@ test('Inspector API links legacy responses to their exact transcript and navigat
     child.stderr.on('data', chunk => { output += chunk; }); child.once('error', reject);
   });
   const base = `http://127.0.0.1:${panelPort}/api/inspector`;
-  const list = await (await fetch(base)).json();
+  let list = await (await fetch(base)).json();
+  assert.equal(list.items.length, 4); // The list is usable before legacy linking finishes.
+  for (let attempt = 0; list.linking && attempt < 100; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 20));
+    list = await (await fetch(base)).json();
+  }
+  assert.equal(list.linking, false);
   assert.deepEqual(list.items.map(item => item.key), ['4', '3', '2', '1']);
+  assert.equal(list.items.find(item => item.key === '3').engine, 'codex');
+  assert.equal(list.items.find(item => item.key === '1').engine, 'claude');
   assert.equal(list.items.find(item => item.key === '2').purpose, 'compaction');
   assert.equal(list.items.find(item => item.key === '1').sessionId, sid);
   const detail = await (await fetch(base + '/2')).json();

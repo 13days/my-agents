@@ -27,7 +27,7 @@ test('latest transcript prompt scans backwards past large replies, tools and int
     fs.writeFileSync(file, lines.map(JSON.stringify).join('\n') + '\n');
     const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
     const start = source.indexOf('function transcriptUserText('), end = source.indexOf('function sessionMessages(', start);
-    const context = vm.createContext({ fs, Buffer, normalizeTitle });
+    const context = vm.createContext({ codexSessions: { list: () => [], pathFor: () => '', messages: () => null }, isCodexPath: () => false, isCodexSession: () => false, fs, Buffer, normalizeTitle });
     vm.runInContext(source.slice(start, end), context);
     context.file = file;
     assert.equal(vm.runInContext('latestTranscriptPrompt(file).title', context), '最新的问题');

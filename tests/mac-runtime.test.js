@@ -9,8 +9,8 @@ test('keep-awake is tied to the panel PID; login agent is scoped to this user an
     runtime.keepAwake(true); assert.equal(runtime.status().keepAwake, true); assert.deepEqual(calls[0].args, ['-i', '-s', '-w', String(process.pid)]);
     runtime.keepAwake(false); assert.equal(runtime.status().keepAwake, false); assert.equal(calls[1].signal, 'SIGTERM');
     runtime.setAutoStart(true); assert.equal(runtime.status().autoStart, true);
-    const plist = fs.readFileSync(path.join(dir, 'Library/LaunchAgents/io.claude-panel.gateway.plist'), 'utf8');
-    assert.match(plist, /A&amp;B/); assert.match(plist, /CCP_BACKGROUND_SERVICE<\/key><string>1/); assert.match(plist, /<key>KeepAlive<\/key><true\/>/); assert.equal(plist.includes('App Secret'), false);
+    const plist = fs.readFileSync(path.join(dir, 'Library/LaunchAgents/io.my-agents.gateway.plist'), 'utf8');
+    assert.match(plist, /A&amp;B/); assert.match(plist, /MY_AGENTS_BACKGROUND_SERVICE<\/key><string>1/); assert.match(plist, /<key>KeepAlive<\/key><true\/>/); assert.equal(plist.includes('App Secret'), false);
     runtime.setAutoStart(false); assert.equal(runtime.status().autoStart, false);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

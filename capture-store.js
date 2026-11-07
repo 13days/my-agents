@@ -35,7 +35,7 @@ function createCaptureStore(file) {
   let sequence = 0, needsNewline = false, revision = 0;
   function index(rec, offset, length) {
     const meta = {};
-    for (const key of ['id', 'ts', 'path', 'status', 'durationMs', 'model', 'messagesCount', 'respMsgId', 'clientVersion', 'upstreamId', 'upstreamName', 'usage', 'requestOrder', 'routing', 'method', 'incomplete']) meta[key] = rec[key];
+    for (const key of ['id', 'ts', 'path', 'status', 'durationMs', 'model', 'messagesCount', 'respMsgId', 'clientVersion', 'upstreamId', 'upstreamName', 'usage', 'requestOrder', 'routing', 'method', 'incomplete', 'engine']) meta[key] = rec[key];
     Object.assign(meta, captureMetadata(rec));
     const start = Date.parse(rec.ts);
     meta.startedAt = rec.startedAt || (Number.isFinite(start) ? new Date(start - (Number(rec.durationMs) || 0)).toISOString() : '');

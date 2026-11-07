@@ -1,10 +1,10 @@
 {
-  "name": "claude-code-panel",
-  "version": "0.16.0",
-  "description": "Claude Code 核心零依赖本地面板：多账号动态代理、env 配置管理、自动故障转移、请求抓包、会话回放与 Token 用量统计",
+  "name": "my-agents",
+  "version": "0.17.0",
+  "description": "Local workspace for Claude Code and Codex: sessions, request capture, multi-account routing, resources and Feishu gateway",
   "main": "server.js",
   "bin": {
-    "claude-code-panel": "./server.js"
+    "my-agents": "./server.js"
   },
   "scripts": {
     "start": "node server.js",
@@ -24,13 +24,15 @@
     "slash-commands",
     "proxy",
     "multi-account",
-    "failover"
+    "failover",
+    "codex",
+    "openai-codex"
   ],
   "author": "13days",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/13days/claude-panel.git"
+    "url": "https://github.com/13days/my-agents.git"
   },
   "files": [
     "server.js",
@@ -54,9 +56,27 @@
     "lark-setup.js",
     "feishu-cards.js",
     "feishu-inbox.js",
-    "feishu-markdown.js"
+    "feishu-contacts.js",
+    "feishu-commands.js",
+    "feishu-markdown.js",
+    "codex-resources.js",
+    "claude-cli.js",
+    "cli-installations.js",
+    "codex-cli.js",
+    "codex-sessions.js",
+    "codex-engine.js",
+    "codex-proxy.js",
+    "codex-stats.js",
+    "docs/migration.md",
+    "upstream-network.js",
+    "codex-profile.js",
+    "history-worker.js"
   ],
   "optionalDependencies": {
     "@larksuiteoapi/node-sdk": "1.76.0"
+  },
+  "homepage": "https://github.com/13days/my-agents#readme",
+  "bugs": {
+    "url": "https://github.com/13days/my-agents/issues"
   }
 }

@@ -35,3 +35,18 @@ test('message pagination and user/group filters return complete records in stabl
   assert.equal(third.hasMore, false);
   assert.ok((await inbox.messages('app', { userId: 'ou_odd', chatId: 'oc_odd' })).items.every(item => Number(item.content) % 2));
 });
+
+test('contact labels survive restart, remain app scoped and do not get replaced by official name refreshes', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'panel-contact-labels-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const inbox = createFeishuInbox(dir), msg = { messageId: 'm1', senderId: 'ou_user', senderName: 'Official user', chatId: 'oc_group', chatName: 'Official group', chatType: 'group', content: 'Hi' };
+  await inbox.record('app-one', msg, 'allowed'); await inbox.record('app-two', msg, 'allowed');
+  inbox.setAlias('app-one', 'ou_user', ' 工作账号 '); inbox.setAlias('app-one', 'oc_group', '项目群');
+  inbox.setName('app-one', 'ou_user', 'Updated official user');
+  const restored = createFeishuInbox(dir); await restored.ready;
+  const contact = restored.contacts('app-one').users[0]; assert.equal(contact.name, 'Updated official user'); assert.equal(contact.displayName, '工作账号'); assert.equal(contact.alias, '工作账号');
+  assert.equal(restored.contacts('app-two').users[0].displayName, 'Official user');
+  const history = (await restored.messages('app-one')).items[0]; assert.equal(history.senderName, '工作账号'); assert.equal(history.chatName, '项目群');
+  restored.setAlias('app-one', 'ou_user', ''); assert.equal(restored.contacts('app-one').users[0].displayName, 'Updated official user');
+  assert.throws(() => restored.setAlias('app-one', 'ou_user', 'x'.repeat(81)), /80/);
+  assert.equal(fs.statSync(path.join(dir, 'panel-feishu-contact-labels.json')).mode & 0o777, 0o600);
+});

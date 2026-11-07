@@ -9,6 +9,7 @@ test('external transcript updates move existing sessions ahead of stale CLI hist
   const start = source.indexOf('function listSessions() {');
   const end = source.indexOf('function transcriptPathFor(', start);
   const context = vm.createContext({
+    codexSessions: { list: () => [], pathFor: () => '', messages: () => null }, isCodexPath: () => false, isCodexSession: () => false,
     path,
     sessionStore: { read: () => ({ older: { title: 'Renamed older session' }, removed: { deleted: true } }) },
     transcriptFiles: () => ({ sessionFiles: ['/sessions/older.jsonl', '/sessions/recent.jsonl', '/sessions/new-cli.jsonl', '/sessions/removed.jsonl'] }),

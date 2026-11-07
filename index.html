@@ -3,16 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Claude Panel</title>
+<title>my-agents · Claude Code & Codex</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23d97b4f'/%3E%3Cpath d='m17 20 13 12-13 12M35 44h13' fill='none' stroke='%23171a21' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/panel.css">
 </head>
 <body>
 
-<aside id="navrail" aria-label="主导航"><div id="logo"><span class="brand-mark"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 6 6 6-6 6M13 18h6"/></svg></span><span class="brand-name">Claude <span>Panel</span></span><button class="panel-toggle" id="navToggle" type="button" aria-label="收起导航" aria-controls="navrail" title="收起导航">‹</button></div><nav id="tabs"><div class="nav-group-label" data-nav-group="工作空间">工作空间</div><button type="button" class="tab" data-type="stats" title="stats"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V5m0 14h16M8 15v-4m5 4V7m5 8v-6"/></svg><span class="nav-label">stats</span><span class="cnt"></span></button><button type="button" class="tab" data-type="proxy" title="proxy"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01M12 10v4"/></svg><span class="nav-label">proxy</span><span class="cnt"></span></button><button type="button" class="tab" data-type="feishu" title="飞书网关"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 3-7 18-4-7-7-4 18-7ZM10 14 21 3"/></svg><span class="nav-label">飞书网关</span><span class="cnt"></span></button><button type="button" class="tab" data-type="sessions" title="sessions"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z"/></svg><span class="nav-label">sessions</span><span class="cnt"></span></button><button type="button" class="tab" data-type="inspector" title="inspector"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg><span class="nav-label">inspector</span><span class="cnt"></span></button><button type="button" class="tab" data-type="voyage" title="voyage"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 17 9 4 9-4M5 15l7-3 7 3M12 3v9M12 3l7 6h-7M5 15v3m14-3v3"/></svg><span class="nav-label">voyage</span><span class="cnt"></span></button><div class="nav-group-label" data-nav-group="资源管理">资源管理</div><button type="button" class="tab" data-type="commands" title="commands"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 6 6 6-6 6M13 18h6"/></svg><span class="nav-label">commands</span><span class="cnt"></span></button><button type="button" class="tab" data-type="skills" title="skills"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4L12 3Z"/></svg><span class="nav-label">skills</span><span class="cnt"></span></button><button type="button" class="tab" data-type="agents" title="agents"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="14" rx="3"/><path d="M12 3v4M8 12h.01M16 12h.01M9 17h6M1 12v5m22-5v5"/></svg><span class="nav-label">agents</span><span class="cnt"></span></button><button type="button" class="tab" data-type="plugins" title="plugins"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v4m6-4v4M7 7h10v5a5 5 0 0 1-10 0V7Zm5 10v4"/></svg><span class="nav-label">plugins</span><span class="cnt"></span></button><button type="button" class="tab" data-type="workflows" title="workflows"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="5" rx="1"/><rect x="2" y="17" width="7" height="5" rx="1"/><rect x="15" y="17" width="7" height="5" rx="1"/><path d="M12 7v5M5.5 17v-5h13v5"/></svg><span class="nav-label">workflows</span><span class="cnt"></span></button><button type="button" class="tab" data-type="config" title="config"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6m8 4v6"/></svg><span class="nav-label">config</span><span class="cnt"></span></button></nav><div id="navFooter"><strong><span class="status-dot"></span><span id="localLabel">本地工作区</span></strong><p>PRIVATE BY DESIGN</p></div></aside>
+<aside id="navrail" aria-label="主导航"><div id="logo"><span class="brand-mark"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 6 6 6-6 6M13 18h6"/></svg></span><span class="brand-name">my<span>-agents</span></span><button class="panel-toggle" id="navToggle" type="button" aria-label="收起导航" aria-controls="navrail" title="收起导航">‹</button></div><nav id="tabs"><div class="nav-group-label" data-nav-group="工作空间">工作空间</div><button type="button" class="tab" data-type="stats" title="stats"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V5m0 14h16M8 15v-4m5 4V7m5 8v-6"/></svg><span class="nav-label">stats</span><span class="cnt"></span></button><button type="button" class="tab" data-type="proxy" title="proxy"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01M12 10v4"/></svg><span class="nav-label">proxy</span><span class="cnt"></span></button><button type="button" class="tab" data-type="feishu" title="飞书网关"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 3-7 18-4-7-7-4 18-7ZM10 14 21 3"/></svg><span class="nav-label">飞书网关</span><span class="cnt"></span></button><button type="button" class="tab" data-type="sessions" title="sessions"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z"/></svg><span class="nav-label">sessions</span><span class="cnt"></span></button><button type="button" class="tab" data-type="inspector" title="inspector"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg><span class="nav-label">inspector</span><span class="cnt"></span></button><button type="button" class="tab" data-type="voyage" title="voyage"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 17 9 4 9-4M5 15l7-3 7 3M12 3v9M12 3l7 6h-7M5 15v3m14-3v3"/></svg><span class="nav-label">voyage</span><span class="cnt"></span></button><div class="nav-group-label" data-nav-group="资源管理">资源管理</div><button type="button" class="tab" data-type="commands" title="commands"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 6 6 6-6 6M13 18h6"/></svg><span class="nav-label">commands</span><span class="cnt"></span></button><button type="button" class="tab" data-type="skills" title="skills"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4L12 3Z"/></svg><span class="nav-label">skills</span><span class="cnt"></span></button><button type="button" class="tab" data-type="agents" title="agents"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="14" rx="3"/><path d="M12 3v4M8 12h.01M16 12h.01M9 17h6M1 12v5m22-5v5"/></svg><span class="nav-label">agents</span><span class="cnt"></span></button><button type="button" class="tab" data-type="plugins" title="plugins"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v4m6-4v4M7 7h10v5a5 5 0 0 1-10 0V7Zm5 10v4"/></svg><span class="nav-label">plugins</span><span class="cnt"></span></button><button type="button" class="tab" data-type="workflows" title="workflows"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="5" rx="1"/><rect x="2" y="17" width="7" height="5" rx="1"/><rect x="15" y="17" width="7" height="5" rx="1"/><path d="M12 7v5M5.5 17v-5h13v5"/></svg><span class="nav-label">workflows</span><span class="cnt"></span></button><button type="button" class="tab" data-type="config" title="config"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6m8 4v6"/></svg><span class="nav-label">config</span><span class="cnt"></span></button></nav><div id="navFooter"><strong><span class="status-dot"></span><span id="localLabel">本地工作区</span></strong><p>PRIVATE BY DESIGN</p></div></aside>
 <aside id="sidebar"><div class="library-header"><span id="libraryTitle">资源</span><span id="libraryCount"></span><button type="button" id="libraryCollapse" class="panel-toggle" aria-label="收起列表" title="收起列表">‹</button></div>
   <div id="projbar"><select id="projSel"></select></div>
-  <div id="searchbox"><input id="search" placeholder="搜索名称 / 描述…"></div>
+  <div id="searchbox"><input id="search" type="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="搜索名称 / 描述…"></div>
+  <div id="session-engines" hidden></div>
   <div id="capture-filters" hidden></div>
   <div id="filterbar">
     <div class="fbtn active" data-origin="user">仅自建</div>
@@ -32,6 +33,7 @@
   <div id="toolbar">
     <button class="btn" id="libraryToggle" type="button" aria-label="打开资源列表" aria-expanded="false">☰</button>
     <div id="toolbarIdentity"><div id="sectionCrumb">工作空间</div><div id="title">未选择<span id="fpath"></span></div></div>
+    <span id="workspaceScope" class="scope-label"></span>
     <div id="capture-nav" class="capture-nav" hidden></div>
     <div id="capture-search" class="capture-search" hidden></div>
     <button class="btn" id="editBtn" disabled>编辑</button>
@@ -51,7 +53,7 @@
 <div id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
   <div class="box">
     <h3 id="modalTitle">新建</h3>
-    <input id="newName" placeholder="名称（如 my-command）">
+    <input autocomplete="off" autocorrect="off" spellcheck="false" id="newName" placeholder="名称（如 my-command）">
     <div class="hint" id="modalHint"></div>
     <div class="row">
       <button class="btn" id="modalCancel" onclick="closeModal()">取消</button>
@@ -84,10 +86,12 @@ const ICONS = {feishu: '<path d="m21 3-7 18-4-7-7-4 18-7ZM10 14l5-5"/>', "termin
 function icon(type) { return `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[type] || ICONS.folder}</svg>`; }
 function ui(zh, en, ja = en) { return lang === 'zh' ? zh : lang === 'ja' ? ja : en; }
 function viewDescription(type) {
+  if (state.resourceEngine === 'codex' && type === 'skills') return ui('管理 Codex 的个人与项目技能，识别共享技能和只读安装项。', 'Manage personal and project Codex skills, including shared and installed skills.');
+  if (state.resourceEngine === 'codex' && type === 'config') return ui('管理 Codex 的 AGENTS.md 指令与 config.toml 配置。', 'Manage Codex AGENTS.md instructions and config.toml settings.');
   const descriptions = {
-    stats: ['把每一次对话，变成看得见的用量与趋势。', 'A clear view of your conversations, usage, and spending.'],
-    feishu: ['在飞书上查看会话、切换项目和接续 Mac 上的 Claude Code。', 'Browse sessions, switch projects and use Claude Code on your Mac from Feishu.'],
-    proxy: ['你的账号，一个入口。随时切换，无缝继续。', 'All your accounts. One local gateway. Keep your work flowing.'],
+    stats: ['两个引擎，一个工作空间。随时掌握你的使用情况。', 'Two engines, one workspace. Keep your work and usage in view.'],
+    feishu: ['通过飞书，接续本机的 Claude Code 与 Codex 会话。', 'Continue local Claude Code and Codex sessions from Feishu.'],
+    proxy: ['管理引擎接入、代理账号与请求记录方式。', 'Manage engine connections, accounts, and request capture.'],
     inspector: ['还原每次模型调用，看清请求、上下文与响应。', 'Inspect every model request, context, and response.'],
     sessions: ['找回工作上下文，继续之前的对话。', 'Find your context and pick up where you left off.'],
     voyage: ['沿着时间，回看你与 Claude 一起完成的工作。', 'Follow the timeline of your work with Claude.'],
@@ -108,8 +112,11 @@ function updateWorkspaceChrome() {
   const dashboard = !!CAPS[state.type].dashboard;
   document.body.dataset.view = dashboard ? 'dashboard' : 'library';
   document.body.dataset.section = state.type;
-  $('#sectionCrumb').textContent = ui('工作空间', 'Workspace', 'ワークスペース') + ' / ' + t('tabs')[state.type];
+  $('#sectionCrumb').textContent = (SCOPED.includes(state.type) || state.type === 'plugins' ? (state.resourceEngine === 'codex' ? 'Codex' : 'Claude Code') : state.type === 'voyage' ? 'Claude Code' : ui('工作空间', 'Workspace', 'ワークスペース')) + ' / ' + t('tabs')[state.type];
   $('#libraryTitle').textContent = t('tabs')[state.type];
+  $('#workspaceScope').textContent = SCOPED.includes(state.type) || state.type === 'plugins' ? (state.resourceEngine === 'codex' ? 'Codex' : 'Claude Code') : state.type === 'voyage' ? 'Claude Code' : 'Claude Code + Codex';
+  renderResourceEngines();
+  renderSessionEngines();
   $('#projbar').hidden = !SCOPED.includes(state.type);
   $('#libraryToggle').hidden = dashboard;
   document.body.dataset.libraryOpen = 'false';
@@ -143,8 +150,8 @@ const LANGS = [
 const DEFAULT_LANG = 'zh';
 const I18N = {
   zh: {
-    tabs: { feishu: '飞书网关', proxy: '账号路由', commands: '/ 命令', skills: '技能', agents: '智能体', plugins: '插件', config: '配置', workflows: '工作流', inspector: '抓包', sessions: '会话', voyage: '航程', stats: '统计' },
-    typeLabel: { commands: '命令', skills: '技能', agents: '智能体', plugins: '插件', config: '配置', workflows: '工作流', inspector: '请求', sessions: '会话', voyage: '航程', stats: '统计' },
+    tabs: { feishu: '飞书网关', proxy: '引擎与接入', commands: '/ 命令', skills: '技能', agents: '智能体', plugins: '插件', config: '配置', workflows: '工作流', inspector: '抓包', sessions: '会话', voyage: '航程', stats: '工作台' },
+    typeLabel: { commands: '命令', skills: '技能', agents: '智能体', plugins: '插件', config: '配置', workflows: '工作流', inspector: '请求', sessions: '会话', voyage: '航程', stats: '工作台' },
     search: '搜索名称 / 描述…', mineOnly: '仅自建', all: '全部',
     newBtn: '＋ 新建', edit: '编辑', save: '保存', cancel: '取消', del: '删除', uninstall: '卸载', create: '创建',
     noSelection: '未选择', emptyHint: '← 从左侧选择一个资源，或点击「新建」',
@@ -197,7 +204,7 @@ const I18N = {
     },
   },
   en: {
-    tabs: { feishu: 'Feishu gateway', proxy: 'Account routing', commands: '/ Commands', skills: 'Skills', agents: 'Agents', plugins: 'Plugins', config: 'Config', workflows: 'Workflows', inspector: 'Inspector', sessions: 'Sessions', voyage: 'Voyage', stats: 'Stats' },
+    tabs: { feishu: 'Feishu gateway', proxy: 'Engines & connections', commands: '/ Commands', skills: 'Skills', agents: 'Agents', plugins: 'Plugins', config: 'Config', workflows: 'Workflows', inspector: 'Inspector', sessions: 'Sessions', voyage: 'Voyage', stats: 'Overview' },
     typeLabel: { commands: 'command', skills: 'skill', agents: 'agent', plugins: 'plugin', config: 'config', workflows: 'workflow', inspector: 'request', sessions: 'session', voyage: 'voyage', stats: 'stats' },
     search: 'Search name / description…', mineOnly: 'Mine', all: 'All',
     newBtn: '＋ New', edit: 'Edit', save: 'Save', cancel: 'Cancel', del: 'Delete', uninstall: 'Uninstall', create: 'Create',
@@ -251,8 +258,8 @@ const I18N = {
     },
   },
   ja: {
-    tabs: { feishu: 'Feishu ゲートウェイ', proxy: 'アカウントルーティング', commands: '/ コマンド', skills: 'スキル', agents: 'エージェント', plugins: 'プラグイン', config: '設定', workflows: 'ワークフロー', inspector: 'キャプチャ', sessions: 'セッション', voyage: '航海', stats: '統計' },
-    typeLabel: { commands: 'コマンド', skills: 'スキル', agents: 'エージェント', plugins: 'プラグイン', config: '設定', workflows: 'ワークフロー', inspector: 'リクエスト', sessions: 'セッション', voyage: '航海', stats: '統計' },
+    tabs: { feishu: 'Feishu ゲートウェイ', proxy: 'エンジンと接続', commands: '/ コマンド', skills: 'スキル', agents: 'エージェント', plugins: 'プラグイン', config: '設定', workflows: 'ワークフロー', inspector: 'キャプチャ', sessions: 'セッション', voyage: '航海', stats: 'ワークスペース' },
+    typeLabel: { commands: 'コマンド', skills: 'スキル', agents: 'エージェント', plugins: 'プラグイン', config: '設定', workflows: 'ワークフロー', inspector: 'リクエスト', sessions: 'セッション', voyage: '航海', stats: 'ワークスペース' },
     search: '名前 / 説明を検索…', mineOnly: '自作のみ', all: 'すべて',
     newBtn: '＋ 新規', edit: '編集', save: '保存', cancel: 'キャンセル', del: '削除', uninstall: 'アンインストール', create: '作成',
     noSelection: '未選択', emptyHint: '← 左からアイテムを選択、または「新規」をクリック',
@@ -327,13 +334,33 @@ const CAPS = {
 };
 // 支持项目作用域的专区
 const SCOPED = ['commands', 'skills', 'agents', 'workflows', 'config'];
-let state = { type: 'commands', items: [], current: null, editing: false, keyword: '', origin: 'user', scope: '', projects: [] };
+let state = { resourceEngine: localStorage.getItem('panel-resource-engine') === 'codex' ? 'codex' : 'claude', type: 'commands', items: [], current: null, editing: false, keyword: '', origin: 'user', scope: '', projects: [] };
+
+function renderResourceEngines() {
+  const label = document.querySelector('[data-nav-group="资源管理"]');
+  let host = $('#resource-engines');
+  if (!host) { host = document.createElement('div'); host.id = 'resource-engines'; host.className = 'resource-engine-switch'; host.setAttribute('role', 'group'); label.after(host); }
+  host.setAttribute('aria-label', ui('资源引擎', 'Resource engine'));
+  host.innerHTML = [['claude', 'Claude'], ['codex', 'Codex']].map(([engine, name]) => `<button type="button" data-resource-engine="${engine}" aria-pressed="${state.resourceEngine === engine}">${name}</button>`).join('');
+  host.querySelectorAll('button').forEach(button => button.onclick = async () => {
+    if (state.resourceEngine === button.dataset.resourceEngine) return;
+    if (state.editing && !confirm(t('unsaved'))) return;
+    state.editing = false; state.resourceEngine = button.dataset.resourceEngine; localStorage.setItem('panel-resource-engine', state.resourceEngine);
+    renderProjOptions();
+    await switchType(['skills', 'config'].includes(state.type) ? state.type : 'skills'); loadCounts();
+  });
+  document.querySelectorAll('.tab').forEach(tab => {
+    const resource = SCOPED.includes(tab.dataset.type) || tab.dataset.type === 'plugins';
+    tab.hidden = resource && state.resourceEngine === 'codex' && !['skills', 'config'].includes(tab.dataset.type);
+  });
+}
 
 // URL paths address both sections and individual resources; scope stays in the query.
 let routeView = '', routeRevision = 0, detailRevision = 0;
 function routePath(type = state.type, key = state.current, view = routeView) {
   const query = new URLSearchParams();
   if (SCOPED.includes(type) && state.scope) query.set('scope', state.scope);
+  if ((SCOPED.includes(type) || type === 'plugins') && state.resourceEngine === 'codex') query.set('engine', 'codex');
   if (type === 'sessions' && key && view) query.set('view', view);
   return '/' + type + (key ? '/' + encodeURIComponent(key) : '') + (query.size ? '?' + query : '');
 }
@@ -348,7 +375,9 @@ function readRoute() {
   const query = new URLSearchParams(location.search);
   const view = query.get('view') || '';
   if (view && !['detail', 'replay'].includes(view)) throw new Error(ui('页面不存在', 'Page not found'));
-  return { type: parts[0], key: parts[1] ? decodeURIComponent(parts[1]) : null, scope: query.get('scope') || '', view };
+  if (query.has('engine') && !['claude', 'codex'].includes(query.get('engine'))) throw new Error(ui('页面不存在', 'Page not found'));
+  if (query.get('engine') === 'codex' && !['skills', 'config'].includes(parts[0])) throw new Error(ui('Codex 当前支持技能与配置管理', 'Codex supports skills and configuration here'));
+  return { ...(query.get('engine') === 'codex' ? { engine: 'codex' } : {}), type: parts[0], key: parts[1] ? decodeURIComponent(parts[1]) : null, scope: query.get('scope') || '', view };
 }
 async function restoreRoute() {
   const revision = ++routeRevision;
@@ -356,7 +385,8 @@ async function restoreRoute() {
   if (state.editing && !confirm(t('unsaved'))) { history.replaceState({}, '', previous); return; }
   state.editing = false;
   try {
-    const target = readRoute() || { type: Object.hasOwn(CAPS, localStorage.getItem('panel-section')) ? localStorage.getItem('panel-section') : 'stats', key: null, scope: '', view: '' };
+    const target = readRoute() || { type: Object.hasOwn(CAPS, localStorage.getItem('panel-section')) ? localStorage.getItem('panel-section') : 'stats', key: null, scope: '', view: '', engine: state.resourceEngine };
+    if (SCOPED.includes(target.type) || target.type === 'plugins') { state.resourceEngine = target.engine || 'claude'; localStorage.setItem('panel-resource-engine', state.resourceEngine); }
     state.scope = SCOPED.includes(target.type) ? target.scope : '';
     renderProjOptions();
     await switchType(target.type, false);
@@ -378,16 +408,21 @@ function matchOrigin(it, type) {
   return state.origin === 'all' || (it.origin || 'user') === 'user';
 }
 
+const pendingApiReads = new Map();
 async function api(method, path, body) {
-  const q = 'lang=' + lang + (state.scope ? '&scope=' + encodeURIComponent(state.scope) : '');
-  const res = await fetch('/api/' + path + (path.includes('?') ? '&' : '?') + q, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json();
-  if (!res.ok) { const error = new Error(data.error || res.statusText); error.status = res.status; throw error; }
-  return data;
+  const resource = SCOPED.includes(path.split(/[/?]/)[0]) || path.split(/[/?]/)[0] === 'plugins';
+  const q = 'lang=' + lang + (state.scope ? '&scope=' + encodeURIComponent(state.scope) : '') + (resource && state.resourceEngine === 'codex' ? '&engine=codex' : '');
+  const url = '/api/' + path + (path.includes('?') ? '&' : '?') + q;
+  if (method === 'GET' && pendingApiReads.has(url)) return pendingApiReads.get(url);
+  const request = (async () => {
+    const res = await fetch(url, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
+    const data = await res.json();
+    if (!res.ok) { const error = new Error(data.error || res.statusText); error.status = res.status; throw error; }
+    return data;
+  })();
+  if (method !== 'GET') return request;
+  pendingApiReads.set(url, request);
+  try { return await request; } finally { pendingApiReads.delete(url); }
 }
 
 function toast(msg, ok = true) {
@@ -399,12 +434,22 @@ function toast(msg, ok = true) {
   t._h = setTimeout(() => t.style.display = 'none', 2200);
 }
 
+function hydrateResourceUsage(items, type, engine, scope, pending) {
+  if (!pending || engine !== 'claude' || scope || !['commands', 'skills', 'agents', 'workflows'].includes(type)) return;
+  api('GET', 'usage').then(counts => {
+    for (const item of items) item.uses = counts[type]?.[item.name] || 0;
+    if (state.type === type && state.resourceEngine === engine && state.scope === scope && state.items === items) renderList();
+  }).catch(() => {});
+}
 async function loadCounts() {
+  const resourceEngine = state.resourceEngine, scope = state.scope;
   for (const type of Object.keys(CAPS)) {
+    if (state.resourceEngine === 'codex' && (SCOPED.includes(type) || type === 'plugins') && !['skills', 'config'].includes(type)) continue;
     if (CAPS[type].dashboard) continue; // 统计页无列表计数
     try {
-      const { items } = await api('GET', type);
-      if (!Array.isArray(items)) continue;
+      const { items, usagePending } = await api('GET', type);
+      hydrateResourceUsage(items, type, resourceEngine, scope, usagePending);
+      if (!Array.isArray(items) || ((SCOPED.includes(type) || type === 'plugins') && (resourceEngine !== state.resourceEngine || scope !== state.scope))) continue;
       document.querySelector(`.tab[data-type="${type}"] .cnt`).textContent = items.filter(it => matchOrigin(it, type)).length;
       if (type === state.type) { state.items = items; renderList(); }
     } catch (e) {}
@@ -412,6 +457,7 @@ async function loadCounts() {
 }
 
 async function switchType(type, updateRoute = true) {
+  if (state.resourceEngine === 'codex' && (SCOPED.includes(type) || type === 'plugins') && !['skills', 'config'].includes(type)) type = 'skills';
   clearCaptureSearch();
   if (state.editing && !confirm(t('unsaved'))) return;
   closeExpandedWindow();
@@ -424,7 +470,8 @@ async function switchType(type, updateRoute = true) {
   disconnectLive();
   stopInspectorPoll();
   state.items = [];
-  $('#list').replaceChildren();
+  const loading = document.createElement('p'); loading.className = 'list-empty'; loading.setAttribute('role', 'status'); loading.textContent = ui('正在加载…', 'Loading…'); $('#list').replaceChildren(loading);
+  $('#libraryCount').textContent = '…'; $('#list-pager')?.setAttribute('hidden', '');
   state.type = type; state.current = null; state.editing = false; state.keyword = '';
   if (updateRoute) { ++routeRevision; writeRoute(); }
   updateWorkspaceChrome();
@@ -433,7 +480,7 @@ async function switchType(type, updateRoute = true) {
   renderCaptureFilters();
   $('#search').value = '';
   $('#search').placeholder = type === 'sessions' ? t('searchSessionsPh') : t('search');
-  $('#footerBtns').style.display = type === 'config' ? 'flex' : 'none';
+  $('#footerBtns').style.display = type === 'config' && state.resourceEngine !== 'codex' ? 'flex' : 'none';
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.type === type));
   $('#newbtn').style.display = CAPS[type].new ? 'block' : 'none';
   $('#newbtn').textContent = newBtnLabel(type);
@@ -448,27 +495,51 @@ async function switchType(type, updateRoute = true) {
   if (type === 'inspector') startInspectorPoll(); else stopInspectorPoll();
   if (type === 'sessions') startRoutePoll();
   try {
-    const { items } = await api('GET', type);
-    if (state.type !== type) return;
+    const resourceEngine = state.resourceEngine, scope = state.scope;
+    const { items, usagePending } = await api('GET', type);
+    if (state.type !== type || resourceEngine !== state.resourceEngine) return;
     state.items = items;
+    hydrateResourceUsage(items, type, resourceEngine, scope, usagePending);
     document.querySelector(`.tab[data-type="${type}"] .cnt`).textContent = items.filter(it => matchOrigin(it, type)).length;
     renderList();
   } catch (e) { toast(t('loadFail') + e.message, false); }
 }
 
+let sessionEngine = ['claude', 'codex'].includes(localStorage.getItem('panel-session-engine')) ? localStorage.getItem('panel-session-engine') : 'all';
+function matchesSessionEngine(item) { return sessionEngine === 'all' || (item.engine || 'claude') === sessionEngine; }
+function renderSessionEngines() {
+  const host = $('#session-engines'); host.hidden = state.type !== 'sessions';
+  if (host.hidden) return;
+  host.innerHTML = '<div class="engine-filter">' + [['all', ui('全部', 'All')], ['claude', 'Claude'], ['codex', 'Codex']].map(([id, label]) => `<button type="button" data-session-engine="${id}" aria-pressed="${sessionEngine === id}">${label}</button>`).join('') + '</div><p class="session-search-hint">' + esc(ui('按名称筛选 · 回车全文搜索仅支持 Claude Code', 'Filter by name · Enter searches Claude Code transcripts')) + '</p>';
+  host.querySelectorAll('button').forEach(button => button.onclick = () => {
+    sessionEngine = button.dataset.sessionEngine; localStorage.setItem('panel-session-engine', sessionEngine); renderSessionEngines(); renderList();
+  });
+}
+let listPage = { key: '', index: 0 };
+const LIST_PAGE_SIZE = 80;
 function renderList({ revealCurrent = false } = {}) {
   const kw = state.keyword.toLowerCase();
   const list = $('#list');
   const previousScroll = list.scrollTop;
   if (CAPS[state.type].dashboard) { list.replaceChildren(); return; }
-  list.innerHTML = '';
+  const fragment = document.createDocumentFragment();
+  if (state.type === 'inspector') updateCaptureFilterCounts();
   const visibleItems = state.items
     .filter(it => matchOrigin(it))
-    .filter(it => state.type !== 'inspector' || ((!state.inspectorSession || it.sessionId === state.inspectorSession) && (!state.inspectorPurpose || it.purpose === state.inspectorPurpose)))
+    .filter(it => state.type !== 'sessions' || matchesSessionEngine(it))
+    .filter(it => state.type !== 'inspector' || matchesCaptureFilters(it))
     .filter(it => !kw || it.name.toLowerCase().includes(kw) || (it.description || '').toLowerCase().includes(kw));
-  $('#libraryCount').textContent = visibleItems.length + ui(' 项', ' items', ' 件');
-  if (!visibleItems.length) { const note = document.createElement('p'); note.className = 'list-empty'; note.textContent = kw ? ui('没有找到匹配的内容', 'No matching results') : ui('这里还没有内容', 'Nothing here yet'); list.append(note); }
-  visibleItems.forEach(it => {
+  const pageKey = JSON.stringify([state.type, state.resourceEngine, state.scope, state.origin, kw, sessionEngine, state.inspectorEngine, state.inspectorSession, state.inspectorPurpose]);
+  const samePage = listPage.key === pageKey;
+  if (!samePage) listPage = { key: pageKey, index: 0 };
+  if (revealCurrent && state.current != null) {
+    const currentIndex = visibleItems.findIndex(item => String(item.key || item.name) === String(state.current));
+    if (currentIndex >= 0) listPage.index = Math.floor(currentIndex / LIST_PAGE_SIZE);
+  }
+  listPage.index = Math.max(0, Math.min(listPage.index, Math.ceil(visibleItems.length / LIST_PAGE_SIZE) - 1));
+  const start = listPage.index * LIST_PAGE_SIZE, end = Math.min(visibleItems.length, start + LIST_PAGE_SIZE);
+  if (!visibleItems.length) { const note = document.createElement('p'); note.className = 'list-empty'; note.textContent = kw ? ui('没有找到匹配的内容', 'No matching results') : ui('这里还没有内容', 'Nothing here yet'); fragment.append(note); }
+  visibleItems.slice(start, end).forEach(it => {
       const key = it.key || it.name;
       const div = document.createElement('button');
       div.type = 'button';
@@ -485,6 +556,13 @@ function renderList({ revealCurrent = false } = {}) {
         sequence.title = ui('全局请求序号', 'Global request number');
         const name = document.createElement('span'); name.className = 'capture-name'; name.textContent = it.name;
         div.querySelector('.nm').replaceChildren(sequence, name);
+      }
+      if (state.type === 'sessions') {
+        const tag = document.createElement('span'); tag.className = 'tag engine-tag ' + (it.engine === 'codex' ? 'codex' : 'claude'); tag.textContent = it.engine === 'codex' ? 'Codex' : 'Claude';
+        div.querySelector('.nm').appendChild(tag);
+      }
+      if (state.resourceEngine === 'codex' && state.type === 'skills') {
+        const tag = document.createElement('span'); tag.className = 'tag engine-tag codex'; tag.textContent = it.source === 'agents' ? ui('共享', 'Shared') : 'Codex'; div.querySelector('.nm').appendChild(tag);
       }
       if (state.origin === 'all' && it.origin === 'installed') {
         const tag = document.createElement('span');
@@ -503,6 +581,9 @@ function renderList({ revealCurrent = false } = {}) {
         div.querySelector('.nm').appendChild(utag);
       }
       div.querySelector('.ds').textContent = it.description || '';
+      if (state.type === 'inspector') {
+        const tag = document.createElement('span'); const engine = captureEngine(it); tag.className = 'tag engine-tag ' + engine; tag.textContent = engine === 'codex' ? 'Codex' : 'Claude Code'; div.querySelector('.ds').prepend(tag, document.createTextNode(' '));
+      }
       div.onclick = () => openItem(key, it.name);
       if (state.type === 'sessions') {
         const row = document.createElement('div'); row.className = 'session-row';
@@ -514,11 +595,26 @@ function renderList({ revealCurrent = false } = {}) {
           if (action === 'delete') button.className = 'danger';
           button.onclick = () => { menu.open = false; editSession(it, action); }; actions.append(button);
         }
-        menu.append(summary, actions); row.append(div, menu); list.append(row);
-      } else list.appendChild(div);
+        menu.append(summary, actions); row.append(div, menu); fragment.append(row);
+      } else fragment.appendChild(div);
     });
+  list.replaceChildren(fragment);
+  $('#libraryCount').textContent = visibleItems.length + ui(' 项', ' items', ' 件');
+  let pager = $('#list-pager');
+  if (!pager) { pager = document.createElement('div'); pager.id = 'list-pager'; pager.className = 'list-pager'; pager.setAttribute('aria-label', ui('列表分页', 'List pagination')); list.after(pager); }
+  pager.replaceChildren(); pager.hidden = visibleItems.length <= LIST_PAGE_SIZE;
+  if (!pager.hidden) {
+    const previous = document.createElement('button'), next = document.createElement('button'), range = document.createElement('span');
+    previous.type = next.type = 'button'; previous.textContent = '‹'; next.textContent = '›';
+    previous.setAttribute('aria-label', ui('上一页', 'Previous page')); next.setAttribute('aria-label', ui('下一页', 'Next page'));
+    previous.disabled = start === 0; next.disabled = end === visibleItems.length;
+    range.textContent = `${start + 1}–${end} / ${visibleItems.length}`;
+    previous.onclick = () => { listPage.index--; renderList(); list.scrollTop = 0; };
+    next.onclick = () => { listPage.index++; renderList(); list.scrollTop = 0; };
+    pager.append(previous, range, next);
+  }
   if (state.type === 'sessions') paintRoutes();
-  list.scrollTop = previousScroll;
+  list.scrollTop = samePage ? previousScroll : 0;
   if (revealCurrent && state.type === 'inspector') {
     const current = list.querySelector('.item.active');
     if (current) {
@@ -597,10 +693,10 @@ async function openItem(key, displayName) {
     const note = d.builtin ? t('noteBuiltin')
       : readonlyCmd ? t('notePluginCmd')
       : d.plugin ? t('notePlugin')
-      : d.origin === 'installed' ? t('noteInstalled') : '';
+      : d.origin === 'installed' ? (state.resourceEngine === 'codex' ? ui(' · 安装项或系统资源（只读）', ' · Installed or system resource (read-only)') : t('noteInstalled')) : '';
     $('#fpath').textContent = d.path.replace(/^\/Users\/[^/]+/, '~') + note;
     $('#editBtn').disabled = !caps.edit || d.origin === 'installed';
-    $('#delBtn').disabled = !caps.del || readonlyCmd;
+    $('#delBtn').disabled = !caps.del || readonlyCmd || (state.resourceEngine === 'codex' && d.origin === 'installed');
     setEditMode(false);
     renderDoc(d);
     if (state.type === 'sessions' && d.session && d.hasTranscript) {
@@ -642,7 +738,7 @@ function renderDoc(d) {
       metabar.appendChild(c);
     });
   } else metabar.style.display = 'none';
-  if (d.lang === 'json' || d.lang === 'js') {
+  if (['json', 'js', 'toml'].includes(d.lang)) {
     $('#render').innerHTML = `<pre><code>${esc(d.content)}</code></pre>`;
     return;
   }
@@ -696,7 +792,7 @@ $('#delBtn').onclick = async () => {
 $('#newbtn').onclick = () => {
   if (state.type === 'sessions') return openNewChat();
   $('#modalTitle').textContent = fmt(t('newTitle'), { label: t('typeLabel')[state.type] });
-  $('#modalHint').textContent = state.type === 'skills' ? t('hintSkills')
+  $('#modalHint').textContent = state.resourceEngine === 'codex' && state.type === 'skills' ? (state.scope ? state.scope + '/.agents/skills/<name>/SKILL.md' : '~/.agents/skills/<name>/SKILL.md') : state.type === 'skills' ? t('hintSkills')
     : state.type === 'workflows' ? t('hintWorkflows')
     : fmt(t('hintFlat'), { type: state.type });
   $('#newName').value = '';
@@ -710,11 +806,11 @@ async function createItem() {
   if (!name) return toast(t('nameRequired'), false);
   try {
     const content = t('templates')[state.type].replaceAll('{NAME}', name);
-    await api('POST', state.type, { name, content });
+    const created = await api('POST', state.type, { name, content });
     closeModal();
     toast(t('created'));
     await switchType(state.type);
-    openItem(name);
+    openItem(created.key || name);
     setTimeout(() => setEditMode(true), 100);
   } catch (e) { toast(t('createFail') + e.message, false); }
 }
@@ -725,8 +821,11 @@ $('#search').addEventListener('keydown', async e => {
   if (e.key !== 'Enter' || state.type !== 'sessions') return;
   const q = e.target.value.trim();
   if (q.length < 2) return;
+  if (sessionEngine === 'codex') { toast(ui('Codex 当前支持按名称筛选；全文搜索暂仅支持 Claude Code', 'Codex supports name filtering. Transcript search currently supports Claude Code.'), false); return; }
+  const searchEpoch = sessionListEpoch;
   try {
     const { results } = await api('GET', 'search?q=' + encodeURIComponent(q));
+    if (state.type !== 'sessions' || searchEpoch !== sessionListEpoch || $('#search').value.trim() !== q) return;
     renderSearchResults(results);
   } catch (err) { toast(t('loadFail') + err.message, false); }
 });
@@ -750,6 +849,7 @@ function renderSearchResults(results) {
     const ds = document.createElement('div'); ds.className = 'ds';
     ds.textContent = r.snippet;
     div.append(nm, ds);
+    const engine = document.createElement('span'); engine.className = 'tag engine-tag claude'; engine.textContent = 'Claude'; nm.appendChild(engine);
     div.onclick = () => openItem(r.session);
     list.appendChild(div);
   }
@@ -775,18 +875,21 @@ async function loadReplay(id) {
     if (r.captured) {
       const banner = document.createElement('div');
       banner.style.cssText = 'margin-bottom:14px;padding:10px 14px;border:1px solid rgba(144,133,233,.4);border-radius:10px;background:rgba(144,133,233,.08);font-size:12px;color:#a99ff0';
-      banner.textContent = '🕵️ ' + fmt(t('replayCaptured'), { v: r.clientVersion || '?' });
+      banner.textContent = r.engine === 'codex' ? ui('本会话的 Codex 请求已被抓取，下方显示实际捕获的提示词与工具。', 'Codex requests were captured. Captured prompts and tools appear below.') : '🕵️ ' + fmt(t('replayCaptured'), { v: r.clientVersion || '?' });
       wrap.appendChild(banner);
     } else {
       const note = document.createElement('div');
       note.style.cssText = 'margin-bottom:14px;padding:12px 16px;border:1px dashed var(--border);border-radius:10px;background:var(--panel);font-size:12.5px;color:var(--muted);line-height:1.6';
-      if (r.proxyInstalled) {
+      if (r.engine === 'codex') {
+        note.textContent = ui('这个 Codex 会话没有可关联的抓包记录。请在「引擎与接入 → Codex」开启抓包；终端会话需先生成配置，并用 codex -p my-agents 启动。历史请求无法补抓。', 'No captured requests are linked to this Codex session. Enable capture in Engines & connections → Codex. For terminal sessions, install the profile and launch codex -p my-agents. Past requests cannot be captured retroactively.');
+        wrap.appendChild(note);
+      } else if (r.proxyInstalled) {
         // 代理已装：历史会话补不回，新会话自动抓——不再叫用户装
         note.innerHTML = `${esc(t('replayHistTitle'))}<br><br>${esc(t('replayHistHint'))}`;
         wrap.appendChild(note);
       } else {
         // 真没装：给开启方法
-        const cmd = `npx claude-code-panel install-proxy`;
+        const cmd = `npx my-agents install-proxy`;
         note.innerHTML = `${esc(t('replayNoCapTitle'))}<br><br><code style="background:var(--code-bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px;font-family:ui-monospace,monospace;color:var(--accent2)">${esc(cmd)}</code> <button class="btn" id="ncCopy" style="padding:3px 10px;font-size:11.5px;margin-left:6px">${esc(t('insCopy'))}</button><br><br>${esc(t('replayNoCapHint'))}`;
         wrap.appendChild(note);
         setTimeout(() => { const b = $('#ncCopy'); if (b) b.onclick = () => { navigator.clipboard.writeText(cmd); toast('✓'); }; }, 0);
@@ -1035,7 +1138,7 @@ async function refreshInspector() {
     _insRevision = d.revision;
     _insProxyPort = d.proxyPort;
     const changed = JSON.stringify(d.items.map(i => i.key)) !== JSON.stringify(state.items.map(i => i.key));
-    state.items = d.items;
+    state.items = d.items; updateCaptureFilterCounts();
     document.querySelector('.tab[data-type="inspector"] .cnt').textContent = d.items.length;
     if (changed) { const top = $('#list').scrollTop; renderList(); $('#list').scrollTop = top; }
     if (!d.items.length && !state.current) renderInspectorEmpty();
@@ -1054,7 +1157,8 @@ function renderInspectorEmpty() {
     <p style="color:var(--muted);font-size:13.5px;margin-bottom:12px">${esc(t('insEmpty'))}</p>
     <pre style="background:var(--code-bg);border:1px solid var(--border);border-radius:10px;padding:14px;font-family:ui-monospace,monospace;font-size:13px">${esc(cmd)}</pre>
     <div style="margin-top:12px"><button class="btn primary" id="insCopyBtn">${esc(t('insCopy'))}</button></div>
-    <p style="color:var(--muted);font-size:11.5px;margin-top:12px">${esc(t('insHint'))}</p></div>`;
+    <p style="color:var(--muted);font-size:11.5px;margin-top:12px">${esc(t('insHint'))}</p></div><div class="chart"><h3>Codex</h3><p class="route-muted">${esc(ui('面板新建的 Codex 会话可在接入页开启抓包。终端使用前，请先生成抓包配置。', 'Enable capture for panel sessions in Connections. For terminal sessions, install the capture profile first.'))}</p><button type="button" class="btn" id="insCodexSetup">${esc(ui('配置 Codex 接入', 'Configure Codex'))} →</button></div>`;
+  $('#insCodexSetup').onclick = () => { localStorage.setItem('panel-connection-engine', 'codex'); switchType('proxy'); };
   const cb = $('#insCopyBtn');
   if (cb) cb.onclick = () => { navigator.clipboard.writeText(cmd); toast('✓'); };
 }
@@ -1167,7 +1271,7 @@ function renderCaptureDetail(wrap, r) {
   const searchBlocks = [];
   wrap.classList.add('capture-detail');
   const summary = document.createElement('div'); summary.className = 'capture-summary';
-  for (const [label, ok] of [[String(r.status || '—'), r.status >= 200 && r.status < 300], [r.upstreamName, false], [r.model, false], [Math.round((r.durationMs || 0) / 100) / 10 + 's', false]]) {
+  for (const [label, ok] of [[captureEngine(r) === 'codex' ? 'Codex' : 'Claude Code', false], [String(r.status || '—'), r.status >= 200 && r.status < 300], [r.upstreamName, false], [r.model, false], [Math.round((r.durationMs || 0) / 100) / 10 + 's', false]]) {
     if (!label) continue; const badge = document.createElement('span'); badge.textContent = label; if (ok) badge.className = 'capture-ok'; summary.append(badge);
   }
   wrap.append(summary);
@@ -1282,6 +1386,26 @@ function renderCaptureDetail(wrap, r) {
   return searchBlocks;
 }
 
+function captureEngine(item) {
+  if (item.engine) return item.engine === 'codex' ? 'codex' : 'claude';
+  return ['codex-chatgpt', 'codex-api'].includes(item.upstreamId) || /^(?:Codex 订阅|Codex API Key)\s*·/.test(item.description || '') ? 'codex' : 'claude';
+}
+function matchesCaptureContext(item) { return (!state.inspectorEngine || captureEngine(item) === state.inspectorEngine) && (!state.inspectorSession || item.sessionId === state.inspectorSession); }
+function matchesCaptureFilters(item) { return matchesCaptureContext(item) && (!state.inspectorPurpose || item.purpose === state.inspectorPurpose); }
+function captureFilterCounts(items) {
+  const keyword = (state.keyword || '').toLowerCase();
+  const counts = { '': 0 };
+  for (const item of items) {
+    if (!matchesCaptureContext(item) || (keyword && !(item.name || '').toLowerCase().includes(keyword) && !(item.description || '').toLowerCase().includes(keyword))) continue;
+    counts['']++; counts[item.purpose || 'other'] = (counts[item.purpose || 'other'] || 0) + 1;
+  }
+  return counts;
+}
+function updateCaptureFilterCounts() {
+  const select = $('#capture-filters select'); if (!select || state.type !== 'inspector') return;
+  const counts = captureFilterCounts(state.items);
+  Array.from(select.options).forEach(option => { const value = String(counts[option.value] || 0); if (option.dataset.count !== value) option.dataset.count = value; });
+}
 function capturePurposeLabel(purpose, inferred = false) {
   const labels = { model_request: ui('模型调用', 'Model call'), compaction: ui('压缩 / 摘要', 'Compaction / summary'), title: ui('标题生成', 'Title generation'), count_tokens: ui('Token 计数', 'Token count'), models: ui('模型列表', 'Model discovery'), oauth: ui('认证', 'Authentication'), other: ui('其他接口', 'Other API') };
   return (labels[purpose] || labels.other) + (inferred ? ui('（推测）', ' (inferred)') : '');
@@ -1289,11 +1413,17 @@ function capturePurposeLabel(purpose, inferred = false) {
 function renderCaptureFilters() {
   const host = $('#capture-filters'); host.hidden = state.type !== 'inspector'; host.replaceChildren();
   if (host.hidden) return;
+  const engines = document.createElement('div'); engines.className = 'engine-filter capture-engine-filter'; engines.setAttribute('role', 'group'); engines.setAttribute('aria-label', ui('抓包引擎', 'Capture engine'));
+  for (const [value, label] of [['', ui('全部', 'All')], ['claude', 'Claude Code'], ['codex', 'Codex']]) {
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.dataset.captureEngine = value; button.setAttribute('aria-pressed', String((state.inspectorEngine || '') === value));
+    button.onclick = () => { state.inspectorEngine = value; renderCaptureFilters(); renderList(); }; engines.append(button);
+  }
+  host.append(engines);
   const select = document.createElement('select'); select.setAttribute('aria-label', ui('调用类型', 'Call type'));
   select.add(new Option(ui('所有调用类型', 'All call types'), ''));
   for (const purpose of ['model_request', 'compaction', 'title', 'count_tokens', 'models', 'oauth', 'other']) select.add(new Option(capturePurposeLabel(purpose), purpose));
   select.value = state.inspectorPurpose || ''; select.onchange = () => { state.inspectorPurpose = select.value; renderList(); };
-  host.append(select);
+  host.append(select); updateCaptureFilterCounts();
   if (state.inspectorSession) {
     const clear = document.createElement('button'); clear.type = 'button'; clear.className = 'btn'; clear.textContent = ui('当前会话 ×', 'Current session ×');
     clear.title = state.inspectorSession; clear.onclick = () => { state.inspectorSession = ''; renderCaptureFilters(); renderList(); }; host.append(clear);
@@ -1524,7 +1654,7 @@ function renderProjOptions() {
   const sel = $('#projSel');
   const cur = state.scope;
   sel.innerHTML = '';
-  sel.add(new Option(t('scopeGlobal'), ''));
+  sel.add(new Option(state.resourceEngine === 'codex' ? ui('全局（Codex + 共享技能）', 'Global (Codex + shared skills)') : t('scopeGlobal'), ''));
   for (const p of state.projects) {
     const o = new Option('📁 ' + p.name, p.path);
     o.title = p.path;
@@ -1546,40 +1676,55 @@ const CHART_COLORS = ['#7c9fbe', '#87b29e', '#b9a17e', '#a499be', '#c48e8b', '#b
 
 let statsRange = 42; // 每日图展示的天数，0 = 全部
 
+let statsEngine = localStorage.getItem('panel-stats-engine') === 'codex' ? 'codex' : 'claude';
 async function renderStatsTab() {
-  try {
-    state.statsData = await api('GET', 'stats');
-    if (state.type !== 'stats') return;
-    $('#empty').style.display = 'none';
-    $('#title').firstChild.textContent = t('tabs')['stats'];
-    $('#fpath').textContent = '~/.claude/projects';
-    $('#render').style.display = 'block';
-    $('#render').classList.add('wide');
-    renderStatsNow();
-  } catch (e) {
-    if (state.type !== 'stats') return;
-    if (e.status !== 404) { toast(t('loadFail') + e.message, false); return; }
-    $('#empty').style.display = 'none'; $('#render').classList.add('wide');
-    $('#render').innerHTML = viewHeading('stats') + `<div class="route-empty"><span class="empty-icon">${icon('stats')}</span><h3>${esc(ui('从你的第一段对话开始', 'Start with your first conversation'))}</h3><p class="route-muted">${esc(ui('接入 Claude 后，这里会显示会话用量、模型分布与费用趋势。', 'Once Claude is connected, your usage, models, and spending trends appear here.'))}</p><button class="btn primary" id="statsSetup">${esc(ui('配置 Claude 账号', 'Set up a Claude account'))}</button></div>`;
-    $('#statsSetup').onclick = () => switchType('proxy');
-  }
+  const revision = (state.statsRevision || 0) + 1; state.statsRevision = revision;
+  state.statsLoading = [true, true]; state.statsErrors = ['', ''];
+  $('#empty').style.display = 'none'; $('#render').style.display = 'block'; $('#render').classList.add('wide');
+  $('#title').firstChild.textContent = t('tabs').stats; $('#fpath').textContent = '';
+  renderStatsNow();
+  await Promise.allSettled(['stats', 'codex/stats'].map(async (route, index) => {
+    const field = index ? 'codexStats' : 'statsData';
+    try { const result = await api('GET', route); if (state.statsRevision === revision) state[field] = result; }
+    catch (error) { if (state.statsRevision === revision) state.statsErrors[index] = error.status === 404 ? '' : error.message; }
+    finally { if (state.statsRevision === revision) { state.statsLoading[index] = false; if (state.type === 'stats') renderStatsNow(); } }
+  }));
 }
-
+function codexStatsHTML(d) {
+  if (!d) return `<div class="route-empty"><h3>${esc(ui('暂无 Codex 用量记录', 'No Codex usage yet'))}</h3><p class="route-muted">${esc(ui('使用 Codex 开始对话后，这里会显示本机会话的 Token 用量。', 'Start a Codex conversation to see local token usage here.'))}</p></div>`;
+  const total = d.totals;
+  const metrics = [[d.sessions, ui('会话', 'Sessions')], [total.input, ui('输入 Token', 'Input tokens')], [total.output, ui('输出 Token', 'Output tokens')], [total.cached, ui('缓存 Token', 'Cached tokens')]];
+  let h = `<div class="cards">${metrics.map(([value, label]) => `<div class="card"><div class="v">${fmtNum(value)}</div><div class="k">${esc(label)}</div></div>`).join('')}</div>`;
+  h += `<p class="data-source">${esc(ui('数据来源：~/.codex/sessions · 输入包含缓存；订阅额度和 API 费用分别计算，不折算为 Claude 费用。', 'Source: ~/.codex/sessions · Input includes cached tokens. Subscription quotas and API billing are separate from Claude costs.'))}</p>`;
+  const limits = d.rateLimits;
+  if (limits) {
+    h += `<div class="chart"><h3>${esc(ui('订阅额度快照', 'Subscription quota snapshot'))}</h3><div class="codex-quotas">${[limits.primary, limits.secondary].filter(Boolean).map(w => {
+      const minutes = w.window_minutes, label = minutes >= 1440 ? `${Math.round(minutes / 1440)}${ui(' 天', ' days')}` : `${Math.round(minutes / 60)}${ui(' 小时', ' hours')}`;
+      return `<div class="codex-quota"><span>${esc(label)} · ${esc(ui('已用', 'used'))} <b>${Math.round(w.used_percent)}%</b></span><div class="codex-bar"><i style="width:${Math.min(100, Math.max(0, w.used_percent))}%"></i></div><small>${w.resets_at ? esc(ui('重置于 ', 'Resets ') + new Date(w.resets_at * 1000).toLocaleString()) : ''}</small></div>`;
+    }).join('')}</div><p class="data-source">${esc(ui('最近记录于 ', 'Last recorded ') + (d.rateLimitsAt ? new Date(d.rateLimitsAt).toLocaleString() : '—'))}</p></div>`;
+  }
+  const table = (title, rows) => `<div class="chart"><h3>${esc(title)}</h3><div class="table-scroll"><table class="usage"><thead><tr><th>${esc(ui('名称', 'Name'))}</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cached</th></tr></thead><tbody>${rows.length ? rows.map(r => `<tr><td>${esc(r.key)}</td>${[r.input, r.output, r.cached].map(v => `<td class="num">${Number(v || 0).toLocaleString()}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="4">${esc(ui('暂无记录', 'No records yet'))}</td></tr>`}</tbody></table></div></div>`;
+  return h + table(ui('模型用量', 'Usage by model'), d.models) + table(ui('每日用量 · 最近 30 天记录', 'Daily usage · Latest 30 recorded days'), d.daily.slice(-30).reverse());
+}
 function renderStatsNow() {
-  $('#render').innerHTML = statsHTML(state.statsData);
-  // 时间范围按钮（重渲染不重新请求，数据已在内存）
-  $('#render').querySelectorAll('.rangebtn').forEach(b => {
-    b.onclick = () => { statsRange = +b.dataset.range; renderStatsNow(); };
-  });
-  const wb = $('#wrappedBtn');
-  if (wb) wb.onclick = () => openWrapped(wrappedDays);
-  connectLive();
+  disconnectLive();
+  const c = state.statsData, x = state.codexStats;
+  const engines = [['claude', 'Claude Code', c ? fmtNum(c.totalSessions) + ui(' 个会话', ' sessions') : ui('暂无记录', 'No records')], ['codex', 'Codex', x ? fmtNum(x.sessions) + ui(' 个会话', ' sessions') : ui('暂无记录', 'No records')]];
+  const intro = viewHeading('stats', `<div class="workspace-actions"><button type="button" class="btn" id="overview-connect">${esc(ui('管理接入', 'Connections'))}</button><button type="button" class="btn primary" id="overview-chat">＋ ${esc(ui('新建会话', 'New conversation'))}</button></div>`);
+  const tabs = `<div class="engine-tabs overview-engines" role="group" aria-label="${esc(ui('查看引擎用量', 'View engine usage'))}">${engines.map(([id, name, note]) => `<button type="button" data-stats-engine="${id}" aria-pressed="${statsEngine === id}"><span class="engine-emblem ${id}">${id === 'codex' ? 'O' : '✳'}</span><span><strong>${name}</strong><small>${esc(note)}</small></span><span class="engine-tab-action">${esc(ui('查看用量', 'View usage'))} ${icon('arrow')}</span></button>`).join('')}</div>`;
+  const loading = state.statsLoading?.[statsEngine === 'codex' ? 1 : 0] && !(statsEngine === 'codex' ? x : c);
+  const detail = loading ? `<div class="route-empty" role="status"><h3>${esc(ui('正在读取用量…', 'Loading usage…'))}</h3><p>${esc(ui('历史记录在后台统计，你可以继续切换页面。', 'History is being processed in the background. You can keep browsing.'))}</p></div>` : statsEngine === 'codex' ? codexStatsHTML(x) : c ? statsHTML(c) : `<div class="route-empty"><h3>${esc(ui('暂无 Claude Code 用量记录', 'No Claude Code usage yet'))}</h3><p class="route-muted">${esc(ui('接入账号并开始对话后，这里会显示用量和费用趋势。', 'Connect an account and start a conversation to see usage and spending.'))}</p></div>`;
+  $('#render').innerHTML = intro + tabs + `<div class="engine-detail"><div class="engine-detail-heading"><h3>${statsEngine === 'codex' ? 'Codex' : 'Claude Code'} · ${esc(ui('用量详情', 'Usage details'))}</h3>${statsEngine === 'claude' && c ? `<button class="btn" id="wrappedBtn">${esc(t('wrappedBtn').replace(/^🎁\s*/, ''))}</button>` : ''}</div>${state.statsErrors?.[statsEngine === 'codex' ? 1 : 0] ? `<p class="data-source" role="status">${esc(t('loadFail') + state.statsErrors[statsEngine === 'codex' ? 1 : 0])}</p>` : ''}${detail}</div>`;
+  $('#overview-connect').onclick = () => switchType('proxy');
+  $('#overview-chat').onclick = async () => { localStorage.setItem('panel-chat-engine', statsEngine); await switchType('sessions'); openNewChat(); };
+  document.querySelectorAll('[data-stats-engine]').forEach(button => button.onclick = () => { statsEngine = button.dataset.statsEngine; localStorage.setItem('panel-stats-engine', statsEngine); renderStatsNow(); });
+  $('#render').querySelectorAll('.rangebtn').forEach(b => { b.onclick = () => { statsRange = +b.dataset.range; renderStatsNow(); }; });
+  const wb = $('#wrappedBtn'); if (wb) wb.onclick = () => openWrapped(wrappedDays);
+  if (statsEngine === 'claude' && c) connectLive();
   const bi = $('#lvBudget');
   if (bi) bi.onchange = async () => {
-    try {
-      await api('PUT', 'panel-config', { dailyBudget: Number(bi.value) || 0 });
-      toast(t('budgetSaved'));
-    } catch (e) { toast(t('saveFail') + e.message, false); }
+    try { await api('PUT', 'panel-config', { dailyBudget: Number(bi.value) || 0 }); toast(t('budgetSaved')); }
+    catch (e) { toast(t('saveFail') + e.message, false); }
   };
 }
 
@@ -1710,13 +1855,13 @@ function drawWrapped(d) {
 
   // 页脚
   ctx.fillStyle = '#8b93a5'; ctx.font = `400 24px ${M}`;
-  ctx.fillText('npx claude-code-panel', W / 2, 1298);
+  ctx.fillText('npx my-agents', W / 2, 1298);
   ctx.fillStyle = '#4a5160';
-  ctx.fillText('github.com/13days/claude-panel', W / 2, 1332);
+  ctx.fillText('github.com/13days/my-agents', W / 2, 1332);
 }
 
 function statsHTML(d) {
-  let h = viewHeading('stats', `<button class="btn" id="wrappedBtn">${icon('arrow')} ${esc(t('wrappedBtn').replace(/^🎁\s*/, ''))}</button>`);
+  let h = '';
   // Live 实时条
   h += `<div id="liveBar"><span class="dot"></span>
     <span><span class="lv">${esc(t('liveToday'))}</span> <b class="cost" id="lvCost">—</b></span>
@@ -1830,6 +1975,12 @@ function statsHTML(d) {
   return h + '</div>';
 }
 
+// Shared tasks come first; Claude-only resources carry an explicit scope.
+const workspaceNav = $('.nav-group-label[data-nav-group="工作空间"]');
+let navAnchor = workspaceNav;
+for (const type of ['stats', 'sessions', 'inspector', 'proxy', 'feishu', 'voyage']) {
+  const tab = document.querySelector(`.tab[data-type="${type}"]`); navAnchor.after(tab); navAnchor = tab;
+}
 // ---------- 语言切换 ----------
 function applyLang() {
   document.documentElement.lang = lang;
@@ -1886,7 +2037,8 @@ $('#langSel').onchange = e => setLang(e.target.value);
 
 // ---------- 会话里的 Claude Code 对话 ----------
 // 新建对话（＋）或打开已有会话后在此接续；每条消息由本机 `claude -p [--resume]` 执行。
-let chatAbort = null, chatModel = localStorage.getItem('panel-chat-model') || '';
+let chatAbort = null, chatModel = '';
+function modelPreference(engine) { return localStorage.getItem('panel-chat-model-' + (engine || 'claude')) ?? (engine !== 'codex' ? localStorage.getItem('panel-chat-model') || '' : ''); }
 let chatScrollObserver = null;
 let chatView = { sessionId: '', cwd: '', messages: [] };
 // 每个会话的代理账号：Claude Code 请求里带 session id，代理据此记录实时账号，也可把单个会话固定到某个账号
@@ -1933,7 +2085,7 @@ async function refreshOpenChat() {
     if (chatView !== v || state.type !== 'sessions' || v.run || !$('#chat-messages')) return;
     if (d.unchanged) return;
     if (d.liveReplay && d.jobId === v.lastReplayJobId) return;
-    if (v.readingImages || v.loadingOlder || document.querySelector('.chat-picker[open]')) return;
+    if (v.readingImages || v.loadingOlder || document.querySelector('.panel-select-menu:popover-open')) return;
     v.revision = d.revision;
     if (!d.liveReplay && JSON.stringify(v.messages) === JSON.stringify(d.messages)) return;
     const box = $('#chat-messages'), prompt = $('#chat-prompt');
@@ -2004,32 +2156,130 @@ function paintRoutes() {
   }
 }
 const newBtnLabel = type => type === 'sessions' ? '＋ ' + ui('新对话', 'New chat', '新しいチャット') : t('newBtn');
-function syncChatPicker(select) {
-  const picker = select.nextElementSibling;
-  if (!picker?.classList.contains('chat-picker')) return;
-  const summary = picker.querySelector('summary');
-  summary.textContent = select.selectedOptions[0]?.textContent || rt('请选择', 'Select');
-  summary.title = select.selectedOptions[0]?.title || summary.textContent;
-  summary.setAttribute('aria-disabled', String(select.disabled));
-  const menu = picker.querySelector('.chat-picker-menu'); menu.replaceChildren();
-  Array.from(select.options).forEach(option => {
-    const button = document.createElement('button'); button.type = 'button'; button.textContent = option.textContent; button.title = option.title || option.textContent;
-    button.disabled = option.disabled; button.setAttribute('aria-pressed', String(option.selected));
-    button.onclick = () => { if (select.disabled) return; select.value = option.value; picker.open = false; select.dispatchEvent(new Event('change', { bubbles: true })); syncChatPicker(select); summary.focus(); };
-    menu.append(button);
-  });
+// All selects share an in-page menu; native selects remain the source of form values.
+const panelSelects = new WeakMap();
+let panelSelectSequence = 0;
+function enhancePanelSelect(select) {
+  if (panelSelects.has(select)) return panelSelects.get(select).sync();
+  if (select.multiple || select.size > 1) return;
+  const wrapper = document.createElement('span'); wrapper.className = 'panel-select';
+  const trigger = document.createElement('button'); trigger.type = 'button'; trigger.className = 'panel-select-trigger';
+  const text = document.createElement('span'); text.className = 'panel-select-value';
+  const currentCount = document.createElement('span'); currentCount.className = 'panel-select-count'; currentCount.hidden = true;
+  const chevron = document.createElement('span'); chevron.className = 'panel-select-chevron'; chevron.setAttribute('aria-hidden', 'true'); chevron.textContent = '⌄';
+  const menu = document.createElement('div'); menu.className = 'panel-select-menu'; menu.id = 'panel-select-' + ++panelSelectSequence;
+  menu.setAttribute('popover', 'auto'); menu.setAttribute('role', 'listbox');
+  trigger.setAttribute('aria-haspopup', 'listbox'); trigger.setAttribute('aria-controls', menu.id); trigger.setAttribute('aria-expanded', 'false');
+  trigger.append(text, currentCount, chevron); select.before(wrapper); wrapper.append(select, trigger, menu);
+  select.classList.add('panel-select-native'); select.tabIndex = -1; select.setAttribute('aria-hidden', 'true');
+  const label = () => select.getAttribute('aria-label') || Array.from(select.labels || []).map(l => { const copy = l.cloneNode(true); copy.querySelectorAll('select, .panel-select').forEach(node => node.remove()); return copy.textContent.trim(); }).join(' ') || select.title || text.textContent;
+  let signature = '', typed = '', typeTimer;
+  const sync = () => {
+    wrapper.hidden = select.hidden;
+    trigger.disabled = select.disabled; text.textContent = select.selectedOptions[0]?.textContent || ui('请选择', 'Select');
+    const count = select.selectedOptions[0]?.dataset.count; currentCount.hidden = count === undefined; currentCount.textContent = count === undefined ? '' : Number(count).toLocaleString();
+    trigger.title = select.selectedOptions[0]?.title || select.title || text.textContent;
+    trigger.setAttribute('aria-label', label()); menu.setAttribute('aria-label', label());
+    const next = JSON.stringify(Array.from(select.options, o => [o.textContent, o.value, o.disabled, o.selected, o.parentElement?.disabled, o.parentElement?.label, o.dataset.count]));
+    if (next === signature) return; signature = next;
+    const focusedIndex = Array.from(menu.querySelectorAll('button')).indexOf(document.activeElement);
+    menu.replaceChildren();
+    let group = null;
+    Array.from(select.options).forEach((option, index) => {
+      if (option.parentElement.tagName === 'OPTGROUP' && group !== option.parentElement) {
+        group = option.parentElement; const heading = document.createElement('div'); heading.className = 'panel-select-group'; heading.textContent = group.label; menu.append(heading);
+      }
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'panel-select-option'; button.setAttribute('role', 'option'); button.setAttribute('aria-selected', String(option.selected));
+      button.disabled = select.disabled || option.disabled || !!option.parentElement.disabled;
+      const check = document.createElement('span'); check.className = 'panel-select-check'; check.setAttribute('aria-hidden', 'true'); check.textContent = option.selected ? '✓' : '';
+      const name = document.createElement('span'); name.textContent = option.textContent; button.append(check, name); button.title = option.title || option.textContent;
+      if (option.dataset.count !== undefined) {
+        const count = document.createElement('span'); count.className = 'panel-select-option-count'; count.textContent = Number(option.dataset.count).toLocaleString(); button.append(count);
+        button.setAttribute('aria-label', option.textContent + ' · ' + count.textContent);
+      }
+      button.onclick = () => {
+        if (select.disabled) return;
+        const changed = select.selectedIndex !== index;
+        close(); select.selectedIndex = index;
+        if (changed) { select.dispatchEvent(new Event('input', { bubbles: true })); select.dispatchEvent(new Event('change', { bubbles: true })); }
+        if (select.isConnected) { sync(); trigger.focus({ preventScroll: true }); }
+      };
+      menu.append(button);
+    });
+    if (focusedIndex >= 0 && menu.matches(':popover-open')) menu.querySelectorAll('button')[focusedIndex]?.focus({ preventScroll: true });
+  };
+  const close = () => { if (menu.matches(':popover-open')) menu.hidePopover(); trigger.setAttribute('aria-expanded', 'false'); };
+  const open = (edge = 0) => {
+    if (select.disabled || !select.isConnected) return;
+    sync(); menu.showPopover(); trigger.setAttribute('aria-expanded', 'true');
+    const r = trigger.getBoundingClientRect(), gap = 6, padding = 10;
+    const width = Math.min(Math.max(r.width, Math.min(menu.scrollWidth + 2, 420)), innerWidth - padding * 2);
+    menu.style.width = width + 'px';
+    const below = innerHeight - r.bottom - gap - padding, above = r.top - gap - padding;
+    const up = below < Math.min(220, menu.scrollHeight) && above > below;
+    menu.style.maxHeight = Math.max(60, Math.min(320, up ? above : below)) + 'px';
+    menu.style.left = Math.max(padding, Math.min(r.left, innerWidth - width - padding)) + 'px';
+    menu.style.top = (up ? Math.max(padding, r.top - gap - menu.getBoundingClientRect().height) : r.bottom + gap) + 'px';
+    const options = Array.from(menu.querySelectorAll('button:not(:disabled)'));
+    const active = edge < 0 ? options.at(-1) : menu.querySelector('[aria-selected="true"]:not(:disabled)') || options[0];
+    active?.focus({ preventScroll: true }); active?.scrollIntoView({ block: 'nearest' });
+  };
+  trigger.onclick = () => menu.matches(':popover-open') ? close() : open();
+  trigger.onkeydown = e => { if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) { e.preventDefault(); open(e.key === 'ArrowUp' || e.key === 'End' ? -1 : 0); } };
+  menu.onkeydown = e => {
+    const options = Array.from(menu.querySelectorAll('button:not(:disabled)')), index = options.indexOf(document.activeElement);
+    let target;
+    if (e.key === 'Escape' || e.key === 'Tab') { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); } close(); trigger.focus(); return; }
+    if (e.key === 'ArrowDown') target = options[(index + 1) % options.length];
+    if (e.key === 'ArrowUp') target = options[(index - 1 + options.length) % options.length];
+    if (e.key === 'Home') target = options[0]; if (e.key === 'End') target = options.at(-1);
+    if (e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      typed += e.key.toLocaleLowerCase(); clearTimeout(typeTimer); typeTimer = setTimeout(() => { typed = ''; }, 700);
+      target = options.find(o => o.textContent.replace(/^✓/, '').trim().toLocaleLowerCase().startsWith(typed));
+    }
+    if (target) { e.preventDefault(); target.focus(); }
+  };
+  menu.addEventListener('toggle', () => trigger.setAttribute('aria-expanded', String(menu.matches(':popover-open'))));
+  select.addEventListener('change', sync);
+  select.addEventListener('invalid', e => { e.preventDefault(); trigger.focus(); });
+  // Existing views set .value and .selectedIndex directly when loading or reverting settings.
+  for (const name of ['value', 'selectedIndex']) {
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, name);
+    Object.defineProperty(select, name, { configurable: true, get() { return descriptor.get.call(this); }, set(value) { descriptor.set.call(this, value); sync(); } });
+  }
+  panelSelects.set(select, { sync, close }); sync();
 }
-function enhanceChatPicker(select) {
-  select.hidden = true;
-  const picker = document.createElement('details'); picker.className = 'chat-picker';
-  const summary = document.createElement('summary'); summary.setAttribute('aria-label', select.getAttribute('aria-label') || select.title);
-  const menu = document.createElement('div'); menu.className = 'chat-picker-menu';
-  picker.append(summary, menu); select.after(picker);
-  summary.onclick = e => { if (select.disabled) e.preventDefault(); };
-  picker.addEventListener('keydown', e => { if (e.key === 'Escape') { picker.open = false; summary.focus(); } if (e.key === 'ArrowDown' && e.target === summary && !select.disabled) { e.preventDefault(); picker.open = true; menu.querySelector('button:not(:disabled)')?.focus(); } });
-  syncChatPicker(select);
+const selectObserver = new MutationObserver(records => {
+  const pending = new Set();
+  for (const record of records) {
+    const node = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+    const select = node?.closest('select'); if (select) pending.add(select);
+    for (const added of record.addedNodes || []) {
+      if (added.nodeType !== 1) continue;
+      if (added.matches('select')) pending.add(added);
+      added.querySelectorAll('select').forEach(s => pending.add(s));
+    }
+  }
+  pending.forEach(select => { if (select.isConnected) enhancePanelSelect(select); });
+});
+function installPanelSelects() {
+  document.querySelectorAll('select').forEach(enhancePanelSelect);
+  selectObserver.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['disabled', 'selected', 'hidden', 'label', 'title', 'aria-label', 'data-count'] });
 }
-document.addEventListener('pointerdown', e => { document.querySelectorAll('.chat-picker[open], .session-menu[open]').forEach(menu => { if (!menu.contains(e.target)) menu.open = false; }); });
+document.addEventListener('reset', e => { setTimeout(() => e.target.querySelectorAll('select').forEach(s => panelSelects.get(s)?.sync()), 0); });
+document.addEventListener('click', e => {
+  const label = e.target.closest('label'); if (!label || e.target.closest('button, .panel-select')) return;
+  const select = label.control; if (select?.tagName === 'SELECT' && panelSelects.has(select)) { e.preventDefault(); select.parentElement.querySelector('.panel-select-trigger').focus(); }
+});
+function closePanelSelects(e) {
+  document.querySelectorAll('.panel-select-menu:popover-open').forEach(menu => { if (e?.type === 'scroll' && menu.contains(e.target)) return; menu.hidePopover(); });
+}
+window.addEventListener('resize', closePanelSelects);
+document.addEventListener('scroll', closePanelSelects, true);
+
+function syncChatPicker(select) { panelSelects.get(select)?.sync(); }
+function enhanceChatPicker(select) { enhancePanelSelect(select); }
+document.addEventListener('pointerdown', e => { document.querySelectorAll('.session-menu[open]').forEach(menu => { if (!menu.contains(e.target)) menu.open = false; }); });
 function chatChrome(title, path) {
   state.editing = false; setEditMode(false);
   $('#empty').style.display = 'none'; $('#metabar').style.display = 'none'; $('#render').classList.add('wide');
@@ -2051,7 +2301,8 @@ async function openNewChat() {
   finally { choosingChatProject = false; button.disabled = false; }
   chatAbort?.abort();
   state.current = null; routeView = ''; writeRoute(); renderList();
-  chatView = { sessionId: '', cwd, messages: [] };
+  sessionEngine = 'all'; localStorage.setItem('panel-session-engine', 'all'); renderSessionEngines();
+  chatView = { sessionId: '', cwd, messages: [], engine: localStorage.getItem('panel-chat-engine') === 'codex' ? 'codex' : 'claude' };
   chatChrome(ui('新对话', 'New chat', '新しいチャット'), '');
   renderChat();
 }
@@ -2064,7 +2315,7 @@ async function openSessionChat(id) {
   try {
     const d = await api('GET', `sessions/${encodeURIComponent(id)}/messages`);
     if (state.type !== 'sessions' || state.current !== id || revision !== detailRevision) return;
-    chatView = { sessionId: id, cwd: d.project || '', messages: d.messages, truncated: d.truncated, historyBefore: d.historyBefore, revision: d.revision };
+    chatView = { sessionId: id, cwd: d.project || '', messages: d.messages, truncated: d.truncated, historyBefore: d.historyBefore, revision: d.revision, engine: d.engine === 'codex' ? 'codex' : 'claude' };
     const first = d.messages.find(m => m.role === 'user');
     chatChrome(state.items.find(item => item.key === id)?.name || (first ? first.text.replace(/\s+/g, ' ').slice(0, 60) : id.slice(0, 8)), (d.project || '').replace(/^\/Users\/[^/]+/, '~'));
     renderChat();
@@ -2073,19 +2324,23 @@ async function openSessionChat(id) {
 }
 function renderChat() {
   chatScrollObserver?.disconnect();
-  const v = chatView, existing = !!v.sessionId;
-  const project = `<div class="chat-field chat-project"><span>${esc(rt('项目', 'Project'))}</span><div class="chat-project-current" title="${esc(v.cwd)}">${icon('folder')}<span>${esc(v.cwd.split('/').filter(Boolean).pop() || v.cwd || rt('未知', 'Unknown'))}</span><small>${esc(v.cwd.replace(/^\/Users\/[^/]+/, '~'))}</small></div></div>`;
+  chatModel = modelPreference(chatView.engine);
+  const v = chatView, existing = !!v.sessionId, codex = v.engine === 'codex', engineName = codex ? 'Codex' : 'Claude Code';
+  const engine = existing
+    ? `<span class="chat-engine-badge${codex ? ' codex' : ''}">${esc(engineName)}</span>`
+    : `<div class="chat-engine" role="group" aria-label="${esc(rt('引擎', 'Engine'))}">${[['claude', 'Claude Code'], ['codex', 'Codex']].map(([id, label]) => `<button type="button" data-engine="${id}" aria-pressed="${v.engine === id}">${label}</button>`).join('')}</div>`;
+  const project =`<div class="chat-field chat-project"><span>${esc(rt('项目', 'Project'))}</span><div class="chat-project-current" title="${esc(v.cwd)}">${icon('folder')}<span>${esc(v.cwd.split('/').filter(Boolean).pop() || v.cwd || rt('未知', 'Unknown'))}</span><small>${esc(v.cwd.replace(/^\/Users\/[^/]+/, '~'))}</small></div></div>`;
   const actions = existing
-    ? `<button class="btn" id="chat-detail">${esc(rt('详情', 'Details'))}</button><button class="btn" id="chat-replay">${esc(rt('查看 Claude 提示词', 'View Claude prompts'))}</button>`
+    ? `<button class="btn" id="chat-detail">${esc(rt('详情', 'Details'))}</button><button class="btn" id="chat-replay">${esc(codex ? rt('查看 Codex 提示词', 'View Codex prompts') : rt('查看 Claude 提示词', 'View Claude prompts'))}</button>`
     : '';
   $('#render').innerHTML = `<section class="chat-shell">
-    <header class="chat-settings"><div class="chat-settings-bar">${project}<span class="chat-live" id="chat-live" hidden></span><div class="chat-top-actions">${actions}<button type="button" class="btn" id="chat-settings-toggle" aria-controls="chat-settings-panel">${esc(rt('设置', 'Settings'))} ⌄</button></div></div>
+    <header class="chat-settings"><div class="chat-settings-bar">${project}${engine}<span class="chat-live" id="chat-live" hidden></span><div class="chat-top-actions">${actions}<button type="button" class="btn" id="chat-settings-toggle" aria-controls="chat-settings-panel">${esc(rt('设置', 'Settings'))} ⌄</button></div></div>
     <div class="chat-top" id="chat-settings-panel" hidden>
       <label class="chat-field chat-model">${esc(rt('模型', 'Model'))}<input id="chat-model" type="text" placeholder="${esc(rt('默认', 'Default'))}" value="${esc(chatModel)}"></label>
-      <div class="chat-field chat-route"><span>${esc(rt('代理账号', 'Proxy account'))}</span><select id="chat-route" aria-label="${esc(rt('代理账号', 'Proxy account'))}" title="${esc(rt('只影响这个会话；其他会话可以走不同账号', 'Only affects this session; other sessions can use other accounts'))}">${routeOptions(existing ? ((routeInfo && routeInfo.routes[v.sessionId.toLowerCase()]) || '') : (v.accountId || ''))}</select></div>
+      <div class="chat-field chat-route"${codex ? ' hidden' : ''}><span>${esc(rt('代理账号', 'Proxy account'))}</span><select id="chat-route" aria-label="${esc(rt('代理账号', 'Proxy account'))}" title="${esc(rt('只影响这个会话；其他会话可以走不同账号', 'Only affects this session; other sessions can use other accounts'))}">${routeOptions(existing ? ((routeInfo && routeInfo.routes[v.sessionId.toLowerCase()]) || '') : (v.accountId || ''))}</select></div>
     </div></header>
     <div class="chat-conversation"><div class="chat-messages" id="chat-messages"></div><div class="chat-scroll-controls" hidden><button type="button" id="chat-scroll-top" title="${esc(rt('会话顶部', 'Top of conversation'))}" aria-label="${esc(rt('会话顶部', 'Top of conversation'))}">↑</button><button type="button" id="chat-scroll-bottom" title="${esc(rt('会话底部', 'Bottom of conversation'))}" aria-label="${esc(rt('会话底部', 'Bottom of conversation'))}">↓</button></div></div>
-    <form class="chat-compose" id="chat-form"><div id="chat-attachments" class="chat-attachments" hidden></div><textarea id="chat-prompt" rows="3" placeholder="${esc(existing ? rt('在这个会话里继续… 可粘贴图片', 'Continue this session… Paste images here') : rt('问 Claude Code 关于这个项目的问题… 可粘贴图片', 'Ask Claude Code about this project… Paste images here'))}"></textarea>
+    <form class="chat-compose" id="chat-form"><div id="chat-attachments" class="chat-attachments" hidden></div><textarea autocomplete="off" autocorrect="off" spellcheck="false" id="chat-prompt" rows="3" placeholder="${esc(existing ? rt('在这个会话里继续… 可粘贴图片', 'Continue this session… Paste images here') : rt(`问 ${engineName} 关于这个项目的问题… 可粘贴图片`, `Ask ${engineName} about this project… Paste images here`))}"></textarea>
       <div class="chat-compose-footer"><button type="button" class="btn chat-attach" id="chat-attach">${esc(rt('＋ 图片', '+ Image'))}</button><input type="file" id="chat-image-file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden><span id="chat-status">${esc(rt('回车发送 · Shift + 回车换行', 'Enter to send · Shift + Enter for a new line'))}</span><button class="btn" type="submit" data-mode="queue" id="chat-queue" title="${esc(rt('等当前轮完成后处理', 'Process after the current turn'))}" hidden>${esc(rt('排队', 'Queue'))}</button><button class="btn primary" type="submit" id="chat-send">${esc(rt('发送', 'Send'))}</button><button class="btn" type="button" id="chat-stop" hidden>${esc(rt('停止', 'Stop'))}</button></div>
     </form>
   </section>`;
@@ -2094,11 +2349,17 @@ function renderChat() {
   setSettingsCollapsed(localStorage.getItem('panel-chat-settings-collapsed') !== 'false');
   settingsToggle.onclick = () => { const collapsed = !settingsPanel.hidden; localStorage.setItem('panel-chat-settings-collapsed', String(collapsed)); setSettingsCollapsed(collapsed); };
   enhanceChatPicker($('#chat-route'));
+  document.querySelectorAll('.chat-engine button').forEach(button => button.onclick = () => {
+    if (v.engine === button.dataset.engine) return;
+    const draft = $('#chat-prompt').value;
+    v.engine = button.dataset.engine; localStorage.setItem('panel-chat-engine', v.engine);
+    renderChat(); $('#chat-prompt').value = draft;
+  });
   const box = $('#chat-messages');
-  if (!v.messages.length) box.innerHTML = `<div class="chat-welcome"><span class="empty-icon">${icon('sessions')}</span><h3>${esc(existing ? rt('这个会话里还没有可显示的对话', 'No messages to show in this session') : rt('和 Claude Code 开始一段新会话', 'Start a new Claude Code session'))}</h3><p>${esc(rt('由本机 Claude Code 执行，有启用的代理账号时经账号路由；发出后会出现在左侧会话列表，之后可随时回来接续。', 'Runs on the local Claude Code CLI (through account routing when enabled). It appears in the session list so you can come back and continue.'))}</p></div>`;
+  if (!v.messages.length) box.innerHTML = `<div class="chat-welcome"><span class="empty-icon">${icon('sessions')}</span><h3>${esc(existing ? rt('这个会话里还没有可显示的对话', 'No messages to show in this session') : rt(`和 ${engineName} 开始一段新会话`, `Start a new ${engineName} session`))}</h3><p>${esc(codex ? rt('由本机 Codex CLI 执行，沿用你的 ChatGPT 订阅或 API Key 登录；开启抓包时请求经面板透传记录。发出后会出现在左侧会话列表，之后可随时回来接续。', 'Runs on the local Codex CLI with your ChatGPT subscription or API key login; with capture on, requests pass through the panel for inspection. It appears in the session list so you can come back and continue.') : rt('由本机 Claude Code 执行，有启用的代理账号时经账号路由；发出后会出现在左侧会话列表，之后可随时回来接续。', 'Runs on the local Claude Code CLI (through account routing when enabled). It appears in the session list so you can come back and continue.'))}</p></div>`;
   else {
     if (v.truncated) box.innerHTML = `<button type="button" class="btn chat-older" id="chat-older">${esc(rt('加载更早的消息', 'Load earlier messages'))}</button>`;
-    v.messages.forEach(m => { const body = appendChatMessage(box, m.role, m.text); paintChatImages(body, m.images || []); (m.tools || []).forEach(tool => paintChatTool(body, tool)); });
+    v.messages.forEach(m => { const body = appendChatMessage(box, m.role, m.text); paintChatImages(body, m.images || []); paintChatReasoning(body, m.reasoning || []); (m.tools || []).forEach(tool => paintChatTool(body, tool)); });
   }
   $('#chat-older')?.addEventListener('click', () => loadOlderChat(v));
   box.scrollTop = box.scrollHeight;
@@ -2127,7 +2388,7 @@ function renderChat() {
     catch (err) { toast(err.message, false); refreshRoutes(); }
   };
   paintRoutes();
-  $('#chat-model').onchange = e => { chatModel = e.target.value.trim(); localStorage.setItem('panel-chat-model', chatModel); };
+  $('#chat-model').onchange = e => { chatModel = e.target.value.trim(); localStorage.setItem('panel-chat-model-' + (chatView.engine || 'claude'), chatModel); };
   $('#chat-stop').onclick = async () => {
     try { await api('POST', `chat/${encodeURIComponent(v.sessionId)}/stop`, {}); }
     catch (e) { toast(e.message, false); }
@@ -2163,7 +2424,7 @@ async function loadOlderChat(v) {
     if (chatView !== v || !button.isConnected) return;
     const box = $('#chat-messages'), top = box.scrollTop, height = box.scrollHeight;
     const older = document.createElement('div');
-    d.messages.forEach(m => { const body = appendChatMessage(older, m.role, m.text); paintChatImages(body, m.images || []); (m.tools || []).forEach(tool => paintChatTool(body, tool)); });
+    d.messages.forEach(m => { const body = appendChatMessage(older, m.role, m.text); paintChatImages(body, m.images || []); paintChatReasoning(body, m.reasoning || []); (m.tools || []).forEach(tool => paintChatTool(body, tool)); });
     button.after(...older.childNodes);
     v.messages.unshift(...d.messages); v.historyBefore = d.historyBefore; v.truncated = d.truncated;
     if (!d.truncated) button.remove();
@@ -2207,7 +2468,7 @@ function registerChatInSidebar(v, prompt) {
   if (!v.sessionId) v.sessionId = crypto.randomUUID();
   if (!state.items.some(item => item.key === v.sessionId)) {
     const name = prompt.replace(/\s+/g, ' ').slice(0, 80) || rt('图片对话', 'Image conversation');
-    v.optimisticItem = { key: v.sessionId, name, description: `${v.cwd.split('/').filter(Boolean).pop() || '/'} · ${new Date().toLocaleDateString('sv-SE')}`, origin: 'user', titleSource: 'auto' };
+    v.optimisticItem = { key: v.sessionId, name, description: `${v.cwd.split('/').filter(Boolean).pop() || '/'} · ${new Date().toLocaleDateString('sv-SE')}`, origin: 'user', titleSource: 'auto', engine: v.engine };
     state.items.unshift(v.optimisticItem);
     $('#title').firstChild.textContent = name;
   }
@@ -2251,7 +2512,8 @@ async function sendChat(mode = 'steer') {
   const v = chatView, prompt = $('#chat-prompt').value.trim();
   if ((!prompt && !v.attachments?.length) || v.readingImages) return;
   const images = (v.attachments || []).slice();
-  chatModel = $('#chat-model').value.trim(); localStorage.setItem('panel-chat-model', chatModel);
+  chatModel = $('#chat-model').value.trim(); localStorage.setItem('panel-chat-model-' + (chatView.engine || 'claude'), chatModel);
+  document.querySelectorAll('.chat-engine button').forEach(button => { button.disabled = true; });
   registerChatInSidebar(v, prompt);
   const turn = createChatTurn(v, prompt, images);
   v.attachments = []; paintChatAttachments(v); $('#chat-prompt').value = '';
@@ -2274,7 +2536,7 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
   const status = $('#chat-status');
   const updateStatus = () => {
     const active = run.turns.get(run.activeId) || Array.from(run.turns.values()).find(turn => !turn.finished);
-    if (active && !active.finished) status.textContent = `Claude Code ${active.phase}… · ${Math.floor((Date.now() - active.startedAt) / 1000)}s`;
+    if (active && !active.finished) status.textContent = `${v.engine === 'codex' ? 'Codex' : 'Claude Code'} ${active.phase}… · ${Math.floor((Date.now() - active.startedAt) / 1000)}s`;
     else if (run.lastStatus) status.textContent = run.lastStatus;
   };
   const timer = setInterval(updateStatus, 1000); updateChatSendState(v); updateStatus();
@@ -2292,10 +2554,20 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
       run.activeId = ''; run.lastStatus = rt('已停止', 'Stopped'); updateChatSendState(v); updateStatus(); return;
     }
     if (kind === 'meta') {
+      // Codex 的线程 ID 由 CLI 生成：新会话用服务端返回的 ID 替换前端预分配的 ID
+      if (payload.sessionId && v.sessionId !== payload.sessionId) {
+        const previous = v.sessionId, item = state.items.find(entry => entry.key === previous);
+        v.sessionId = payload.sessionId;
+        if (item) { item.key = payload.sessionId; item.engine = payload.engine; }
+        if (state.current === previous) { state.current = payload.sessionId; writeRoute(); renderList(); }
+      }
+      if (payload.engine) v.engine = payload.engine;
       v.liveId = payload.sessionId; v.lastReplayJobId = payload.jobId; resolveReady(); refreshRoutes();
+      const picker = chatView === v && document.querySelector('.chat-engine');
+      if (picker) { const badge = document.createElement('span'); badge.className = 'chat-engine-badge' + (v.engine === 'codex' ? ' codex' : ''); badge.textContent = v.engine === 'codex' ? 'Codex' : 'Claude Code'; picker.replaceWith(badge); }
       if (chatView === v && !$('#chat-detail')) {
         const actions = $('.chat-top-actions'), settings = $('#chat-settings-toggle');
-        for (const [id, text, action] of [['chat-detail', rt('详情', 'Details'), () => { state.sessionDetail = true; openItem(v.sessionId); }], ['chat-replay', rt('查看 Claude 提示词', 'View Claude prompts'), () => loadReplay(v.sessionId)]]) {
+        for (const [id, text, action] of [['chat-detail', rt('详情', 'Details'), () => { state.sessionDetail = true; openItem(v.sessionId); }], ['chat-replay', v.engine === 'codex' ? rt('查看 Codex 提示词', 'View Codex prompts') : rt('查看 Claude 提示词', 'View Claude prompts'), () => loadReplay(v.sessionId)]]) {
           const button = document.createElement('button'); button.type = 'button'; button.className = 'btn'; button.id = id; button.textContent = text; button.onclick = action; actions.insertBefore(button, settings);
         }
       }
@@ -2340,6 +2612,13 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
     const current = run.turns.get(payload.messageId || run.activeId);
     if (!current) return;
     const answer = current.answer;
+    if (kind === 'reasoning') {
+      answer.reasoning ||= [];
+      const item = answer.reasoning.find(item => item.id === payload.id);
+      if (item) item.text = payload.text; else answer.reasoning.push({ id: payload.id, text: payload.text });
+      current.phase = rt('正在思考', 'Thinking'); current.label.textContent = current.phase;
+      updateChatContent(current.box, () => paintChatReasoning(current.node, answer.reasoning));
+    }
     if (kind === 'tool' || kind === 'tool_input' || kind === 'tool_result') {
       let tool = answer.tools.find(item => item.id === payload.id);
       if (!tool) { tool = { id: payload.id, name: payload.name || 'Tool', input: {}, state: 'running' }; answer.tools.push(tool); }
@@ -2361,7 +2640,7 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
   try {
     const response = await fetch(reconnect ? `/api/chat/${encodeURIComponent(v.sessionId)}/events` : '/api/chat', {
       method: reconnect ? 'GET' : 'POST', headers: reconnect ? undefined : { 'Content-Type': 'application/json' },
-      body: reconnect ? undefined : JSON.stringify({ prompt, images, cwd: v.cwd, model: chatModel, sessionId: v.sessionId, messageId: turn.id, accountId: v.accountId }), signal: abort.signal,
+      body: reconnect ? undefined : JSON.stringify({ prompt, images, cwd: v.cwd, model: chatModel, sessionId: v.sessionId, messageId: turn.id, accountId: v.engine === 'codex' ? undefined : v.accountId, engine: v.engine }), signal: abort.signal,
     });
     if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.error || response.statusText); }
     const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
@@ -2390,6 +2669,18 @@ function updateChatContent(box, paint) {
   if (follow) box.scrollTop = box.scrollHeight;
   box.updateScrollControls?.();
 }
+function paintChatReasoning(body, reasoning) {
+  const text = reasoning.map(item => item.text).filter(Boolean).join('\n\n');
+  if (!text) return;
+  const article = body.parentElement;
+  let detail = article.querySelector('.chat-reasoning');
+  if (!detail) {
+    detail = document.createElement('details'); detail.className = 'chat-reasoning';
+    const label = document.createElement('summary'); label.textContent = rt('思考摘要', 'Reasoning summary');
+    detail.append(label, document.createElement('pre')); body.before(detail);
+  }
+  detail.querySelector('pre').textContent = text;
+}
 function paintChatTool(body, tool) {
   const article = body.parentElement;
   let trace = article.querySelector('.chat-tool-trace');
@@ -2411,7 +2702,7 @@ function paintChatTool(body, tool) {
 function appendChatMessage(box, role, text) {
   box.querySelector('.chat-welcome')?.remove();
   const article = document.createElement('article'); article.className = 'chat-message ' + role;
-  const label = document.createElement('div'); label.className = 'chat-message-label'; label.textContent = role === 'user' ? rt('你', 'You') : 'Claude Code';
+  const label = document.createElement('div'); label.className = 'chat-message-label'; label.textContent = role === 'user' ? rt('你', 'You') : (chatView?.engine === 'codex' ? 'Codex' : 'Claude Code');
   const body = document.createElement('div'); body.className = 'chat-message-body'; body.innerHTML = role === 'assistant' ? md(text) : esc(text).replace(/\n/g, '<br>');
   article.append(label, body); box.append(article); return body;
 }
@@ -2436,13 +2727,23 @@ async function renderProxyTab() {
     $('#list').innerHTML = '';
     $('#route-dialog')?.remove();
     $('#render').innerHTML = `
-      ${viewHeading('proxy', `<button class="btn primary" id="route-add">＋ ${esc(rt('添加账号', 'Add account'))}</button>`)}
+      ${viewHeading('proxy')}
+      <div class="engine-tabs connection-tabs" role="group" aria-label="${esc(rt('选择引擎', 'Choose engine'))}">${[['claude', 'Claude Code', rt('多账号路由 · 故障转移', 'Account routing · Failover')], ['codex', 'Codex', rt('本机登录 · 透传抓包', 'Local login · Request capture')]].map(([id, name, note]) => `<button type="button" data-connection-engine="${id}" aria-pressed="false"><span class="engine-emblem ${id}">${id === 'codex' ? 'O' : '✳'}</span><span><strong>${name}</strong><small>${esc(note)}</small></span>${icon('arrow')}</button>`).join('')}</div>
+      <section id="claude-connection"><div class="connection-heading"><h3>Claude Code</h3><button class="btn primary" id="route-add">＋ ${esc(rt('添加账号', 'Add account'))}</button></div>
       <div class="chart route-connect" id="route-connect"></div>
       <div id="route-notice" role="status"></div>
       <div class="route-heading route-controls"><h3>${esc(rt('我的账号', 'My accounts'))} <span id="route-count" class="route-muted"></span></h3><label>${esc(rt('使用方式', 'Strategy'))} <select id="route-mode"><option value="manual">${esc(rt('手动切换', 'Manual'))}</option><option value="failover">${esc(rt('优先使用，故障自动切换', 'Priority with failover'))}</option><option value="round-robin">${esc(rt('多个账号轮流使用', 'Round robin'))}</option></select></label></div>
       <div id="route-accounts"></div>
       <div class="route-foot"><span class="route-muted">${esc(rt('切换对下一次请求生效，正在生成的回复不受影响。', 'Changes apply to the next request. Active responses continue uninterrupted.'))}</span><button class="btn" id="route-refresh">${esc(rt('刷新', 'Refresh'))}</button><button class="btn" id="route-reset">${esc(rt('重置故障状态', 'Reset failures'))}</button></div>
-      <section class="account-usage chart"><div class="route-heading"><div><h3>${esc(rt('账号用量', 'Account usage'))}</h3><p class="route-muted">${esc(rt('按本地代理抓取的最近请求统计；历史请求只从代理启用后开始记录。', 'Based on recent requests captured by the local proxy. Tracking starts when the proxy is enabled.'))}</p></div><button class="btn" id="account-usage-refresh">${esc(rt('刷新', 'Refresh'))}</button></div><div id="account-usage-list"><p class="route-muted">${esc(rt('正在读取用量…', 'Loading usage…'))}</p></div></section>`;
+      <section class="account-usage chart"><div class="route-heading"><div><h3>${esc(rt('账号用量', 'Account usage'))}</h3><p class="route-muted">${esc(rt('按本地代理抓取的最近请求统计；历史请求只从代理启用后开始记录。', 'Based on recent requests captured by the local proxy. Tracking starts when the proxy is enabled.'))}</p></div><button class="btn" id="account-usage-refresh">${esc(rt('刷新', 'Refresh'))}</button></div><div id="account-usage-list"><p class="route-muted">${esc(rt('正在读取用量…', 'Loading usage…'))}</p></div></section>
+      </section><section class="codex-panel chart" id="codex-panel"><div class="route-heading"><div><h3>Codex</h3><p class="route-muted">${esc(rt('Codex 使用你自己的 codex login；面板只负责选版本和透传抓包，不保存 Codex 凭证。', 'Codex uses your own codex login. The panel picks the CLI and passes requests through for capture; it never stores Codex credentials.'))}</p></div><button class="btn" id="codex-refresh">${esc(rt('刷新', 'Refresh'))}</button></div><div id="codex-body"><p class="route-muted">${esc(rt('正在读取…', 'Loading…'))}</p></div></section>`;
+    const selectConnection = engine => {
+      localStorage.setItem('panel-connection-engine', engine);
+      $('#claude-connection').hidden = engine !== 'claude'; $('#codex-panel').hidden = engine !== 'codex';
+      document.querySelectorAll('[data-connection-engine]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.connectionEngine === engine)));
+    };
+    document.querySelectorAll('[data-connection-engine]').forEach(button => button.onclick = () => selectConnection(button.dataset.connectionEngine));
+    selectConnection(localStorage.getItem('panel-connection-engine') === 'codex' ? 'codex' : 'claude');
     const dialog = document.createElement('dialog'); dialog.id = 'route-dialog';
     const envExample = { env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:8790', ANTHROPIC_AUTH_TOKEN: 'ferry', ANTHROPIC_API_KEY: '', CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1', CLAUDE_CODE_AUTO_MODE_SERVER: '0' } };
     dialog.innerHTML = `<form id="route-form"><div class="route-heading"><h2 id="route-form-title">${esc(rt('添加账号', 'Add account'))}</h2><button class="btn" type="button" id="route-cancel" aria-label="${esc(rt('关闭', 'Close'))}">✕</button></div>
@@ -2573,6 +2874,31 @@ async function renderProxyTab() {
     $('#route-mode').onchange = e => run(async () => { try { await save({ ...routeData, mode: e.target.value, selected: routeData.selected || routeData.accounts.find(a => a.enabled)?.id || '' }); } finally { $('#route-mode').value = routeData.mode; } });
     $('#route-refresh').onclick = () => run(async () => { routeData = await api('GET', 'proxy'); draw(); });
     $('#account-usage-refresh').onclick = loadAccountUsage;
+    async function loadCodex() {
+      const box = $('#codex-body'); if (!box) return;
+      try {
+        const [info, stats] = await Promise.all([api('GET', 'codex'), api('GET', 'codex/stats').catch(() => null)]);
+        if (state.type !== 'proxy' || !$('#codex-body')) return;
+        const others = info.candidates.filter(c => c.path !== info.cli);
+        const auth = info.authMode === 'apikey' ? 'API Key' : info.authMode ? rt('ChatGPT 订阅', 'ChatGPT subscription') : rt('未登录（终端运行 codex login）', 'Not signed in (run codex login)');
+        const limits = stats?.rateLimits, windows = limits ? [limits.primary, limits.secondary].filter(Boolean) : [];
+        const windowName = m => m >= 10080 ? rt('每周', 'Weekly') : m >= 1440 ? rt('每天', 'Daily') : m >= 60 ? rt(`${Math.round(m / 60)} 小时`, `${Math.round(m / 60)}h`) : `${m}m`;
+        const quota = windows.map(w => `<div class="codex-quota"><span>${esc(windowName(w.window_minutes))} · ${esc(rt('已用', 'used'))} <b>${Math.round(w.used_percent)}%</b></span><div class="codex-bar"><i style="width:${Math.min(100, Math.max(0, w.used_percent))}%"></i></div><small>${w.resets_at ? esc(rt('重置于 ', 'Resets ') + new Date(w.resets_at * 1000).toLocaleString()) : ''}</small></div>`).join('');
+        const t = stats?.totals;
+        box.innerHTML = `<div class="codex-grid">
+          <div><span class="route-muted">${esc(rt('CLI 版本', 'CLI'))}</span><strong>${info.cli ? 'v' + esc(info.version || '?') : esc(rt('未找到 codex', 'codex not found'))}</strong><small title="${esc(info.cli || '')}">${esc(info.cli || rt('安装：npm i -g @openai/codex', 'Install: npm i -g @openai/codex'))}</small>${others.length ? `<small class="codex-warn">${esc(rt('另有旧版本未使用：', 'Other installs ignored: '))}${others.map(c => esc(`v${c.version || '?'} ${c.path}`)).join('，')}</small>` : ''}</div>
+          <div><span class="route-muted">${esc(rt('登录方式', 'Login'))}</span><strong>${esc(auth)}</strong>${limits?.plan_type ? `<small>${esc(limits.plan_type)}</small>` : ''}</div>
+          <div><span class="route-muted">${esc(rt('累计用量', 'Total usage'))}</span><strong>${t ? fmtNum(t.input + t.output) : '—'}</strong><small>${t ? esc(rt(`${stats.sessions} 个会话 · ${t.turns} 轮 · 输入 ${fmtNum(t.input)}（缓存 ${fmtNum(t.cached)}）· 输出 ${fmtNum(t.output)}`, `${stats.sessions} sessions · ${t.turns} turns · in ${fmtNum(t.input)} (cached ${fmtNum(t.cached)}) · out ${fmtNum(t.output)}`)) : ''}</small></div>
+        </div>
+        ${quota ? `<div class="codex-quotas">${quota}${stats.rateLimitsAt ? `<small class="route-muted">${esc(rt('额度快照来自 ', 'Snapshot from '))}${esc(new Date(stats.rateLimitsAt).toLocaleString())}</small>` : ''}</div>` : ''}
+        <label class="codex-toggle"><input type="checkbox" id="codex-capture" ${info.capture ? 'checked' : ''}> <span><b>${esc(rt('面板发起的 Codex 会话经本地代理抓包', 'Capture panel-started Codex sessions through the local proxy'))}</b><small class="route-muted">${esc(rt('关闭后直连 OpenAI；代理异常时可临时关闭。飞书里也可以发 /route codex direct。', 'Turn off to connect directly; useful if the proxy misbehaves. In Feishu: /route codex direct.'))}</small></span></label>
+        <div class="codex-profile"><span><b>${esc(rt('终端抓包配置', 'Terminal capture profile'))}</b><small class="route-muted">${info.profile.installed ? esc(rt('已生成，终端用 codex -p my-agents 启动即可抓包', 'Installed. Run codex -p my-agents to capture')) : esc(rt('直接运行 codex 不经过面板；生成后用 codex -p my-agents 启动可抓包', 'Plain codex bypasses the panel. Install, then run codex -p my-agents'))}</small></span><button class="btn" id="codex-profile">${esc(info.profile.installed ? rt('移除配置', 'Remove profile') : rt('生成配置', 'Install profile'))}</button></div>`;
+        $('#codex-capture').onchange = e => run(async () => { const next = await api('PUT', 'codex', { capture: e.target.checked }); toast(next.capture ? rt('Codex 已改为抓包，下一轮生效', 'Codex capture on for the next turn') : rt('Codex 已改为直连，下一轮生效', 'Codex now connects directly from the next turn')); loadCodex(); });
+        $('#codex-profile').onclick = () => run(async () => { await api('POST', 'codex/profile', info.profile.installed ? { remove: true } : {}); loadCodex(); });
+      } catch (e) { box.innerHTML = `<p class="route-muted">${esc(e.message)}</p>`; }
+    }
+    $('#codex-refresh').onclick = loadCodex;
+    loadCodex();
     $('#route-reset').onclick = () => run(async () => { routeData = await api('POST', 'proxy/reset', {}); draw(); });
     $('#route-accounts').onclick = e => run(async () => {
       const action = e.target.closest('[data-action]')?.dataset.action;
@@ -2654,13 +2980,14 @@ installWindowControls();
 document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
     const root = expandedWindow?.node || $('#render');
-    root.querySelectorAll('details:not(.route-more):not(.chat-picker)').forEach(node => { node.open = true; node.populateForSearch?.(); });
+    root.querySelectorAll('details:not(.route-more)').forEach(node => { node.open = true; node.populateForSearch?.(); });
     root.querySelectorAll('pre, .capture-context').forEach(node => { if (node.setExpanded) node.setExpanded(true); else node.classList.add('show-full-content'); });
     // Keep native browser Find, including its match count and next/previous shortcuts.
   }
 });
 
 // ---------- 初始化 ----------
+installPanelSelects();
 applyLang();
 restoreRoute();
 loadCounts();

@@ -73,6 +73,45 @@ test('new project sessions, queue/steer modes and images reach the same Panel AP
   assert.equal(f.calls[0].messageId, messageUUID(first.messageId));
 });
 
+test('unlisted project paths survive restart before the first task and support engine switching', async t => {
+  const f = await fixture(t); await f.pair();
+  const cwd = path.join(f.dir, '新项目  with spaces'); fs.mkdirSync(cwd);
+  await f.gateway.receive(f.msg('/new codex "' + cwd + '"'));
+  assert.match(JSON.stringify(f.sent.at(-1).content), /新会话已就绪/);
+  assert.equal(f.calls.length, 0);
+  await f.gateway.stop();
+  const restored = createFeishuGateway(f.options); await restored.start();
+  try {
+    await restored.receive(f.msg('/projects'));
+    assert.ok(JSON.stringify(f.sent.at(-1).content).includes(cwd));
+    await restored.receive(f.msg('/claude'));
+    await restored.receive(f.msg('First task in the new directory'));
+    assert.equal(f.calls.at(-1).cwd, cwd);
+    await restored.receive(f.msg('/new codex ' + cwd));
+    await restored.receive(f.msg('Codex task in the new directory'));
+    assert.equal(f.calls.at(-1).cwd, cwd);
+    assert.equal(f.calls.at(-1).engine, 'codex');
+  } finally { await restored.stop(); }
+});
+
+test('new project paths must be existing directories and retain management authorization', async t => {
+  const f = await fixture(t); await f.pair();
+  const file = path.join(f.dir, 'ordinary-file'); fs.writeFileSync(file, 'text');
+  for (const target of [file, path.join(f.dir, 'missing-directory')]) {
+    await f.gateway.receive(f.msg('/new ' + target));
+    assert.match(JSON.stringify(f.sent.at(-1).content), /项目目录不存在或不是文件夹/);
+  }
+  assert.equal(fs.existsSync(path.join(f.dir, 'missing-directory')), false);
+  await f.gateway.receive(f.msg('/new ~/'));
+  assert.match(JSON.stringify(f.sent.at(-1).content), /新会话已就绪/);
+  await f.gateway.receive(f.msg('Use the home directory'));
+  assert.equal(f.calls.at(-1).cwd, os.homedir());
+  await f.gateway.configure({ allowAllGroups: true });
+  await f.gateway.receive(f.msg('/new ' + f.dir, { chatId: 'oc_unlisted_group', chatType: 'group', mentionedBot: true }));
+  assert.match(JSON.stringify(f.sent.at(-1).content), /逐项授权/);
+  assert.equal(f.calls.length, 1);
+});
+
 test('card actions cannot be used by another owner and groups require an allowlist plus mention', async t => {
   const f = await fixture(t); await f.pair(); await f.pair('ou_second');
   const action = { action: { value: { owner: 'ou_owner', action: 'switch', id: f.rows[0].id, key: contextKey(f.msg('')) } }, operator: { openId: 'ou_second' }, chatId: 'oc_private', messageId: 'card_id' };
@@ -256,7 +295,7 @@ test('open groups hide session controls and tool details while explicitly select
   await f.gateway.receive(f.msg('公开群任务', group));
   await new Promise(resolve => setTimeout(resolve, 30));
   let rendered = JSON.stringify(f.sent.at(-1).content);
-  assert.equal(f.sent.at(-1).content.post.zh_cn.content[0][0].text, 'A complete response.');
+  assert.equal(f.sent.at(-1).content.post.zh_cn.content[0][0].text, 'A complete response.\n\nClaude Code · /codex 或 /claude 切换引擎');
   assert.equal(f.updated.length, 0);
   assert.deepEqual(f.reactions.map(x => x.action), ['add', 'remove']);
   assert.match(rendered, /A complete response/);
@@ -330,4 +369,260 @@ test('idle sockets are not reported as connected and can be restarted; reconnect
   assert.match(f.gateway.status().lastError, /ENOTFOUND/);
   f.channel.getConnectionStatus = () => ({ state: 'connected' });
   f.handlers.reconnected(); assert.equal(f.gateway.status().phase, 'connected'); assert.equal(f.gateway.status().lastError, '');
+});
+
+test('/new codex starts a Codex binding and adopts the thread ID the panel returns', async t => {
+  const f = await fixture(t); await f.pair();
+  const original = f.panel.submit, requested = [];
+  f.panel.submit = async input => {
+    requested.push(input);
+    const sessionId = input.engine === 'codex' && !input.sessionId.startsWith('thread-') ? 'thread-0001-codex' : input.sessionId;
+    await original({ ...input, sessionId }); return { sessionId };
+  };
+  await f.gateway.receive(f.msg('/new codex'));
+  assert.match(JSON.stringify(f.sent.at(-1).content), /Codex · /);
+  await f.gateway.receive(f.msg('first codex turn'));
+  await f.gateway.receive(f.msg('second codex turn'));
+  assert.equal(requested[0].engine, 'codex'); assert.equal(requested[0].model, '');
+  assert.notEqual(requested[0].sessionId, 'thread-0001-codex');
+  assert.equal(requested[1].sessionId, 'thread-0001-codex');
+  await f.gateway.receive(f.msg('/projects'));
+  assert.match(JSON.stringify(f.sent.at(-1).content), /改用 Codex/);
+});
+
+test('/route switches proxy accounts, modes, cooldowns, pins and Codex capture inside the gateway without invoking a model', async t => {
+  const f = await fixture(t); await f.pair();
+  const router = require('../proxy-router').createRouter({ dir: f.dir, port: 49999 });
+  router.save({ mode: 'manual', selected: '', accounts: [
+    { id: 'acc-a', name: 'Primary', url: 'https://a.example.com', token: 'secret-token-a', authType: 'bearer' },
+    { id: 'acc-b', name: 'Backup', url: 'https://b.example.com', token: 'secret-token-b', authType: 'bearer' },
+  ], selected: 'acc-a' });
+  let capture = true;
+  Object.assign(f.panel, {
+    routes: () => ({ ...router.status(), pins: router.sessions().routes }), route: input => router.route(input), resetRoutes: () => router.reset(),
+    pinRoute: (id, accountId) => router.setSessionRoute(id, accountId), codex: () => ({ version: '0.167.0', authMode: 'chatgpt', capture }), setCodexCapture: value => { capture = value; },
+  });
+  await f.gateway.receive(f.msg('/route'));
+  let card = JSON.stringify(f.sent.at(-1).content);
+  assert.match(card, /代理路由/); assert.match(card, /Primary/); assert.match(card, /● 当前/); assert.doesNotMatch(card, /secret-token/);
+  await f.gateway.receive(f.msg('/route 2'));
+  assert.equal(router.status().selected, 'acc-b'); assert.equal(router.status().mode, 'manual');
+  assert.match(JSON.stringify(f.sent.at(-1).content), /已切到「Backup」/);
+  await f.gateway.receive(f.msg('/route auto')); assert.equal(router.status().mode, 'failover');
+  await f.gateway.receive(f.msg('/route rr')); assert.equal(router.status().mode, 'round-robin');
+  await f.gateway.receive(f.msg('/route primary')); assert.equal(router.status().selected, 'acc-a'); assert.equal(router.status().mode, 'manual');
+  await f.gateway.receive(f.msg('/route codex direct')); assert.equal(capture, false);
+  await f.gateway.receive(f.msg('/sessions')); await f.gateway.receive(f.msg('/switch 1'));
+  await f.gateway.receive(f.msg('/route pin 2')); assert.equal(router.sessions().routes[f.rows[0].id], 'acc-b');
+  await f.gateway.receive(f.msg('/route pin off')); assert.equal(router.sessions().routes[f.rows[0].id], undefined);
+  await f.gateway.receive(f.msg('/route nobody')); assert.match(JSON.stringify(f.sent.at(-1).content), /没有找到该账号/);
+  // tokens survive switching
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-proxy.json'), 'utf8')).accounts[1].token, 'secret-token-b');
+  // card buttons
+  const key = contextKey(f.msg(''));
+  await f.gateway.action({ action: { value: { owner: 'ou_owner', key, action: 'route', mode: 'failover' } }, operator: { openId: 'ou_owner' }, chatId: 'oc_private', messageId: 'card_route' });
+  assert.equal(router.status().mode, 'failover');
+  await f.gateway.action({ action: { value: { owner: 'ou_owner', key, action: 'route', selected: 'acc-b' } }, operator: { openId: 'ou_owner' }, chatId: 'oc_private', messageId: 'card_route' });
+  assert.equal(router.status().selected, 'acc-b'); assert.equal(router.status().mode, 'manual');
+  await f.gateway.action({ action: { value: { owner: 'ou_owner', key, action: 'route', codexCapture: true } }, operator: { openId: 'ou_owner' }, chatId: 'oc_private', messageId: 'card_route' });
+  assert.equal(capture, true);
+  assert.equal(f.calls.filter(call => call.prompt !== undefined).length, 0);
+});
+
+test('different topics keep Claude and Codex engines, real session IDs and model choices across restart', async t => {
+  const f = await fixture(t); await f.pair(); await f.gateway.configure({ allowedChatIds: ['oc_group'], model: 'claude-model' });
+  const group = { chatType: 'group', chatId: 'oc_group', mentionedBot: true };
+  const claude = { ...group, threadId: 'omt_claude' }, codex = { ...group, threadId: 'omt_codex' };
+  const original = f.panel.submit;
+  f.panel.submit = async input => { const id = input.engine === 'codex' ? 'codex-real-thread' : input.sessionId; await original({ ...input, sessionId: id }); return { sessionId: id }; };
+  await f.gateway.receive(f.msg('/new claude', claude));
+  await f.gateway.receive(f.msg('/new codex', codex));
+  await Promise.all([f.gateway.receive(f.msg('Claude first', claude)), f.gateway.receive(f.msg('Codex first', codex))]);
+  const one = f.calls.find(call => call.prompt === 'Claude first'), two = f.calls.find(call => call.prompt === 'Codex first');
+  assert.notEqual(one.sessionId, two.sessionId);
+  assert.equal(one.engine || 'claude', 'claude'); assert.equal(one.model, 'claude-model');
+  assert.equal(two.engine, 'codex'); assert.equal(two.model, ''); assert.equal(two.sessionId, 'codex-real-thread');
+  const saved = JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json'))).bindings;
+  assert.equal(saved[contextKey(f.msg('', claude))].engine, 'claude');
+  assert.equal(saved[contextKey(f.msg('', codex))].engine, 'codex');
+  assert.equal(saved[contextKey(f.msg('', codex))].id, 'codex-real-thread');
+  await f.gateway.stop(); const restored = createFeishuGateway(f.options); await restored.start();
+  try {
+    await restored.receive(f.msg('Claude after restart', claude));
+    assert.equal(f.calls.at(-1).sessionId, one.sessionId); assert.equal(f.calls.at(-1).model, 'claude-model');
+    await restored.receive(f.msg('Codex after restart', { ...codex, senderId: 'ou_second' }));
+    assert.equal(f.calls.at(-1).sessionId, two.sessionId); assert.equal(f.calls.at(-1).engine, 'codex'); assert.equal(f.calls.at(-1).model, '');
+  } finally { await restored.stop(); }
+});
+
+test('switch commands and card switches persist the target engine and repair legacy bindings before submission', async t => {
+  const f = await fixture(t); await f.pair(); await f.gateway.configure({ allowedChatIds: ['oc_group'], model: 'claude-only-model' });
+  const codex = { id: '33333333-3333-4333-8333-333333333333', engine: 'codex', title: 'Codex existing', project: f.dir }; f.rows.push(codex);
+  const topic = { chatType: 'group', chatId: 'oc_group', threadId: 'omt_switch', mentionedBot: true };
+  const key = contextKey(f.msg('', topic));
+  await f.gateway.receive(f.msg('/switch ' + codex.id, topic));
+  let saved = JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json')));
+  assert.equal(saved.bindings[key].engine, 'codex');
+  await f.gateway.receive(f.msg('Existing Codex', topic)); assert.equal(f.calls.at(-1).engine, 'codex'); assert.equal(f.calls.at(-1).model, '');
+  await f.gateway.receive(f.msg('/sessions', topic)); const card = f.sent.at(-1);
+  await f.gateway.action({ messageId: card.messageId, chatId: topic.chatId, operator: { openId: 'ou_owner' }, action: { value: { owner: 'ou_owner', key, action: 'switch', id: f.rows.find(row => row.id !== codex.id).id } } });
+  saved = JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json'))); assert.equal(saved.bindings[key].engine, 'claude');
+  await f.gateway.receive(f.msg('/switch ' + codex.id, topic));
+  await f.gateway.stop(); saved = JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json'))); delete saved.bindings[key].engine;
+  fs.writeFileSync(path.join(f.dir, 'panel-feishu-state.json'), JSON.stringify(saved));
+  const restored = createFeishuGateway(f.options); await restored.start();
+  try { await restored.receive(f.msg('Legacy Codex', topic)); assert.equal(f.calls.at(-1).engine, 'codex'); assert.equal(f.calls.at(-1).model, ''); }
+  finally { await restored.stop(); }
+});
+
+test('default engine controls new topics and /new, preserves existing bindings and survives restart', async t => {
+  const f = await fixture(t); await f.pair();
+  await f.gateway.receive(f.msg('Existing Claude'));
+  const existing = f.calls.at(-1).sessionId;
+  await f.gateway.configure({ defaultEngine: 'codex', allowAllGroups: true });
+  assert.equal(f.gateway.status().config.defaultEngine, 'codex');
+  await f.gateway.receive(f.msg('Continue existing')); assert.equal(f.calls.at(-1).sessionId, existing); assert.notEqual(f.calls.at(-1).engine, 'codex');
+  const topic = { chatType: 'group', chatId: 'oc_default', threadId: 'omt_default', mentionedBot: true };
+  await f.gateway.receive(f.msg('Fresh topic', topic)); assert.equal(f.calls.at(-1).engine, 'codex');
+  await f.gateway.receive(f.msg('/new', topic)); await f.gateway.receive(f.msg('Default new', topic)); assert.equal(f.calls.at(-1).engine, 'codex');
+  await f.gateway.receive(f.msg('/new claude', topic)); await f.gateway.receive(f.msg('Explicit Claude', topic)); assert.notEqual(f.calls.at(-1).engine, 'codex');
+  await assert.rejects(f.gateway.configure({ defaultEngine: 'unknown' }), /默认引擎/);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  await f.gateway.stop(); const restored = createFeishuGateway(f.options);
+  try { await restored.messages({}); assert.equal(restored.status().config.defaultEngine, 'codex'); } finally { await restored.stop(); }
+});
+
+test('simple topics can inspect and change engines with short hints and no detailed session data', async t => {
+  const f = await fixture(t); await f.pair(); await f.gateway.configure({ allowAllGroups: true, defaultEngine: 'codex' });
+  const one = { chatType: 'group', chatId: 'oc_simple_engines', threadId: 'omt_one', mentionedBot: true };
+  const two = { ...one, threadId: 'omt_two' };
+  await f.gateway.receive(f.msg('/engine', one));
+  assert.match(JSON.stringify(f.sent.at(-1).content), /默认引擎：Codex/); assert.equal(f.sent.at(-1).content.card, undefined);
+  await f.gateway.receive(f.msg('Other topic', two)); const other = f.calls.at(-1).sessionId;
+  await f.gateway.receive(f.msg('/engine claude', one));
+  assert.match(JSON.stringify(f.sent.at(-1).content), /Claude Code/);
+  await f.gateway.receive(f.msg('First topic', one)); assert.notEqual(f.calls.at(-1).engine, 'codex');
+  await new Promise(resolve => setTimeout(resolve, 30));
+  let reply = JSON.stringify(f.sent.at(-1).content); assert.match(reply, /Claude Code · \/codex/); assert.equal(reply.includes(f.dir), false);
+  await f.gateway.receive(f.msg('/engine codex', one)); await f.gateway.receive(f.msg('First topic Codex', one)); assert.equal(f.calls.at(-1).engine, 'codex');
+  await f.gateway.receive(f.msg('Other topic again', two)); assert.equal(f.calls.at(-1).sessionId, other); assert.equal(f.calls.at(-1).engine, 'codex');
+  await f.gateway.receive(f.msg('/current', one)); reply = JSON.stringify(f.sent.at(-1).content); assert.match(reply, /Codex/); assert.equal(reply.includes(f.dir), false);
+  await new Promise(resolve => setTimeout(resolve, 30));
+});
+
+test('engine picker cards start explicit engines without changing another topic binding', async t => {
+  const f = await fixture(t); await f.pair(); await f.gateway.configure({ allowedChatIds: ['oc_engine_card'], defaultEngine: 'codex' });
+  const topic = { chatType: 'group', chatId: 'oc_engine_card', threadId: 'omt_engine_card', mentionedBot: true };
+  await f.gateway.receive(f.msg('/engine', topic)); const card = f.sent.at(-1), key = contextKey(f.msg('', topic));
+  assert.match(JSON.stringify(card.content), /选择会话引擎/);
+  await f.gateway.action({ messageId: card.messageId, chatId: topic.chatId, operator: { openId: 'ou_owner' }, action: { value: { owner: 'ou_owner', key, action: 'new', cwd: f.dir, engine: 'claude' } } });
+  await f.gateway.receive(f.msg('Picked Claude', topic)); assert.notEqual(f.calls.at(-1).engine, 'codex');
+  await f.gateway.receive(f.msg('/new', { ...topic, threadId: 'omt_other' }));
+  await f.gateway.receive(f.msg('Default Codex', { ...topic, threadId: 'omt_other' })); assert.equal(f.calls.at(-1).engine, 'codex');
+});
+
+test('@bot new/engine/current commands are handled locally in detailed and simple topics', async t => {
+  const f = await fixture(t); await f.pair(); f.channel.botIdentity = { name: 'Timi', openId: 'ou_bot' };
+  await f.gateway.configure({ allowAllGroups: true, allowedChatIds: ['oc_detail_commands'] });
+  for (const chatId of ['oc_detail_commands', 'oc_simple_commands']) {
+    const topic = { chatType: 'group', chatId, threadId: 'omt_commands', mentionedBot: true };
+    const before = f.calls.length;
+    await f.gateway.receive(f.msg('@Timi /new codex', topic)); assert.equal(f.calls.length, before);
+    assert.match(JSON.stringify(f.sent.at(-1).content), /Codex/);
+    await f.gateway.receive(f.msg('Use Codex now', topic)); assert.equal(f.calls.at(-1).engine, 'codex');
+    const after = f.calls.length;
+    await f.gateway.receive(f.msg('@_user_1 /engine claude', { ...topic, mentions: [{ key: '@_user_1', openId: 'ou_bot', isBot: true }] })); assert.equal(f.calls.length, after);
+    await f.gateway.receive(f.msg('@Timi /current', topic)); assert.equal(f.calls.length, after); assert.match(JSON.stringify(f.sent.at(-1).content), /Claude Code/);
+    await f.gateway.receive(f.msg('Use Claude now', topic)); assert.notEqual(f.calls.at(-1).engine, 'codex');
+    await new Promise(resolve => setTimeout(resolve, 30));
+  }
+});
+
+test('discovered contacts resolve names and permit local labels without changing access rules', async t => {
+  const f = await fixture(t); await f.pair();
+  f.channel.getChatInfo = async () => ({ name: '研发群' });
+  f.channel.rawClient = { contact: { v3: { user: { get: async () => ({ data: { user: { name: '张三' } } }) } } } };
+  const group = { chatType: 'group', chatId: 'oc_names', mentionedBot: true };
+  await f.gateway.receive(f.msg('Discovery only', group)); // blocked groups are recorded, never submitted.
+  const result = await f.gateway.refreshContacts();
+  assert.equal(result.inbox.groups.find(item => item.id === 'oc_names').displayName, '研发群');
+  assert.equal(result.inbox.users.find(item => item.id === 'ou_owner').displayName, '张三');
+  const labelled = await f.gateway.labelContact({ id: 'ou_owner', label: '我的工作账号' });
+  assert.equal(labelled.inbox.users.find(item => item.id === 'ou_owner').displayName, '我的工作账号');
+  assert.deepEqual(labelled.config.allowedChatIds, []); assert.equal(f.calls.length, 0);
+  await assert.rejects(f.gateway.labelContact({ id: 'ou_unknown', label: 'Unknown' }), /已发现/);
+});
+
+test('short engine commands resume separate contexts, accept prompts and keep real Codex IDs across restart', async t => {
+  const f = await fixture(t); await f.pair(); await f.gateway.configure({ allowedChatIds: ['oc_shortcuts'] });
+  f.channel.botIdentity = { name: 'Timi', openId: 'ou_bot' };
+  const topic = { chatType: 'group', chatId: 'oc_shortcuts', threadId: 'omt_shortcuts', mentionedBot: true };
+  const original = f.panel.submit; let count = 0;
+  f.panel.submit = async input => { const id = input.engine === 'codex' && !input.sessionId.startsWith('real-codex-') ? 'real-codex-' + ++count : input.sessionId; await original({ ...input, sessionId: id }); return { sessionId: id }; };
+  await f.gateway.receive(f.msg('@Timi /codex 检查项目', topic));
+  const codexId = f.calls.at(-1).sessionId; assert.equal(f.calls.at(-1).engine, 'codex'); assert.equal(f.calls.at(-1).prompt, '检查项目');
+  await f.gateway.receive(f.msg('@Timi /claude 分析结果', topic)); const claudeId = f.calls.at(-1).sessionId; assert.notEqual(claudeId, codexId); assert.notEqual(f.calls.at(-1).engine, 'codex');
+  await f.gateway.receive(f.msg('@Timi /codex 继续检查', topic)); assert.equal(f.calls.at(-1).sessionId, codexId); assert.equal(f.calls.at(-1).prompt, '继续检查');
+  const before = f.calls.length; await f.gateway.receive(f.msg('/codex', topic)); assert.equal(f.calls.length, before);
+  await f.gateway.receive(f.msg('/new codex', topic)); await f.gateway.receive(f.msg('Fresh Codex', topic)); const freshCodex = f.calls.at(-1).sessionId; assert.notEqual(freshCodex, codexId);
+  assert.ok(f.rows.some(row => row.id === codexId));
+  await f.gateway.receive(f.msg('/claude 继续分析', topic)); assert.equal(f.calls.at(-1).sessionId, claudeId);
+  await f.gateway.receive(f.msg('/claude Other topic', { ...topic, threadId: 'omt_other' })); assert.notEqual(f.calls.at(-1).sessionId, claudeId);
+  await f.gateway.stop(); const restored = createFeishuGateway(f.options); await restored.start();
+  try {
+    await restored.receive(f.msg('/codex Restored Codex', topic)); assert.equal(f.calls.at(-1).sessionId, freshCodex);
+    await restored.receive(f.msg('/claude Restored Claude', topic)); assert.equal(f.calls.at(-1).sessionId, claudeId);
+  } finally { await restored.stop(); }
+});
+
+test('SDK error objects produce meaningful redacted status instead of object coercion', async t => {
+  const { errorMessage } = require('../feishu-gateway');
+  assert.equal(errorMessage([{ message: 'Connection closed' }, { code: 'ECONNRESET' }]), 'Connection closed · 飞书请求失败（ECONNRESET）');
+  assert.equal(errorMessage({ response: { data: { msg: 'Scope unavailable' } } }), 'Scope unavailable');
+  assert.equal(errorMessage('[object Object],[object Object]'), '');
+  const f = await fixture(t); await f.pair(); f.handlers.error([{ unknown: {} }, { another: {} }]);
+  assert.doesNotMatch(f.gateway.status().lastError, /object Object/); assert.match(f.gateway.status().lastError, /服务日志/);
+});
+
+test('/session is a local alias for /sessions, including after a bot mention', async t => {
+  const f = await fixture(t); await f.pair(); f.channel.botIdentity = { name: 'Timi', openId: 'ou_bot' };
+  await f.gateway.receive(f.msg('@Timi /session First'));
+  assert.equal(f.calls.length, 0); assert.match(JSON.stringify(f.sent.at(-1).content), /First session/);
+  assert.doesNotMatch(JSON.stringify(f.sent.at(-1).content), /未知网关命令/);
+});
+
+test('/new without a default project offers interactive engine and project selection before any model call', async t => {
+  const f = await fixture(t); await f.pair(); await f.gateway.configure({ defaultProject: '' });
+  const callbacks = value => value && typeof value === 'object' ? [...(value.type === 'callback' ? [value.value] : []), ...Object.values(value).flatMap(callbacks)] : [];
+  await f.gateway.receive(f.msg('/new codex'));
+  const sent = f.sent.at(-1), actions = callbacks(sent.content), start = actions.find(value => value.action === 'new');
+  assert.equal(f.calls.length, 0); assert.equal(start.engine, 'codex'); assert.equal(start.cwd, f.dir);
+  assert.ok(actions.some(value => value.action === 'projects' && value.engine === 'claude'));
+  await f.gateway.action({ messageId: sent.messageId, chatId: 'oc_private', operator: { openId: 'ou_owner' }, action: { value: start } });
+  assert.equal(f.calls.length, 0); assert.match(JSON.stringify(f.sent.at(-1).content), /Codex/);
+  await f.gateway.receive(f.msg('Use the chosen project'));
+  assert.equal(f.calls.at(-1).engine, 'codex'); assert.equal(f.calls.at(-1).cwd, f.dir);
+});
+
+test('pending history cards are safe and old Codex card IDs resolve without changing the active engine', async t => {
+  const f = await fixture(t); await f.pair();
+  const original = f.panel.submit;
+  f.panel.submit = async input => { const sessionId = input.engine === 'codex' ? 'codex-card-real' : input.sessionId; await original({ ...input, sessionId }); return { sessionId }; };
+  await f.gateway.receive(f.msg('/new codex'));
+  const card = f.sent.at(-1), key = contextKey(f.msg(''));
+  const pendingId = JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json'))).bindings[key].id;
+  const history = () => f.gateway.action({ messageId: card.messageId, chatId: 'oc_private', operator: { openId: 'ou_owner' }, action: { value: { owner: 'ou_owner', key, action: 'history', id: pendingId } } });
+  await history(); assert.doesNotMatch(JSON.stringify(f.sent.at(-1).content), /会话不存在/); assert.equal(f.calls.length, 0);
+  await f.gateway.receive(f.msg('Start Codex'));
+  await f.gateway.receive(f.msg('/claude Start Claude')); const claudeId = f.calls.at(-1).sessionId;
+  await history(); assert.match(JSON.stringify(f.sent.at(-1).content), /Saved reply/);
+  await f.gateway.receive(f.msg('Continue current Claude')); assert.equal(f.calls.at(-1).sessionId, claudeId); assert.notEqual(f.calls.at(-1).engine, 'codex');
+});
+
+test('gateway context identifies the selected CLI version instead of another executable on PATH', async t => {
+  const f = await fixture(t); await f.pair();
+  f.panel.engineInfo = () => ({ path: '/custom/npm/bin/claude', version: '2.1.283' });
+  await f.gateway.receive(f.msg('Which Claude version is running?'));
+  assert.match(f.calls.at(-1).gatewayContext, /实际运行版本为 2\.1\.283/);
+  assert.match(f.calls.at(-1).gatewayContext, /\$CLAUDE_CLI/);
 });

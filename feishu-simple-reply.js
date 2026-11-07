@@ -1,7 +1,7 @@
 const { sendMarkdown } = require('./feishu-markdown');
 // Simple chats use ordinary rich-text replies and a temporary reaction on the user's
 // message. Capture the transport so cleanup also works while the gateway stops.
-function createSimpleReply({ channel, msg, messageId, onError = () => {}, onClose = () => {} }) {
+function createSimpleReply({ channel, msg, messageId, footer = '', onError = () => {}, onClose = () => {} }) {
   let reactionId, unsubscribe, timer, closed = false, closing, text = '', done = false, fallback = '已完成。', permissionPending = false;
   async function clearReaction() {
     if (!reactionId) return;
@@ -23,7 +23,7 @@ function createSimpleReply({ channel, msg, messageId, onError = () => {}, onClos
     if (closed) return;
     // Stop listening before awaiting the send, so error/done/end cannot send twice.
     closed = true; clearTimeout(timer); unsubscribe?.();
-    try { if (text || fallback) await sendText(text || fallback); }
+    try { if (text || fallback) await sendText((text || fallback) + (footer ? '\n\n' + footer : '')); }
     catch (e) { onError(e); }
     finally { await close(); }
   }

@@ -52,6 +52,8 @@ async function receive(content, extra = {}) { const before = sent.length; handle
  await receive('/history'); assert.match(JSON.stringify(sent.at(-1)), /完成：排队消息/); assert.doesNotMatch(JSON.stringify(sent.at(-1)), /飞书发送上下文|feishu\/reply/);
  const forbidden = await fetch(base + 'feishu', { headers: { Origin: 'https://example.com' } }); assert.equal(forbidden.status, 403);
  const safe = await api('feishu'); assert.equal(JSON.stringify(safe).includes('test-secret'), false);
+ const labelled = await api('feishu/contacts/label', 'POST', { id: 'ou_owner', label: 'Integration user' }); assert.equal(labelled.inbox.users.find(item => item.id === 'ou_owner').displayName, 'Integration user');
+ const syncNames = await api('feishu/contacts/refresh', 'POST', {}); assert.equal(typeof syncNames.nameRefresh.updated, 'number');
  const revealed = await api('feishu/secret', 'POST', {}); assert.equal(revealed.appSecret, 'test-secret');
  const blockedSecret = await fetch(base + 'feishu/secret', { method: 'POST', headers: { Origin: 'https://example.com', 'Content-Type': 'application/json' }, body: '{}' }); assert.equal(blockedSecret.status, 403);
  const secretResponse = await fetch(base + 'feishu/secret', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); assert.equal(secretResponse.headers.get('cache-control'), 'no-store');

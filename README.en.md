@@ -1,22 +1,25 @@
-# ⌘ Claude Panel
+# ⌘ my-agents
 
-**See exactly what Claude Code sends the model, manage everything in your `~/.claude`, and take it with you through Feishu.**
+**A local workspace for Claude Code and Codex: sessions, request capture, engine connections and a Feishu gateway.**
 
-A local dashboard for Claude Code with a zero-dependency core: browse and edit slash commands, skills, agents, plugins and workflows; search and replay past sessions; track token spend; and, uniquely, **capture the real system prompt, tool definitions and every LLM round-trip** behind each conversation. It also routes across multiple accounts with automatic failover, and lets you continue local Claude Code sessions from your phone through a **Feishu (Lark) bot**.
+A local dashboard for Claude Code with a zero-dependency core: browse and edit slash commands, skills, agents, plugins and workflows; search and replay past sessions; track token spend; and, uniquely, **capture the real system prompt, tool definitions and every LLM round-trip** behind each conversation. It also routes across multiple accounts with automatic failover, and lets you continue local Claude Code sessions from your phone through a **Feishu (Lark) bot**. **OpenAI Codex CLI** is supported too: view, replay and continue Codex sessions in the same panel, with capture for subscription requests as well.
 
 ```bash
-npx claude-code-panel
+git clone https://github.com/13days/my-agents.git
+cd my-agents
+npm install
+npm start
 ```
 
-[中文文档](README.md) · [Quick Start](#quick-start) · [Features](#features) · [Feishu gateway](#feishu-gateway) · [Account routing](#account-routing) · [Screenshots](#screenshots) · [Changelog](#changelog)
+[中文文档](README.md) · [Quick Start](#quick-start) · [Features](#features) · [Feishu gateway](#feishu-gateway) · [Codex](#codex) · [Account routing](#account-routing) · [Screenshots](#screenshots) · [Changelog](#changelog)
 
 ![core zero dependencies](https://img.shields.io/badge/core%20dependencies-0-brightgreen) ![node >= 18](https://img.shields.io/badge/node-%3E%3D18-blue) ![license MIT](https://img.shields.io/badge/license-MIT-orange) ![i18n](https://img.shields.io/badge/i18n-中文%20%7C%20EN%20%7C%20日本語-purple)
 
-![demo](https://raw.githubusercontent.com/13days/claude-panel/main/docs/demo.gif?v=3)
+![demo](docs/demo.gif?v=3)
 
 ## Why
 
-Claude Code scatters everything across `~/.claude`: commands here, skills there, plugins in a JSON manifest, usage buried in hundreds of MB of transcript JSONL. And the most interesting thing of all, *what actually gets sent to the model*, isn't saved anywhere. Claude Panel fixes that:
+Claude Code scatters everything across `~/.claude`: commands here, skills there, plugins in a JSON manifest, usage buried in hundreds of MB of transcript JSONL. And the most interesting thing of all, *what actually gets sent to the model*, isn't saved anywhere. my-agents fixes that:
 
 - **Find** any command, skill, plugin or past session in one searchable place, editable in the browser.
 - **Recover** the session you lost after a crash or reboot: full-text search your history, one-click `claude --resume`.
@@ -25,11 +28,11 @@ Claude Code scatters everything across `~/.claude`: commands here, skills there,
 
 ## The killer feature: see every LLM round-trip
 
-Claude Code transcripts don't store the system prompt or the raw request/response. Claude Panel runs a tiny **local reverse proxy** that Claude Code talks through, records each API call, and folds it back into the session replay, matched to the exact turn.
+Claude Code transcripts don't store the system prompt or the raw request/response. my-agents runs a tiny **local reverse proxy** that Claude Code talks through, records each API call, and folds it back into the session replay, matched to the exact turn.
 
 Open a session, expand a query, and you get **"🔁 This query triggered N LLM rounds"**. Expand any round to see the **full context sent to the model** (every message, tool call and tool result), the **system prompt**, the **tool definitions with full descriptions**, the **thinking** and the **response**, plus token usage.
 
-![llm trace](https://raw.githubusercontent.com/13days/claude-panel/main/docs/05-replay-trace.png)
+![llm trace](docs/05-replay-trace.png)
 
 Set it up once: on first run the panel adds a `claude` wrapper to your shell (routes through the proxy while the panel is up, connects directly when it's off). Credentials are never written to captures; all data stays local.
 
@@ -37,7 +40,7 @@ Set it up once: on first run the panel adds a `claude` wrapper to your shell (ro
 
 Hundreds of sessions aren't a mess; they're the log of your work. The **Voyage** tab renders them as one continuous timeline: a river colored by project (block = session, height = conversation turns), split into storyline "legs", each labeled by the intent you opened it with. Computed locally from `history.jsonl`.
 
-![voyage](https://raw.githubusercontent.com/13days/claude-panel/main/docs/11-voyage.png)
+![voyage](docs/11-voyage.png)
 
 ## Features
 
@@ -52,6 +55,7 @@ Hundreds of sessions aren't a mess; they're the log of your work. The **Voyage**
 | **Stats** | `ccusage`-accurate usage: daily messages, per-model tokens, 24h heatline, `ccusage daily`-style cost table, and a live ticker (today's spend, burn rate, budget alerts) |
 | **Account routing** | One-click import of your current Claude config, paste-to-add env, manual switching, automatic failover, round robin, model mappings and extra env variables |
 | **💬 Feishu gateway** | A Feishu bot connected to your Mac over a long connection: view, switch, create and continue sessions; images; queueing and mid-turn steering; separate bindings per private chat, group and topic; access control and a local message log; Mac keep-awake and login startup |
+| **⌁ Codex** | Codex sessions listed alongside Claude ones (with a Codex tag); create or continue Codex sessions from the web UI or Feishu; pass-through capture for subscription and API key requests; picks the newest local `codex` automatically |
 | **🚢 Voyage** | Your scattered sessions rewoven into one timeline, colored by project and split into intent-labeled legs |
 | **🎁 Wrapped** | One-click shareable PNG card: spend, tokens, top command, favorite model and an earned badge |
 
@@ -61,24 +65,24 @@ Cross-cutting:
 - 📁 **Project scope**: a dropdown scopes Commands / Skills / Agents / Workflows / Config to any project's `.claude/` directory.
 - 🎯 **Accurate stats**: recursive transcript scan, `message.id + requestId` dedup, streaming-final handling, 5m/1h cache-tier pricing. Validated day by day against ccusage.
 - 🔒 **Local only**: binds to `127.0.0.1`, path-traversal guarded, credentials excluded from captures, sensitive config files stored with mode `0600`.
-- ⚡ **Zero-dependency core**: no build step, ~0.8s cold scan of 300MB of transcripts (~13ms warm). Only the Feishu gateway needs an optional SDK.
+- ⚡ **Zero-dependency core**: no build step; history statistics run in a background worker and long lists are paginated. Only the Feishu gateway needs an optional SDK.
 
 ## Quick Start
 
-Requires Node.js ≥ 18.
+Requires Node.js ≥ 18. The npm package is not published yet; use a source checkout until release.
 
 ```bash
-npx claude-code-panel
+npx my-agents
 # open http://localhost:4321
 ```
 
-On first run it adds a `claude` wrapper to your shells so future sessions are captured automatically. **Open a new terminal** (or `source ~/.zshrc`) and use `claude` as usual; with the panel running, that session's full trace shows up under Sessions. Opt out with `CCP_NO_PROXY_SETUP=1`; remove it with `npx claude-code-panel uninstall-proxy`.
+On first run it adds a `claude` wrapper to your shells so future sessions are captured automatically. **Open a new terminal** (or `source ~/.zshrc`) and use `claude` as usual; with the panel running, that session's full trace shows up under Sessions. Opt out with `MY_AGENTS_NO_PROXY_SETUP=1`; remove it with `npx my-agents uninstall-proxy`.
 
 From source:
 
 ```bash
-git clone https://github.com/13days/claude-panel.git
-cd claude-panel
+git clone https://github.com/13days/my-agents.git
+cd my-agents
 npm install        # only needed for the Feishu gateway; skip it or use npm install --omit=optional
 node server.js
 ```
@@ -88,7 +92,7 @@ node server.js
 | `PORT` | `4321` | Panel port |
 | `PROXY_PORT` | `PORT+1` | Capture / account-routing proxy port |
 | `CLAUDE_DIR` | `~/.claude` | Claude config directory; the panel stores its own data here too |
-| `CCP_NO_PROXY_SETUP` | — | Set to `1` to skip shell setup |
+| `MY_AGENTS_NO_PROXY_SETUP` | — | Set to `1` to skip shell setup |
 
 ### Terminal statusline
 
@@ -112,7 +116,7 @@ CLAUDE_DIR="$PWD/demo-data/claude" PORT=4999 node server.js
 Message a Feishu bot privately to drive Claude Code on your Mac.
 
 ```
-Feishu app ──official long connection──▶ Claude Panel on your Mac ──▶ local Claude Code CLI
+Feishu app ──official long connection──▶ my-agents on your Mac ──▶ local Claude Code CLI
                                           (same processes, account routing and session records)
 ```
 
@@ -120,7 +124,7 @@ Feishu app ──official long connection──▶ Claude Panel on your Mac ─�
 - **Same sessions as the web UI**: tasks started from Feishu share Claude Code processes, account routing and local session records with the browser, so you can switch between them at any time.
 - **Live task cards**: text, tool inputs and results refresh about every 1.2 seconds; the final content is filled in on completion and long replies are split.
 
-![Feishu gateway](https://raw.githubusercontent.com/13days/claude-panel/main/docs/15-feishu-gateway.png)
+![Feishu gateway](docs/15-feishu-gateway.png)
 
 ### Setup
 
@@ -150,12 +154,19 @@ Send text or images and they go to the session bound to the current chat. Sendin
 |---|---|
 | `/sessions [keyword]` | Paginated session list (5 per page) with the current session and run state marked; tap a card to switch |
 | `/switch 2` | Switch by number from the last list; a unique ID prefix or full name also works |
-| `/new`, `/new 1`, `/projects` | New session in the default project; `/projects` lists projects, `/new <n>` or a known path picks one |
+| `/new`, `/new 1`, `/projects` | New session in the default project; `/projects` lists projects, `/new <n>` or `/new /absolute/path` picks a project, including any existing local directory; `~/` is supported and selected paths stay in the list |
+| `/new codex`, `/new codex 1` | New Codex session; the project card also has a "Use Codex" button |
 | `/current` | Show the bound session |
 | `/history` | Last 10 messages |
 | `/queue <text>` | Queue it to run after the current turn |
 | `/steer <text>` | Interrupt the current turn and continue with the extra instructions |
 | `/rename <name>` | Pin a session name, shared by web and Feishu |
+| `/route` | Account routing card: each account's status, cooldown and the Codex capture state, with buttons to switch. Handled by the gateway itself, not the model, so it works even when every account is down |
+| `/route 2`, `/route name` | Pin all traffic to one account (number, name or a unique fragment) |
+| `/route auto`, `/route rr` | Back to failover / round robin |
+| `/route reset` | Clear every account's cooldown |
+| `/route pin 2`, `/route pin off` | Pin only the current session to an account / unpin |
+| `/route codex direct`, `/route codex proxy` | Panel-started Codex sessions connect directly / go through the capture proxy |
 | `/stop`, `/status`, `/help` | Stop a task started by this panel, show status, list commands |
 | `/ask /command` | Forward a Claude slash command as text so it doesn't collide with gateway commands |
 
@@ -177,7 +188,7 @@ Send text or images and they go to the session bound to the current chat. Sendin
 - Checkboxes save immediately and apply to new messages without interrupting running tasks; previously blocked messages are not replayed.
 - Every received message (including blocked ones) is logged locally and can be browsed in the panel with user and group filters. Only messages delivered after the gateway comes online are recorded; earlier chat history is not fetched.
 
-![Access control](https://raw.githubusercontent.com/13days/claude-panel/main/docs/16-feishu-access.png)
+![Access control](docs/16-feishu-access.png)
 
 ### Two display modes
 
@@ -202,13 +213,13 @@ Each Feishu turn carries the current bot, chat and topic. When you ask Claude to
 
 - **Keepalive**: the SDK sends heartbeats at the server-provided interval (about 2 minutes by default). The panel also enables a 20-second pong timeout, so a dead connection is closed and reconnected automatically with unlimited retries. The panel shows the real connection state.
 - **Keep Mac awake**: uses `caffeinate` to prevent idle sleep only while the panel process is alive. The screen can still turn off and system settings are untouched.
-- **Start at login**: writes `~/Library/LaunchAgents/io.claude-panel.gateway.plist`, **effective at next login**, with logs in `~/.claude/panel-service.log`. Keep the source directory in place. Unchecking deletes the file; an already-loaded service stops at the next login.
+- **Start at login**: writes `~/Library/LaunchAgents/io.my-agents.gateway.plist`, **effective at next login**, with logs in `~/.claude/panel-service.log`. Keep the source directory in place. Unchecking deletes the file; an already-loaded service stops at the next login.
 
 To switch to the background service right away (stop any manual instance on the same port first):
 
 ```bash
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.claude-panel.gateway.plist
-launchctl print gui/$(id -u)/io.claude-panel.gateway   # should report running
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.my-agents.gateway.plist
+launchctl print gui/$(id -u)/io.my-agents.gateway   # should report running
 ```
 
 **Limits**: the Mac must stay powered, online and logged in; closing the lid, forced sleep or shutdown takes the bot offline. A panel restart doesn't resume interrupted CLI processes; send a new message in the same session to continue. Closing the browser doesn't affect tasks; disabling the gateway only disconnects Feishu and doesn't stop tasks already started.
@@ -224,11 +235,48 @@ launchctl print gui/$(id -u)/io.claude-panel.gateway   # should report running
 
 The status API never returns the secret. Messages, replies and any tool results you ask to see travel through Feishu; Claude's session records themselves stay on your Mac.
 
+## Codex
+
+The panel also supports [OpenAI Codex CLI](https://github.com/openai/codex). Codex uses your own login (ChatGPT subscription via `codex login`, or an API key); the panel never stores or switches Codex credentials.
+
+| Capability | Details |
+|---|---|
+| Session list and replay | Reads session records under `~/.codex/sessions`, mixed with Claude sessions and tagged Codex; full-text view with tool calls and results |
+| Web chat | Toggle "Claude Code / Codex" at the top of a new chat; opening an existing Codex session continues it; images, queueing, mid-turn steering and stop are supported |
+| Feishu | `/new codex` creates a Codex session; Codex sessions in `/sessions` can be switched to and continued; `/history` works as usual |
+| Capture | Codex sessions started by the panel go through the local proxy by default: subscriptions via `chatgpt.com/backend-api/codex`, API keys via `api.openai.com/v1`. Captures show the system prompt, tool definitions, full context and token usage; "View Codex prompt" in the replay links them per session |
+| Version selection | Discovers installations via `npm prefix --global` and `PATH`, then compares valid candidates; no fixed installation directory is required. `CODEX_CLI` provides an optional override |
+| Management card | The Codex card on the Account routing page: CLI version and path (warns about ignored older installs), login method and plan, total tokens, subscription quota bars (weekly / daily) with reset times, the capture toggle, and the terminal capture profile install / remove |
+
+**Codex in the terminal**: running `codex` directly still connects straight to OpenAI, bypassing the panel. To capture terminal sessions too, click "Install profile" under "Terminal capture profile" on the Codex card (or call the endpoint below), then launch with `-p`:
+
+```bash
+curl -X POST http://127.0.0.1:4321/api/codex/profile -H 'Content-Type: application/json' -d '{}'
+codex -p my-agents
+```
+
+The profile uses `~/.codex/my-agents.config.toml` with newer CLIs, or a managed section in `~/.codex/config.toml` with older CLIs; remove it with `-d '{"remove":true}'`.
+
+**Continuing terminal sessions**: Codex sessions created in the terminal show up in the session list automatically and can be continued from the web UI and Feishu. Continuing keeps the channel the session was created with (a direct session stays direct), regardless of the capture toggle. Codex allows only one process to write a session, so a session still open in a terminal must be exited there first (`/quit` or Ctrl+C); otherwise the panel shows an "opened elsewhere" hint.
+
+**Notes**
+
+- Each Codex turn is one `codex exec` (`codex exec resume` when continuing), run with `--dangerously-bypass-approvals-and-sandbox`, so there are no approval prompts, same as Claude Code in the web UI and Feishu.
+- Subscription accounts are passed through only: no multi-account round robin or failover. Claude account routing doesn't affect Codex.
+- Codex's own slash commands and skills aren't managed by the panel.
+- `GET /api/codex` shows the selected CLI, version, login method and capture state; `GET /api/codex/stats` returns token usage by day / model and the latest subscription quota snapshot.
+
+| Variable | Meaning |
+|---|---|
+| `CODEX_CLI` | Path to `codex`, skipping automatic selection |
+| `CODEX_HOME` | Codex data directory, default `~/.codex` |
+| `MY_AGENTS_CODEX_CAPTURE=0` | Panel-started Codex sessions connect directly, without the proxy |
+
 ## Account routing
 
-![Accounts](https://raw.githubusercontent.com/13days/claude-panel/main/docs/12-account-routing.png)
+![Accounts](docs/12-account-routing.png)
 
-![Paste env to add an account](https://raw.githubusercontent.com/13days/claude-panel/main/docs/13-env-import.png)
+![Paste env to add an account](docs/13-env-import.png)
 
 Add multiple env profiles under **Account routing**. Claude Code always talks to the local proxy, which picks an account per request. Supports manual switching, ordered failover, round robin, cooldowns and per-account model mappings; captures show which account served each request.
 
@@ -249,25 +297,25 @@ Add multiple env profiles under **Account routing**. Claude Code always talks to
 
 **Usage dashboard**: live spend ticker, daily volume, per-model tokens, `ccusage daily`-style cost table
 
-![stats](https://raw.githubusercontent.com/13days/claude-panel/main/docs/01-stats-dashboard.png)
+![stats](docs/01-stats-dashboard.png)
 
 **Chat in the browser**: open a session and keep going, with collapsible tool calls and image paste
 
-![web chat](https://raw.githubusercontent.com/13days/claude-panel/main/docs/17-web-chat.png)
+![web chat](docs/17-web-chat.png)
 
 **Inspector**: the real system prompt, tool definitions and response Claude Code never saves
 
-![inspector](https://raw.githubusercontent.com/13days/claude-panel/main/docs/06-inspector.png)
+![inspector](docs/06-inspector.png)
 
 **Every command in one place**: yours, your plugins' and Claude Code's built-ins, with usage counts
 
-![commands](https://raw.githubusercontent.com/13days/claude-panel/main/docs/03-commands.png)
+![commands](docs/03-commands.png)
 
 **Skills, rendered properly** · **🎁 Wrapped card** · **Speaks your language**
 
-<img src="https://raw.githubusercontent.com/13days/claude-panel/main/docs/04-skill-detail.png" width="49%" alt="skill"> <img src="https://raw.githubusercontent.com/13days/claude-panel/main/docs/10-wrapped-card.png" width="30%" alt="wrapped">
+<img src="docs/04-skill-detail.png" width="49%" alt="skill"> <img src="docs/10-wrapped-card.png" width="30%" alt="wrapped">
 
-![english](https://raw.githubusercontent.com/13days/claude-panel/main/docs/09-english-ui.png)
+![english](docs/09-english-ui.png)
 
 ## How it works
 
@@ -284,6 +332,7 @@ No framework, no build step; the backend is split into small modules:
 | `feishu-cards.js`, `feishu-markdown.js`, `feishu-simple-reply.js` | JSON 2.0 cards, Markdown rich-text chunking, simple-mode replies |
 | `feishu-inbox.js`, `feishu-ui.js`, `lark-setup.js` | Message log, gateway settings page, QR bot creation |
 | `mac-runtime.js`, `folder-picker.js` | Mac keep-awake / login startup, project folder picker |
+| `codex-cli.js`, `codex-sessions.js`, `codex-engine.js`, `codex-proxy.js` | Codex CLI version selection, session record parsing, `codex exec` turn runner, pass-through capture proxy |
 | `index.html`, `panel.css` | Single-page app (with a mini Markdown renderer) and the shared design system / responsive layout |
 
 ### Adding a language
@@ -307,8 +356,20 @@ Tests never call a real model API or Feishu. A local mock upstream covers accoun
 - Claude Code keeps transcripts for about 30 days; the system prompt / LLM trace only exists for sessions **captured live through the proxy**. Historical ones can't be recovered.
 - The built-in command list is a static snapshot (PRs welcome).
 - The Feishu gateway depends on your Mac being online; see [Connection and uptime](#connection-and-uptime).
+- Codex capture covers only panel-started sessions and `codex -p my-agents`; plain `codex` bypasses the proxy.
 
 ## Changelog
+
+### 0.17.0 Codex
+
+- New Codex engine: sessions mixed into the list, chat-style replay, `codex resume` command; create and continue Codex sessions from the web UI and Feishu, with images, queueing, mid-turn steering and stop.
+- Pass-through capture for Codex requests with ChatGPT subscriptions and API keys: system prompt, tool definitions, context and token usage; credentials are never written to captures.
+- Automatically uses the highest-version local `codex`; a `codex -p my-agents` profile lets terminal sessions be captured too.
+- New `/api/codex` and `/api/codex/stats` endpoints.
+- Codex management card on the Account routing page: version, login method, subscription quota, capture toggle, terminal profile.
+- New Feishu `/route` command and routing card: switch accounts, failover / round robin, clear cooldowns, pin per session, Codex direct / capture. Handled by the gateway directly, without the model.
+- Fix: subscription Codex captures whose SSE lacked a `text/event-stream` header had empty usage and were marked incomplete; Account usage no longer shows an empty Codex row.
+- Fix: continuing a terminal-created (direct) Codex session from the web UI or Feishu failed with a provider mismatch; common Codex errors now come with an actionable hint; Codex replies are labelled Codex.
 
 ### 0.16.0 Feishu gateway
 
@@ -341,3 +402,7 @@ A consistent visual system across all sections: grouped navigation, a separate r
 ---
 
 *Built with [Claude Code](https://claude.com/claude-code), for Claude Code.*
+
+## Rename and migration
+
+The project, npm package and executable are named `my-agents`. The repository is [13days/my-agents](https://github.com/13days/my-agents). The npm package is not published yet; `npx my-agents` will be available after release. Existing Git history and local user data are preserved. See [migration and release instructions](docs/migration.md) for data locations, compatibility, backup and service migration.

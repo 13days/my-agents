@@ -26,7 +26,7 @@ test('QR creation streams an unchanged URL, uses isolated config, and imports cr
   const f = fixture(t);
   await f.setup.start('lark'); await f.setup.start('lark');
   assert.equal(f.children.length, 1);
-  assert.deepEqual(f.spawns[0].args, ['config', 'init', '--new', '--brand', 'lark', '--name', 'claude-panel']);
+  assert.deepEqual(f.spawns[0].args, ['config', 'init', '--new', '--brand', 'lark', '--name', 'my-agents']);
   assert.equal(f.spawns[0].opts.env.LARKSUITE_CLI_CONFIG_DIR, path.join(f.dir, 'lark-cli'));
   const url = 'https://accounts.larksuite.com/setup?code=a%2Fb+z&state=x%3Dy';
   f.children[0].stderr.write('Open:\n  ' + url.slice(0, 35));
