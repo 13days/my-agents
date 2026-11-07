@@ -70,8 +70,9 @@ function createNodeHub({ registry, token, dir, log = console, spawnImpl = spawn,
       .catch(e => { link.error = e.message; child.kill(); });
     child.on('exit', code => {
       link.child = null;
+      // Once connected, the last stderr line is just the node's ready banner; say what happened instead.
+      if (!link.error) link.error = link.state === 'connected' ? `连接已断开（ssh 退出 ${code}），将自动重连` : (stderr.trim().split('\n').pop() || `ssh 退出（${code}）`).slice(0, 300);
       link.state = 'disconnected';
-      if (!link.error) link.error = (stderr.trim().split('\n').pop() || `ssh 退出（${code}）`).slice(0, 300);
       if (saved.some(item => item.id === config.id && item.enabled !== false)) { link.timer = setTimeout(() => connectSSH(config), retryMs); link.timer.unref?.(); }
     });
     child.on('error', e => { link.error = e.message; });

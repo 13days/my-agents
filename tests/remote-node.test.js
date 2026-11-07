@@ -126,7 +126,7 @@ test('SSH nodes are validated, saved, launched with the stdio command and retrie
     serveNode({ peer: createPeer(streamTransport(child.stdin, child.stdout)), host: createLocalHost(), engines: [echoEngine()], id: 'whatever-the-node-says' });
     return child;
   };
-  const hub = createNodeHub({ registry, token: 't', dir, spawnImpl, retryMs: 10, log: { log() {}, warn() {} } });
+  const hub = createNodeHub({ registry, token: 't', dir, spawnImpl, retryMs: 300, log: { log() {}, warn() {} } });
   assert.throws(() => hub.add({ id: 'bad id', ssh: 'me@box' }), { status: 400 });
   assert.throws(() => hub.add({ id: 'box', ssh: '-oProxyCommand=evil' }), { status: 400 });
   hub.add({ id: 'gpu-box', label: 'GPU 开发机', ssh: 'me@gpu.example' });
@@ -134,7 +134,10 @@ test('SSH nodes are validated, saved, launched with the stdio command and retrie
   await until(() => registry.node('gpu-box'));
   assert.equal(registry.node('gpu-box').label, 'GPU 开发机', 'saved SSH nodes keep the name they were added under');
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'panel-nodes.json'), 'utf8')).nodes[0].ssh, 'me@gpu.example');
+  spawned[0].child.stderr.write('[my-agents node] ready\n');
   spawned[0].child.kill();
+  await until(() => !registry.node('gpu-box'));
+  assert.match(hub.list().find(n => n.id === 'gpu-box').error, /连接已断开/, 'a dropped connection is not reported as the ready banner');
   await until(() => spawned.length === 2 && registry.node('gpu-box'), 3000);
   assert.ok(hub.remove('gpu-box'));
   hub.stop();
