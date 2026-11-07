@@ -61,6 +61,7 @@
     "core/",
     "engines/",
     "hosts/",
+    "channels/",
     "http/",
     "docs/architecture-v2.md"
   ],

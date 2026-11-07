@@ -8,7 +8,7 @@ const MODEL = /^[\w.\/:\[\]-]{1,100}$/;
 function createClaudeEngine({ accounts = null, transcripts, timeoutMs = Number(process.env.CCP_CHAT_TIMEOUT_MS || 0), env = process.env } = {}) {
   return {
     id: 'claude',
-    meta: { label: 'Claude Code', short: 'Claude', emblem: '✳', color: '#d97757', aliases: ['cc', 'claude-code'], upstreamHint: '可停止任务后用 /route 切换账号' },
+    meta: { label: 'Claude Code', short: 'Claude', emblem: '✳', color: '#d97757', aliases: ['cc', 'claude-code'], cliEnv: 'CLAUDE_CLI', upstreamHint: '可停止任务后用 /route 切换账号' },
     capabilities: {
       sessionId: 'assigned', steer: 'inject', streamingText: true, reasoning: true, permissions: 'auto',
       accounts: !!accounts, images: true, resources: ['skills', 'config', 'commands', 'agents', 'plugins', 'workflows'],

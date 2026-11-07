@@ -1773,6 +1773,7 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
       return { sessionId };
     },
     engine: id => sessionEngine(id),
+    engines: () => registry.list().map(engine => ({ id: engine.id, ...engine.meta, capabilities: engine.capabilities })),
     engineInfo: engine => registry.get(engine)?.detect?.() || {},
     routes: () => ({ ...accountRouter.status(), pins: accountRouter.sessions().routes }),
     route: input => accountRouter.route(input),
