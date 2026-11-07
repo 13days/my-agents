@@ -801,3 +801,17 @@ body[data-nav-collapsed="true"] .resource-engine-switch button { padding: 5px 1p
 :where(.chat-engine-badge[style*="--engine-color"]):not(.claude):not(.codex) { color: var(--engine-color); border-color: color-mix(in srgb, var(--engine-color) 30%, transparent); }
 :where(.resource-engine-switch button[style*="--engine-color"][aria-pressed="true"]):not(.claude):not(.codex) { color: var(--engine-color); background: color-mix(in srgb, var(--engine-color) 10%, transparent); }
 .engine-tabs > button[aria-pressed="true"][style*="--engine-color"]:not([data-stats-engine="claude"]):not([data-stats-engine="codex"]):not([data-connection-engine="claude"]):not([data-connection-engine="codex"]) { background: color-mix(in srgb, var(--engine-color) 4%, transparent); border-color: color-mix(in srgb, var(--engine-color) 50%, transparent); }
+
+/* Remote nodes on the connections page */
+.nodes-panel { margin-top: 24px; }
+.nodes-panel .route-heading { align-items: flex-start; }
+.node-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
+.node-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.node-main small { font-size: 12px; overflow-wrap: anywhere; }
+.node-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.node-state.is-on { color: #10a37f; }
+.node-guide { margin: 14px 0; }
+.node-guide summary { cursor: pointer; font-weight: 600; }
+.node-cmd { display: block; margin-top: 8px; padding: 8px 10px; border-radius: 6px; background: var(--code-bg, rgba(127,127,127,.1)); overflow-wrap: anywhere; user-select: all; }
+.node-form { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; border-top: 1px solid var(--border); }
+.node-form .btn.primary { align-self: flex-start; }

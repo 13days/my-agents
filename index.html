@@ -2938,6 +2938,49 @@ function genericConnectionPanel(engine) {
   return `<section class="chart" data-connection-panel="${esc(engine.id)}" hidden><div class="route-heading"><div><h3>${esc(engine.label)}</h3><p class="route-muted">${esc(rt(`${engine.label} 使用本机 CLI 自己的登录，面板不保存它的凭证。`, `${engine.label} uses the local CLI's own login. The panel never stores its credentials.`, `${engine.label} はローカル CLI 自身のログインを使用します。パネルは資格情報を保存しません。`))}</p></div></div>
     ${cli ? `<p>${esc(rt('CLI 路径', 'CLI path', 'CLI のパス'))}：<code>${esc(cli.path || '—')}</code>${cli.version ? ` · ${esc(cli.version)}` : ''}</p>` : `<p class="route-muted">${esc(rt('未在本机找到这个引擎的 CLI，安装后刷新页面。', 'This engine\'s CLI was not found on this machine. Install it and reload.', 'このエンジンの CLI が見つかりません。インストール後に再読み込みしてください。'))}</p>`}</section>`;
 }
+// Remote nodes: machines whose engine CLIs this panel drives over WebSocket or SSH.
+async function renderNodesPanel() {
+  let section = $('#nodes-panel');
+  if (!section) { section = document.createElement('section'); section.className = 'nodes-panel chart'; section.id = 'nodes-panel'; $('#render').append(section); }
+  section.innerHTML = `<div class="route-heading"><div><h3>${esc(rt('远程节点', 'Remote nodes', 'リモートノード'))}</h3><p class="route-muted">${esc(rt('在云端开发机等机器上运行 Claude Code / Codex，由本面板统一管理会话。节点使用自己机器上的 CLI 登录。', 'Run engines on remote machines such as cloud dev boxes; this panel manages their sessions. Nodes use their own CLI logins.'))}</p></div><button class="btn" id="nodes-refresh">${esc(rt('刷新', 'Refresh'))}</button></div><div id="nodes-body"><p class="route-muted">${esc(rt('加载中…', 'Loading…'))}</p></div>`;
+  const load = async () => {
+    const box = $('#nodes-body'); if (!box) return;
+    let data;
+    try { data = await api('GET', 'nodes'); } catch (e) { box.innerHTML = `<p class="route-muted">${esc(e.message)}</p>`; return; }
+    if (state.type !== 'proxy' || !$('#nodes-body')) return;
+    const remote = data.nodes.filter(node => node.remote);
+    const status = node => node.connected ? `<span class="tag node-state is-on">${esc(rt('已连接', 'Connected'))}</span>` : `<span class="tag node-state">${esc(node.state === 'connecting' ? rt('连接中', 'Connecting') : rt('离线', 'Offline'))}</span>`;
+    const rows = remote.map(node => `<div class="node-row" data-node="${esc(node.id)}">
+      <div class="node-main"><strong>${esc(node.label || node.id)}</strong> ${status(node)}<small class="route-muted">${esc([node.id !== node.label ? node.id : '', node.ssh ? 'SSH ' + node.ssh : node.transport === 'ws' ? 'WebSocket' : '', node.platform, node.version ? 'v' + node.version : ''].filter(Boolean).join(' · '))}</small>
+      ${node.engines?.length ? `<small>${node.engines.map(engine => esc(engine.label + (engine.cli?.version ? ' ' + engine.cli.version : engine.cli ? '' : rt('（未安装）', ' (not installed)')))).join(' · ')}</small>` : ''}
+      ${node.error ? `<small class="codex-warn">${esc(node.error)}</small>` : ''}</div>
+      <div class="node-actions">${node.ssh ? `<button class="btn" data-node-action="reconnect">${esc(rt('重连', 'Reconnect'))}</button>` : ''}<button class="btn" data-node-action="remove">${esc(node.ssh ? rt('删除', 'Remove') : rt('断开', 'Disconnect'))}</button></div></div>`).join('');
+    box.innerHTML = `${rows || `<p class="route-muted">${esc(rt('还没有远程节点。', 'No remote nodes yet.'))}</p>`}
+      <details class="node-guide"><summary>${esc(rt('方式一：节点主动连接（WebSocket）', 'Option 1: node dials in (WebSocket)'))}</summary><p class="route-muted">${esc(rt('在远端机器安装 my-agents 后运行下面的命令。令牌见本机数据目录下的 panel-token；Hub 需要能被远端访问（例如 SSH 端口转发或内网地址）。', 'Install my-agents on the remote machine and run this. The token is in panel-token in the data directory; the hub must be reachable from the remote machine.'))}</p><code class="node-cmd">${esc(data.hint)}</code></details>
+      <form id="node-form" class="node-form"><strong>${esc(rt('方式二：通过 SSH 启动节点', 'Option 2: launch over SSH'))}</strong><p class="route-muted">${esc(rt('需要本机可以免密 SSH 登录（BatchMode），且远端已安装 my-agents。', 'Requires passwordless SSH (BatchMode) and my-agents installed remotely.'))}</p>
+        <div class="gateway-form-row"><label>${esc(rt('节点名称', 'Node id'))}<input name="id" required pattern="[\\w.\\-]{1,64}" placeholder="devbox"></label><label>${esc(rt('SSH 目标', 'SSH target'))}<input name="ssh" required placeholder="user@host"></label></div>
+        <label>${esc(rt('远端命令（选填）', 'Remote command (optional)'))}<input name="command" placeholder="my-agents node --stdio"></label>
+        <p id="node-form-error" class="codex-warn" role="alert"></p><button class="btn primary" type="submit">＋ ${esc(rt('添加 SSH 节点', 'Add SSH node'))}</button></form>`;
+    $('#node-form').onsubmit = async e => {
+      e.preventDefault();
+      const form = new FormData(e.target), button = e.target.querySelector('[type=submit]');
+      button.disabled = true; $('#node-form-error').textContent = '';
+      try { await api('POST', 'nodes', { id: form.get('id'), ssh: form.get('ssh'), command: form.get('command') }); toast(rt('节点已添加，正在连接', 'Node added; connecting')); setTimeout(refresh, 1500); load(); }
+      catch (err) { $('#node-form-error').textContent = err.message; }
+      finally { button.disabled = false; }
+    };
+    box.querySelectorAll('[data-node-action]').forEach(button => button.onclick = async () => {
+      const id = button.closest('[data-node]').dataset.node, action = button.dataset.nodeAction;
+      if (action === 'remove' && !confirm(rt(`确定移除节点 ${id}？正在运行的会话会结束。`, `Remove node ${id}? Running sessions will end.`))) return;
+      try { await (action === 'remove' ? api('DELETE', 'nodes/' + encodeURIComponent(id)) : api('POST', 'nodes/' + encodeURIComponent(id) + '/reconnect', {})); setTimeout(refresh, 1500); refresh(); }
+      catch (err) { toast(err.message, false); }
+    });
+  };
+  // The engine list depends on which nodes are connected.
+  const refresh = async () => { await load(); await loadEngines().catch(() => {}); };
+  $('#nodes-refresh').onclick = refresh;
+  await load();
+}
 let routeData;
 async function renderProxyTab() {
   stopInspectorPoll();
@@ -3128,6 +3171,7 @@ async function renderProxyTab() {
     }
     $('#codex-refresh').onclick = loadCodex;
     if (hasEngine('codex')) loadCodex(); // the panel only exists for a registered Codex engine
+    renderNodesPanel();
     $('#route-reset').onclick = () => run(async () => { routeData = await api('POST', 'proxy/reset', {}); draw(); });
     $('#route-accounts').onclick = e => run(async () => {
       const action = e.target.closest('[data-action]')?.dataset.action;
