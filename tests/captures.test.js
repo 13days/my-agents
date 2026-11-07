@@ -10,7 +10,7 @@ function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'panel-captures-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  const context = vm.createContext({ codexSessions: { list: () => [], pathFor: () => '', messages: () => null }, isCodexPath: () => false, isCodexSession: () => false, fs, path, zlib, createCaptureStore: require('../capture-store').createCaptureStore, CLAUDE_DIR: dir,
+  const context = vm.createContext({ codexSessions: { list: () => [], pathFor: () => '', messages: () => null }, upstreams: { for: () => null }, isCodexSession: () => false, fs, path, zlib, createCaptureStore: require('../capture-store').createCaptureStore, CLAUDE_DIR: dir, DATA_DIR: dir,
     extractText: content => typeof content === 'string' ? content : (content || []).filter(b => b.type === 'text').map(b => b.text).join(' '),
   });
   vm.runInContext(source.slice(source.indexOf('const CAPTURES_FILE ='), source.indexOf('const accountRouter =')), context);

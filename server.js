@@ -35,6 +35,7 @@ const { createSessionManager } = require('./core/session-manager');
 const { createLocalHost } = require('./hosts/local');
 const { createClaudeEngine } = require('./engines/claude');
 const { createCodexEngine } = require('./engines/codex');
+const { createUpstreams } = require('./core/upstreams');
 const { createCodexProxy, codexProviderConfig, extractResponses, isCodexPath } = require('./engines/codex/proxy');
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 const codexSessions = createCodexSessions({ home: CODEX_HOME });
@@ -193,16 +194,28 @@ function ensureProxyInstalled() {
 const CLI_CMD = process.argv[2];
 if (CLI_CMD === 'install-proxy') { installProxy(); process.exit(0); }
 if (CLI_CMD === 'uninstall-proxy') { uninstallProxy(); process.exit(0); }
+if (CLI_CMD === 'migrate-data') {
+  const { resolveDataDir, migrateDataDir } = require('./core/data-dir');
+  const from = process.env.CLAUDE_DIR || path.join(os.homedir(), '.claude'), current = resolveDataDir({ claudeDir: from });
+  const to = current.legacy ? path.join(os.homedir(), '.my-agents') : current.dir;
+  const { copied, skipped } = migrateDataDir({ from, to });
+  console.log(`已复制 ${copied.length} 项到 ${to}${skipped.length ? `，${skipped.length} 项已存在未覆盖` : ''}。原文件保留在 ${from} 作为备份。`);
+  console.log('请重启面板（含后台服务）以使用新目录；仍在运行的旧版面板会继续写旧目录。');
+  process.exit(0);
+}
 if (CLI_CMD === '--help' || CLI_CMD === '-h') {
   console.log('my-agents            start the panel + inspector proxy');
+  console.log('my-agents migrate-data     copy panel data from ~/.claude to ~/.my-agents (originals kept)');
   console.log('my-agents install-proxy    add a smart `claude` wrapper to your shell rc');
   console.log('my-agents uninstall-proxy  remove it');
   process.exit(0);
 }
 const CLAUDE_DIR = process.env.CLAUDE_DIR || path.join(os.homedir(), '.claude');
+// The panel's own files; Claude's files (settings, transcripts) stay in CLAUDE_DIR.
+const DATA_DIR = require('./core/data-dir').resolveDataDir({ claudeDir: CLAUDE_DIR }).dir;
 const BIND_HOST = process.env.MY_AGENTS_BIND || '127.0.0.1';
-const auth = HISTORY_WORKER ? null : require('./http/auth').createAuth({ port: PORT, bindHost: BIND_HOST, dir: CLAUDE_DIR, publicHosts: (process.env.MY_AGENTS_PUBLIC_HOSTS || '').split(',').filter(Boolean) });
-const sessionStore = createSessionStore(CLAUDE_DIR);
+const auth = HISTORY_WORKER ? null : require('./http/auth').createAuth({ port: PORT, bindHost: BIND_HOST, dir: DATA_DIR, publicHosts: (process.env.MY_AGENTS_PUBLIC_HOSTS || '').split(',').filter(Boolean) });
+const sessionStore = createSessionStore(DATA_DIR);
 
 const TYPES = {
   commands:  { dir: path.join(CLAUDE_DIR, 'commands'),  layout: 'flat', ext: '.md' },  // <name>.md
@@ -1209,7 +1222,7 @@ function sessionReplay(id) {
 }
 
 // ---------- Live 快照 / 面板配置（预算） ----------
-const PANEL_CONFIG = path.join(CLAUDE_DIR, 'panel-config.json');
+const PANEL_CONFIG = path.join(DATA_DIR, 'panel-config.json');
 function readPanelConfig() {
   try { return JSON.parse(fs.readFileSync(PANEL_CONFIG, 'utf8')); } catch { return {}; }
 }
@@ -1537,7 +1550,7 @@ function readBody(req, limit = 5 * 1024 * 1024) {
 // ---------- Inspector：本地反向代理抓包 ----------
 // 用法：ANTHROPIC_BASE_URL=http://localhost:<PROXY_PORT> claude
 // 面板即可看到每个请求的完整 payload（系统提示词、工具定义、消息、流式响应含 thinking）
-const CAPTURES_FILE = path.join(CLAUDE_DIR, 'panel-captures.jsonl');
+const CAPTURES_FILE = path.join(DATA_DIR, 'panel-captures.jsonl');
 const captureStore = createCaptureStore(CAPTURES_FILE);
 function loadCaptures() { captureStore.load(); }
 // Recover legacy captures only through exact response IDs; copied history stays ambiguous.
@@ -1656,10 +1669,10 @@ function recordExchange(reqPath, status, durationMs, reqBody, resBody, isStream,
     // 原始正文保留完整 JSON / SSE，包括图片、工具 ID、schema 及未知内容块。
     requestBody: reqBody.toString('utf8'), responseBody: resBody.toString('utf8'),
   };
-  if (isCodexPath(reqPath)) {
-    const { finished, ...extracted } = extractResponses(rec.requestBody, rec.responseBody, isStream);
-    Object.assign(rec, extracted, { anthropicVersion: '', betas: '' });
-    if (finished === 'response.completed') rec.incomplete = false; // 上游收到终止事件后才断开连接，不算中断
+  // Upstreams with their own wire format parse the exchange; the default (Anthropic) is parsed below.
+  const upstream = upstreams.for(reqPath);
+  if (upstream?.extract) {
+    upstream.extract(rec, { stream: isStream });
     warnUpstream(rec);
     try { persistCapture(rec); } catch (e) { console.error('抓包保存失败：', e.message); }
     return;
@@ -1701,11 +1714,21 @@ function recordExchange(reqPath, status, durationMs, reqBody, resBody, isStream,
 }
 
 const accountRouter = require('./proxy-router').createRouter({
-  dir: CLAUDE_DIR, port: PROXY_PORT, record: recordExchange,
+  dir: DATA_DIR, claudeDir: CLAUDE_DIR, port: PROXY_PORT, record: recordExchange,
   reserveCapture: () => ({ id: captureStore.nextId(), startedAt: new Date().toISOString() }),
 });
 const codexProxy = createCodexProxy({ record: recordExchange, reserveCapture: () => ({ id: captureStore.nextId(), startedAt: new Date().toISOString() }) });
-const proxyServer = http.createServer((req, res) => isCodexPath(req.url) ? codexProxy.handle(req, res) : accountRouter.handle(req, res));
+const upstreams = createUpstreams();
+upstreams.add({ id: 'anthropic', engine: 'claude', handle: accountRouter.handle }, { isDefault: true });
+upstreams.add({
+  id: 'openai', engine: 'codex', match: isCodexPath, handle: codexProxy.handle,
+  extract(rec, { stream }) {
+    const { finished, ...extracted } = extractResponses(rec.requestBody, rec.responseBody, stream);
+    Object.assign(rec, extracted, { anthropicVersion: '', betas: '' });
+    if (finished === 'response.completed') rec.incomplete = false; // 上游收到终止事件后才断开连接，不算中断
+  },
+});
+const proxyServer = http.createServer(upstreams.handle);
 // Panel-started Codex runs go through the capture proxy unless disabled.
 const codexCaptureEnabled = () => process.env.CCP_CODEX_CAPTURE !== '0' && readPanelConfig().codexCapture !== false;
 function codexAuthMode() {
@@ -1758,9 +1781,9 @@ proxyServer.on('error', e => {
 });
 if (!HISTORY_WORKER) proxyServer.listen(PROXY_PORT, '127.0.0.1');
 
-const macRuntime = require('./mac-runtime').createMacRuntime({ dir: CLAUDE_DIR, serverPath: path.join(__dirname, 'server.js'), port: PORT, proxyPort: PROXY_PORT, claudeInfo: HISTORY_WORKER ? undefined : resolveClaude() });
+const macRuntime = require('./mac-runtime').createMacRuntime({ dir: DATA_DIR, claudeDir: CLAUDE_DIR, serverPath: path.join(__dirname, 'server.js'), port: PORT, proxyPort: PROXY_PORT, claudeInfo: HISTORY_WORKER ? undefined : resolveClaude() });
 const feishuGateway = require('./feishu-gateway').createFeishuGateway({
-  dir: CLAUDE_DIR, runtime: macRuntime, replyURL: `http://127.0.0.1:${PORT}/api/feishu/reply`,
+  dir: DATA_DIR, runtime: macRuntime, replyURL: `http://127.0.0.1:${PORT}/api/feishu/reply`,
   panel: {
     sessions: listSessions,
     projects: knownProjects,
@@ -1790,7 +1813,7 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
   },
 });
 
-const larkSetup = require('./lark-setup').createLarkSetup({ dir: CLAUDE_DIR, configure: input => feishuGateway.configure(input) });
+const larkSetup = require('./lark-setup').createLarkSetup({ dir: DATA_DIR, configure: input => feishuGateway.configure(input) });
 
 // Usage annotations must never delay the resource list itself.
 let resourceUsage, resourceUsageAt = 0, resourceUsagePending;
@@ -2329,6 +2352,7 @@ if (!HISTORY_WORKER) server.listen(PORT, BIND_HOST, () => {
   console.log(`my-agents 已启动: http://localhost:${PORT}`);
   if (auth.requireToken) console.log(`远程访问链接（含令牌，勿外传）: http://<host>:${PORT}/?token=${auth.token}`);
   console.log(`管理目录: ${CLAUDE_DIR}`);
+  if (DATA_DIR !== CLAUDE_DIR) console.log(`数据目录: ${DATA_DIR}`);
   console.log(`Inspector 代理: http://localhost:${PROXY_PORT}`);
   ensureProxyInstalled();
   feishuGateway.bootstrap().catch(e => console.warn('飞书网关：' + e.message));

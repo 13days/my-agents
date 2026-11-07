@@ -47,7 +47,7 @@ function sessionIdOf(parsed) {
   return m ? m[1].toLowerCase() : '';
 }
 const SESSION_ROUTES_MAX = 500, LIVE_TTL = 30 * 60 * 1000;
-function createRouter({ dir, port, record = () => {}, reserveCapture = () => ({}) }) {
+function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCapture = () => ({}) }) {
   const file = path.join(dir, 'panel-proxy.json');
   let config = { mode: 'manual', selected: '', accounts: [], localToken: crypto.randomBytes(32).toString('hex') };
   if (fs.existsSync(file)) config = { ...config, ...JSON.parse(fs.readFileSync(file, 'utf8')) };
@@ -59,7 +59,7 @@ function createRouter({ dir, port, record = () => {}, reserveCapture = () => ({}
   const localURL = `http://127.0.0.1:${port}`;
   function connectionStatus() {
     try {
-      const settings = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
+      const settings = JSON.parse(fs.readFileSync(path.join(claudeDir, 'settings.json'), 'utf8'));
       const env = settings.env || {};
       const base = (env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/$/, '');
       const connected = base === localURL && env.ANTHROPIC_AUTH_TOKEN === config.localToken;
@@ -115,7 +115,7 @@ function createRouter({ dir, port, record = () => {}, reserveCapture = () => ({}
     }
     config = next;
     if (settingsChange?.changed) {
-      try { atomicJSON(path.join(dir, 'settings.json'), settingsChange.settings); }
+      try { atomicJSON(path.join(claudeDir, 'settings.json'), settingsChange.settings); }
       catch (e) { throw new Error('账号已保存，但 Claude 环境变量写入失败：' + e.code); }
     }
     cursor = 0;
@@ -123,7 +123,7 @@ function createRouter({ dir, port, record = () => {}, reserveCapture = () => ({}
     return { ...status(), restartRequired: !!settingsChange?.changed };
   }
   function prepareClientEnv(next, original) {
-    const settings = original || JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
+    const settings = original || JSON.parse(fs.readFileSync(path.join(claudeDir, 'settings.json'), 'utf8'));
     const env = { ...(settings.env || {}) };
     const before = JSON.stringify(env);
     const account = next.accounts.find(a => a.id === next.selected && a.enabled) || next.accounts.find(a => a.enabled);
@@ -144,7 +144,7 @@ function createRouter({ dir, port, record = () => {}, reserveCapture = () => ({}
     return { settings: { ...settings, env }, changed: before !== JSON.stringify(env) };
   }
   function importSettings() {
-    const settings = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
+    const settings = JSON.parse(fs.readFileSync(path.join(claudeDir, 'settings.json'), 'utf8'));
     const env = settings.env || {};
     const url = env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
     const token = env.ANTHROPIC_AUTH_TOKEN || env.ANTHROPIC_API_KEY;
@@ -159,7 +159,7 @@ function createRouter({ dir, port, record = () => {}, reserveCapture = () => ({}
     return save({ ...config, selected: config.selected || id, accounts: [...config.accounts.map(({ env: stored, ...a }) => a), { id, name: new URL(url).hostname + ' · ' + (config.accounts.length + 1), url, token, authType: env.ANTHROPIC_AUTH_TOKEN ? 'bearer' : 'api-key', modelMap, env }] });
   }
   function setup() {
-    const settingsFile = path.join(dir, 'settings.json');
+    const settingsFile = path.join(claudeDir, 'settings.json');
     const settings = fs.existsSync(settingsFile) ? JSON.parse(fs.readFileSync(settingsFile, 'utf8')) : {};
     // Preserve the old upstream before replacing credentials.
     if (connectionStatus().canImport) importSettings();

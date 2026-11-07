@@ -23,6 +23,10 @@ function createLocalHost({ id = 'local', label = '本机' } = {}) {
       return real;
     },
     join: (...parts) => path.join(...parts),
+    // Read-only file access for history and resource lookups on the node's disk.
+    exists: file => fs.existsSync(file),
+    readFile: (file, encoding = 'utf8') => fs.promises.readFile(file, encoding),
+    readdir: dir => fs.promises.readdir(dir, { withFileTypes: true }).then(entries => entries.map(entry => ({ name: entry.name, dir: entry.isDirectory() }))),
   };
 }
 module.exports = { createLocalHost };
