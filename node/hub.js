@@ -13,6 +13,10 @@ const { attachRemoteNode } = require('./remote');
 const NODE_ID = /^[\w.-]{1,64}$/;
 const SSH_TARGET = /^[\w.@:[\]-]{1,200}$/;
 const DEFAULT_COMMAND = 'my-agents node --stdio';
+// Non-interactive SSH sessions often lack the PATH from the user's shell setup
+// (nvm, nodenv, Homebrew), and the engines need it too. Run the command the way
+// the user would type it after logging in; profile noise on stdout is ignored by the RPC peer.
+const remoteCommand = command => `exec "\${SHELL:-/bin/sh}" -ilc '${command.replace(/'/g, `'\\''`)}'`;
 
 function createNodeHub({ registry, token, dir, log = console, spawnImpl = spawn, retryMs = 30000 }) {
   const file = path.join(dir, 'panel-nodes.json');
@@ -53,7 +57,7 @@ function createNodeHub({ registry, token, dir, log = console, spawnImpl = spawn,
     clearTimeout(link.timer);
     if (link.child || registry.node(config.id)) return;
     link.state = 'connecting'; link.error = '';
-    const child = spawnImpl('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'ServerAliveInterval=30', config.ssh, config.command || DEFAULT_COMMAND], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawnImpl('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'ServerAliveInterval=30', config.ssh, remoteCommand(config.command || DEFAULT_COMMAND)], { stdio: ['pipe', 'pipe', 'pipe'] });
     link.child = child;
     let stderr = '';
     child.stderr?.on('data', chunk => { stderr = (stderr + chunk).slice(-2000); });
@@ -114,4 +118,4 @@ function createNodeHub({ registry, token, dir, log = console, spawnImpl = spawn,
     stop() { for (const link of links.values()) { clearTimeout(link.timer); link.child?.kill(); } wss?.clients.forEach(ws => ws.close()); },
   };
 }
-module.exports = { createNodeHub, DEFAULT_COMMAND };
+module.exports = { createNodeHub, DEFAULT_COMMAND, remoteCommand };

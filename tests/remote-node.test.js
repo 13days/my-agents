@@ -8,7 +8,7 @@ const { createPeer } = require('../node/rpc');
 const { pairTransports, wsTransport } = require('../node/transports');
 const { serveNode } = require('../node/agent');
 const { attachRemoteNode } = require('../node/remote');
-const { createNodeHub } = require('../node/hub');
+const { createNodeHub, remoteCommand } = require('../node/hub');
 
 // An engine on the node that echoes prompts, with optional permission requests.
 function echoEngine() {
@@ -122,6 +122,7 @@ test('SSH nodes are validated, saved, launched with the stdio command and retrie
     spawned.push({ cmd, args, child });
     // Act as the remote `my-agents node --stdio`.
     const { streamTransport } = require('../node/transports');
+    child.stdout.write('hello from a chatty login profile\n');
     serveNode({ peer: createPeer(streamTransport(child.stdin, child.stdout)), host: createLocalHost(), engines: [echoEngine()], id: 'whatever-the-node-says' });
     return child;
   };
@@ -129,7 +130,7 @@ test('SSH nodes are validated, saved, launched with the stdio command and retrie
   assert.throws(() => hub.add({ id: 'bad id', ssh: 'me@box' }), { status: 400 });
   assert.throws(() => hub.add({ id: 'box', ssh: '-oProxyCommand=evil' }), { status: 400 });
   hub.add({ id: 'gpu-box', label: 'GPU 开发机', ssh: 'me@gpu.example' });
-  assert.deepEqual(spawned[0].args.slice(-2), ['me@gpu.example', 'my-agents node --stdio']);
+  assert.deepEqual(spawned[0].args.slice(-2), ['me@gpu.example', remoteCommand('my-agents node --stdio')]);
   await until(() => registry.node('gpu-box'));
   assert.equal(registry.node('gpu-box').label, 'GPU 开发机', 'saved SSH nodes keep the name they were added under');
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'panel-nodes.json'), 'utf8')).nodes[0].ssh, 'me@gpu.example');
@@ -137,4 +138,10 @@ test('SSH nodes are validated, saved, launched with the stdio command and retrie
   await until(() => spawned.length === 2 && registry.node('gpu-box'), 3000);
   assert.ok(hub.remove('gpu-box'));
   hub.stop();
+});
+
+test('the SSH command runs in the login shell and survives quoting', () => {
+  const { execFileSync } = require('node:child_process');
+  const command = `printf '%s|%s' "it's" '$HOME'`;
+  assert.equal(execFileSync('/bin/sh', ['-c', remoteCommand(command)], { env: { SHELL: '/bin/sh', HOME: '/x', PATH: process.env.PATH }, encoding: 'utf8' }), "it's|$HOME");
 });
