@@ -2368,7 +2368,15 @@ server.on('error', e => {
 // Claude on remote nodes goes through this panel's proxy accounts, relayed over the node link.
 const nodeHub = require('./node/hub').createNodeHub({ registry, token: auth?.token, dir: DATA_DIR, routing: {
   target: `http://127.0.0.1:${PROXY_PORT}`,
-  engines: { claude: async options => { const env = await accountRouteEnv(accountRouter, options); return env.ANTHROPIC_BASE_URL ? env : null; } },
+  engines: {
+    async claude(options) {
+      const env = await accountRouteEnv(accountRouter, options);
+      if (!env.ANTHROPIC_BASE_URL) return null;
+      // Unless the run picks a model, use this panel's default rather than one pinned in the node's settings.
+      if (!env.ANTHROPIC_MODEL) { try { const { model } = JSON.parse(fs.readFileSync(path.join(CLAUDE_DIR, 'settings.json'), 'utf8')); if (typeof model === 'string' && model) env.ANTHROPIC_MODEL = model; } catch {} }
+      return env;
+    },
+  },
 } });
 server.on('upgrade', (req, socket, head) => { if (!nodeHub.upgrade(req, socket, head)) socket.destroy(); });
 if (!HISTORY_WORKER) server.listen(PORT, BIND_HOST, () => {
