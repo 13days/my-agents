@@ -234,3 +234,8 @@ test('worktree creation is routed to the session node', async () => {
     assert.equal(engine.opened[0].cwd, fs.realpathSync(workspace.cwd));
   } finally { manager.shutdown(); peer.close(); }
 });
+
+test('working directories typed in chat may start with ~ on the machine that runs the CLI', () => {
+  assert.equal(createLocalHost().resolveDir('~'), fs.realpathSync(os.homedir()));
+  assert.throws(() => createLocalHost().resolveDir('~/definitely-missing-dir-xyz'), { status: 400 });
+});

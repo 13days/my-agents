@@ -345,6 +345,7 @@ curl -X POST localhost:4321/api/nodes -H 'Content-Type: application/json' \
 - `GET /api/nodes` 列出本机、在线节点和已保存的 SSH 节点（含状态和最近错误）；`DELETE /api/nodes/:id`；`POST /api/nodes/:id/reconnect`。
 - 面板「接入」页底部的「远程节点」区域提供同样的操作：查看节点状态和引擎版本、复制 WebSocket 接入命令、添加/删除/重连 SSH 节点；节点变化后引擎列表会自动刷新。
 - `POST /api/chat` 带 `"node":"devbox"` 即在该节点上启动会话；之后的接续、停止、插话自动走会话所属节点（记录在会话元数据的 `node` 字段）。
+- 飞书：`/node` 查看并切换当前话题的运行位置（本机 / 远程节点），`/node devbox ~/repos/项目` 直接切到节点上的目录；会话卡片有「切换运行位置」按钮。每个话题按「引擎 × 节点」记住上一次会话，`/new`、`/projects`、`/claude`、`/codex` 都留在当前节点。
 - 节点断开时，其上运行中的会话收到 `error` 并结束；SSH 节点 30 秒后自动重连，WebSocket 节点由 daemon 指数退避重连。
 
 ### 6.4 已知限制

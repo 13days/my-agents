@@ -17,7 +17,9 @@ function createLocalHost({ id = 'local', label = '本机' } = {}) {
     // Resolves a working directory; throws a user-facing error when unusable.
     resolveDir(dir) {
       let real;
-      try { real = fs.realpathSync(typeof dir === 'string' && dir.trim() ? dir.trim() : process.cwd()); }
+      // `~/…` comes from chat input (e.g. Feishu /node devbox ~/repos/x); expand it on the machine that runs the CLI.
+      const input = typeof dir === 'string' && dir.trim() ? dir.trim().replace(/^~(?=$|\/)/, os.homedir()) : process.cwd();
+      try { real = fs.realpathSync(input); }
       catch { throw Object.assign(new Error('工作目录不存在'), { status: 400 }); }
       if (!fs.statSync(real).isDirectory()) throw Object.assign(new Error('工作目录必须是文件夹'), { status: 400 });
       return real;

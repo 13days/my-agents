@@ -792,7 +792,7 @@ function listSessions() {
     const meta = sessionMetadata[s.id] || {}, manual = isManualTitle(meta, s.firstTitle);
     const pendingInput = manager.busy(s.id);
     const automatic = meta.autoTitle && (pendingInput || meta.autoTitleAt >= (s.promptAt || 0)) ? meta.autoTitle : s.promptAt ? s.title : meta.title || s.title;
-    return { ...s, ...(meta.worktree ? { worktree: meta.worktree } : {}), engine: s.engine || 'claude', title: manual ? meta.title : automatic || meta.title || s.id, titleSource: manual ? 'manual' : 'auto', last: Math.max(s.last, meta.lastAt || 0) };
+    return { ...s, ...(meta.worktree ? { worktree: meta.worktree } : {}), ...(meta.node ? { node: meta.node } : {}), engine: s.engine || 'claude', title: manual ? meta.title : automatic || meta.title || s.id, titleSource: manual ? 'manual' : 'auto', last: Math.max(s.last, meta.lastAt || 0) };
   }).sort((a, b) => b.last - a.last);
 }
 
@@ -1810,7 +1810,8 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
     },
     engine: id => sessionEngine(id),
     engines: () => registry.list().map(engine => ({ id: engine.id, ...engine.meta, capabilities: engine.capabilities })),
-    engineInfo: engine => registry.get(engine)?.detect?.() || {},
+    engineInfo: (engine, node = 'local') => registry.adapter(engine, node)?.detect?.() || {},
+    nodes: () => nodeHub.list().filter(node => node.id !== 'local').map(node => ({ id: node.id, label: node.label, connected: node.connected, platform: node.platform, home: node.home })),
     routes: () => ({ ...accountRouter.status(), pins: accountRouter.sessions().routes }),
     route: input => accountRouter.route(input),
     resetRoutes: () => accountRouter.reset(),

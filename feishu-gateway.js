@@ -16,6 +16,7 @@ function helpText(engines) {
     '/sessions [关键词] 查看会话卡片', '/switch 序号、ID前缀或名称 切换会话', '/projects 查看项目',
     `/new [${ids.join('|')}] [项目序号或路径] 选择引擎新建，省略时使用默认引擎；路径支持本机已有目录及 ~/`,
     ...engines.list.map(engine => `/${engine.id} [问题] 切到 ${engine.label}，可直接带问题`),
+    '/node [节点名] [路径] 查看或切换运行位置（本机 / 远程开发机），例如 /node devbox ~/repos/项目',
     '/use 引擎 切换引擎（支持别名）', '/engine 查看当前引擎和切换选项', '/current 查看当前位置的绑定会话', '/history 查看最近对话',
     '/rename 新名称 固定会话名称', '/queue 内容 排队处理', '/steer 内容 立即引导', '/stop 停止当前任务',
     '/route 代理路由：/route 序号切账号、auto 故障转移、rr 轮询、reset 清除冷却、pin 序号|off 固定当前会话、codex direct|proxy',
@@ -48,7 +49,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   const configFile = path.join(dir, 'panel-feishu.json'), stateFile = path.join(dir, 'panel-feishu-state.json');
   const inbox = createFeishuInbox(dir);
   const defaults = { allowAllUsers: false, allowAllGroups: false, enabled: false, appId: '', appSecret: '', domain: 'feishu', allowedUserIds: [], disabledUserIds: [], allowedChatIds: [], defaultProject: '', defaultEngine: 'claude', worktree: true, model: '', keepAwake: false };
-  let config = defaults, state = { bindings: {}, engineBindings: {}, cards: {}, listings: {}, receipts: [], projects: [] }, phase = 'disabled', lastError = '', channel = null, connecting = null, pairing = null;
+  let config = defaults, state = { bindings: {}, engineBindings: {}, cards: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} }, phase = 'disabled', lastError = '', channel = null, connecting = null, pairing = null;
   try { config = { ...defaults, ...load(configFile, {}) }; state = { ...state, ...load(stateFile, {}) }; }
   catch (e) { lastError = e.message; phase = 'error'; }
   // Engines come from the panel registry; unknown defaults fall back at use time.
@@ -91,9 +92,10 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     for (const [token, target] of replyTargets) if (target.expires <= now()) replyTargets.delete(token);
     const token = crypto.randomBytes(24).toString('hex');
     replyTargets.set(token, { appId: config.appId, msg: { messageId: msg.messageId, senderId: msg.senderId, chatId: msg.chatId, chatType: msg.chatType, threadId: threadOf(msg), rootId: msg.rootId }, expires: now() + 2 * 60 * 60 * 1000 });
-    const binding = state.bindings[scope(msg)], engine = binding ? engineOf(binding) : defaultEngine();
-    const cli = panel.engineInfo?.(engine);
-    const runtime = cli ? `当前会话由 my-agents 直接启动本机 ${catalog().label(engine)} CLI，实际运行版本为 ${cli.version || '未检测'}，可执行文件为 ${JSON.stringify(cli.path)}。核实当前引擎版本时请以该进程信息为准，不要把 PATH 中其他安装的版本或推测的 SDK 版本当作当前版本。${cliEnvHint(engine)}` : '';
+    const binding = state.bindings[scope(msg)], engine = binding ? engineOf(binding) : defaultEngine(), node = binding ? nodeOf(binding) : 'local';
+    const cli = panel.engineInfo?.(engine, node);
+    const where = node === 'local' ? '本机' : `远程节点「${nodeLabel(node)}」上的`;
+    const runtime = cli ? `当前会话由 my-agents 直接启动${where} ${catalog().label(engine)} CLI，实际运行版本为 ${cli.version || '未检测'}，可执行文件为 ${JSON.stringify(cli.path)}。核实当前引擎版本时请以该进程信息为准，不要把 PATH 中其他安装的版本或推测的 SDK 版本当作当前版本。${cliEnvHint(engine)}` : '';
     return `[my-agents 飞书发送上下文，本轮有效]\n${runtime}\n${JSON.stringify({ appId: config.appId, chatId: msg.chatId, chatType: msg.chatType, threadId: threadOf(msg), messageId: msg.messageId, senderId: msg.senderId, detailed: detailed(msg) })}\n这条用户消息来自${contextLabel(msg)}。用户说“发卡片／发给我／回复”且未指定其他接收方时，默认发送到当前 chatId 和当前话题，不是发送人的私聊。每轮以本轮位置为准，不沿用历史接收方或其他机器人。普通文字答复由网关自动发回，并按 Markdown 富文本渲染。\n用户明确要求发送飞书卡片或额外消息时，优先调用当前机器人的本地发送入口：POST ${replyURL}，Content-Type: application/json，JSON 为 {"token":"${token}","card":<飞书 JSON 2.0 卡片对象>} 或 {"token":"${token}","text":"消息正文"}。可先把 JSON 写到临时文件，再用 curl --fail-with-body -sS -H 'Content-Type: application/json' --data-binary @文件路径 '${replyURL}'。text 字段支持 Markdown，网关负责渲染，不要为避免显示标记而删除粗体或代码块。此入口固定使用当前机器人和原消息的位置，并在话题内回复；不能另传接收人。仅在用户要求发送时调用，以返回成功为发送依据；不要在答复中输出 token。简洁显示的群中不主动披露本机目录、分支、会话或详细工具数据。\n[/my-agents 飞书发送上下文]`;
   }
   async function sendReply(input) {
@@ -115,10 +117,19 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   }
   function session(id) { return panel.sessions().find(item => item.id === id); }
   function engineOf(binding) { return catalog().fallback(session(binding.id)?.engine || binding.engine || panel.engine?.(binding.id), 'claude'); }
-  function bindingFor(item) { return { id: item.id, cwd: item.project, worktree: item.worktree, engine: engineOf(item) }; }
+  function bindingFor(item) { return { id: item.id, cwd: item.project, worktree: item.worktree, engine: engineOf(item), ...(item.node && item.node !== 'local' ? { node: item.node } : {}) }; }
+  // Where a binding runs: 'local' (this Mac) or a remote node id (see node/). A session stays on its node.
+  function nodeOf(binding) { return session(binding.id)?.node || binding.node || 'local'; }
+  const remoteNodes = () => (panel.nodes?.() || []).filter(node => node.id !== 'local');
+  const nodeLabel = id => id === 'local' ? '本机' : remoteNodes().find(node => node.id === id)?.label || id;
+  const findNode = query => { const q = String(query || '').trim().toLowerCase(); if (['local', 'mac', '本机'].includes(q)) return 'local'; return remoteNodes().find(node => node.id.toLowerCase() === q || String(node.label).toLowerCase() === q)?.id || ''; };
+  // Remote directories cannot be checked here; the node validates them when the session starts.
+  const usable = binding => nodeOf(binding) === 'local' ? projects().includes(binding.cwd) : true;
+  // Per-location memory of the last session for each engine on each node.
+  const cacheKey = (engine, node) => node && node !== 'local' ? `${engine}@${node}` : engine;
   function rememberEngine(key, binding) {
     if (!binding) return;
-    const engine = engineOf(binding); (state.engineBindings[key] ||= {})[engine] = { ...binding, engine };
+    const engine = engineOf(binding); (state.engineBindings[key] ||= {})[cacheKey(engine, nodeOf(binding))] = { ...binding, engine };
   }
   function bind(key, binding) {
     rememberEngine(key, state.bindings[key]);
@@ -128,13 +139,53 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     const key = scope(msg), current = state.bindings[key];
     if (!current || engineOf(current) !== engine) {
       rememberEngine(key, current);
-      const cached = state.engineBindings[key]?.[engine];
+      const node = current ? nodeOf(current) : 'local';
+      const cached = state.engineBindings[key]?.[cacheKey(engine, node)];
       const saved = cached && session(cached.id) ? cached : null;
-      const cwd = saved?.cwd || current?.cwd || config.defaultProject;
-      if (!cwd || !projects().includes(cwd)) return projectsCard(msg, 0, engine);
-      bind(key, saved && projects().includes(saved.cwd) ? { ...saved } : { id: crypto.randomUUID(), cwd, engine });
+      const cwd = saved?.cwd || current?.cwd || (node === 'local' ? config.defaultProject : '');
+      const at = { node };
+      if (!cwd || !usable({ ...at, cwd })) return projectsCard(msg, 0, engine, node);
+      bind(key, saved && usable(saved) ? { ...saved } : { id: crypto.randomUUID(), cwd, engine, ...(node !== 'local' ? at : {}) });
     }
     return prompt ? run(msg, prompt, 'steer') : currentCard(msg, state.bindings[key]);
+  }
+  // Moves this location to another machine, keeping the engine. Resumes that node's last session unless a directory is given.
+  async function useNode(msg, node, dir = '') {
+    const key = scope(msg), current = state.bindings[key], engine = current ? engineOf(current) : defaultEngine();
+    if (node !== 'local' && !remoteNodes().find(item => item.id === node)?.connected) throw new Error(`节点「${nodeLabel(node)}」未连接，请在 Mac 面板「接入 · 远程节点」检查`);
+    const target = dir.replace(/^(["'])(.*)\1$/s, '$2');
+    if (!target && current && nodeOf(current) === node) return currentCard(msg, current);
+    rememberEngine(key, current);
+    const cached = state.engineBindings[key]?.[cacheKey(engine, node)];
+    if (!target && cached && session(cached.id) && usable(cached)) { bind(key, { ...cached }); return currentCard(msg, state.bindings[key]); }
+    let cwd = target;
+    if (node === 'local') {
+      if (cwd && !path.isAbsolute(cwd) && cwd !== '~' && !cwd.startsWith('~/')) throw new Error('请使用绝对路径或 ~/ 开头的路径');
+      if (cwd) cwd = path.resolve(cwd.startsWith('~') ? os.homedir() + cwd.slice(1) : cwd);
+      cwd ||= config.defaultProject;
+      if (!cwd) return projectsCard(msg, 0, engine, node);
+      let directory = false; try { directory = fs.statSync(cwd).isDirectory(); } catch {}
+      if (!directory) throw new Error('项目目录不存在或不是文件夹');
+      if (!state.projects.includes(cwd)) state.projects.push(cwd);
+    } else {
+      if (cwd && !cwd.startsWith('/') && cwd !== '~' && !cwd.startsWith('~/')) throw new Error('请使用开发机上的绝对路径或 ~/ 开头的路径');
+      if (!cwd) return projectsCard(msg, 0, engine, node);
+    }
+    bind(key, { id: crypto.randomUUID(), cwd, engine, ...(node !== 'local' ? { node } : {}) });
+    return currentCard(msg, state.bindings[key]);
+  }
+  async function nodesCard(msg) {
+    const binding = state.bindings[contextKey(msg)], node = binding ? nodeOf(binding) : 'local';
+    const list = [{ id: 'local', label: '本机', connected: true }, ...remoteNodes()];
+    if (!detailed(msg)) return send(msg, { text: `${contextLabel(msg)} · 运行位置：${nodeLabel(node)}\n可选：${list.map(item => `${item.label}（${item.id}）${item.connected ? '' : ' · 离线'}`).join('、')}\n/node 节点名 [路径] 切换，例如 /node ${list[1]?.id || 'devbox'} ~/repos/项目` });
+    const result = await send(msg, { card: cards.nodePicker({ owner: msg.senderId, key: contextKey(msg), location: contextLabel(msg), node, nodes: list, engines: catalog(), engine: binding ? engineOf(binding) : defaultEngine() }) });
+    rememberCard(result, msg, binding);
+  }
+  // Directories used on a remote node, newest first: its sessions plus ones picked from Feishu.
+  function nodeProjects(node) {
+    if (node === 'local') return projects();
+    const home = remoteNodes().find(item => item.id === node)?.home;
+    return [...new Set([...panel.sessions().filter(item => item.node === node).map(item => item.project), ...(state.nodeProjects[node] || []), home].filter(Boolean))];
   }
   const pageOf = (page, total, size = cards.PAGE_SIZE) => Math.max(0, Math.min(Math.max(0, Math.ceil(total / size) - 1), Math.trunc(Number(page) || 0)));
   async function sessionsCard(msg, query = '', requestedPage = 0) {
@@ -148,15 +199,18 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   function projects() {
     return [...new Set([config.defaultProject, ...panel.projects(), ...state.projects].filter(Boolean))].filter(folder => { try { return fs.statSync(folder).isDirectory(); } catch { return false; } });
   }
-  async function projectsCard(msg, requestedPage = 0, engine = defaultEngine()) {
+  async function projectsCard(msg, requestedPage = 0, engine = defaultEngine(), node = null) {
     if (!detailed(msg)) return managementNotice(msg);
-    const all = projects(), page = pageOf(requestedPage, all.length);
-    const result = await send(msg, { card: cards.projectList({ owner: msg.senderId, key: contextKey(msg), location: contextLabel(msg), rows: all.slice(page * cards.PAGE_SIZE, (page + 1) * cards.PAGE_SIZE), total: all.length, page, defaultProject: config.defaultProject, engine: catalog().fallback(engine, defaultEngine()), engines: catalog() }) });
+    const current = state.bindings[contextKey(msg)];
+    node = node && (node === 'local' || remoteNodes().some(item => item.id === node)) ? node : current ? nodeOf(current) : 'local';
+    const all = nodeProjects(node), page = pageOf(requestedPage, all.length);
+    const result = await send(msg, { card: cards.projectList({ owner: msg.senderId, key: contextKey(msg), location: contextLabel(msg), rows: all.slice(page * cards.PAGE_SIZE, (page + 1) * cards.PAGE_SIZE), total: all.length, page, defaultProject: node === 'local' ? config.defaultProject : '', engine: catalog().fallback(engine, defaultEngine()), engines: catalog(), node, nodeLabel: nodeLabel(node) }) });
     rememberCard(result, msg);
   }
   async function currentCard(msg, binding) {
-    if (!detailed(msg)) return send(msg, { text: `${contextLabel(msg)} · ${catalog().label(engineOf(binding))} 已就绪。直接发送消息继续。\n${catalog().switchHint(engineOf(binding))} 切换；各自保留上下文。` });
-    const result = await send(msg, { card: cards.currentSession({ engines: catalog(), owner: msg.senderId, key: contextKey(msg), location: contextLabel(msg), binding, item: session(binding.id), running: panel.running(binding.id), requests: panel.pendingPermissions?.(binding.id) || [] }) });
+    const node = nodeOf(binding), where = node === 'local' ? '' : ` · ${nodeLabel(node)}`;
+    if (!detailed(msg)) return send(msg, { text: `${contextLabel(msg)} · ${catalog().label(engineOf(binding))}${where} 已就绪。直接发送消息继续。\n${catalog().switchHint(engineOf(binding))} 切换；各自保留上下文。/node 切换运行位置。` });
+    const result = await send(msg, { card: cards.currentSession({ engines: catalog(), owner: msg.senderId, key: contextKey(msg), location: contextLabel(msg), nodeLabel: nodeLabel(node), binding, item: session(binding.id), running: panel.running(binding.id), requests: panel.pendingPermissions?.(binding.id) || [] }) });
     rememberCard(result, msg, binding);
   }
   async function historyReply(msg, binding) {
@@ -256,12 +310,17 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     const engine = engineOf(binding);
     if (binding.engine !== engine) { binding.engine = engine; persist(); }
     const previousId = binding.id;
-    const result = await panel.submit({ sessionId: binding.id, cwd: binding.cwd, worktree: config.worktree && !session(binding.id), model: modelFor(engine), engine, ...input });
+    const node = nodeOf(binding);
+    const result = await panel.submit({ sessionId: binding.id, cwd: binding.cwd, worktree: config.worktree && !session(binding.id), model: modelFor(engine), engine, ...(node !== 'local' ? { node } : {}), ...input });
     if (result?.sessionId && result.sessionId !== binding.id) {
       binding.id = result.sessionId;
       for (const card of Object.values(state.cards)) if (card.sessionId === previousId) { card.originalSessionId ||= previousId; card.sessionId = binding.id; }
     }
-    if (result?.cwd) { binding.cwd = result.cwd; if (!state.projects.includes(result.cwd)) state.projects.push(result.cwd); }
+    if (result?.cwd) {
+      binding.cwd = result.cwd;
+      const list = node === 'local' ? state.projects : (state.nodeProjects[node] ||= []);
+      if (!list.includes(result.cwd)) list.push(result.cwd);
+    }
     if (result?.worktree) binding.worktree = result.worktree;
     for (const [key, saved] of Object.entries(state.engineBindings)) if (saved[engine]?.id === previousId || state.bindings[key] === binding) rememberEngine(key, binding);
     persist();
@@ -269,7 +328,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   async function run(msg, prompt, mode) {
     const key = scope(msg);
     let binding = state.bindings[key];
-    if (binding && !session(binding.id) && !projects().includes(binding.cwd)) binding = null;
+    if (binding && !session(binding.id) && !usable(binding)) binding = null;
     if (!binding) {
       if (!config.defaultProject) { await projectsCard(msg); return; }
       binding = bind(key, { id: crypto.randomUUID(), cwd: config.defaultProject, engine: defaultEngine() });
@@ -361,7 +420,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     const newEngine = explicitEngine || defaultEngine();
     const newTarget = explicitEngine ? arg.slice(firstWord.length).trim() : arg;
     if (!detailed(msg) && (['sessions', 'projects', 'switch', 'history', 'rename', 'route'].includes(command) || command === 'new' && newTarget)) return managementNotice(msg);
-    if (!detailed(msg) && command === 'help') return send(msg, { text: `直接发送消息，或 @机器人，在当前位置独立会话中处理。\n/new [${engines.ids().join('|')}] 默认项目新建\n${engines.ids().map(id => '/' + id).join(' 或 ')} 切换引擎\n/current 查看当前引擎与绑定\n/queue 内容 排队\n/steer 内容 引导任务\n/stop 停止任务\n此群使用普通文字回复和临时思考表情，会话管理请先在面板逐项授权此群。` });
+    if (!detailed(msg) && command === 'help') return send(msg, { text: `直接发送消息，或 @机器人，在当前位置独立会话中处理。\n/new [${engines.ids().join('|')}] 默认项目新建\n${engines.ids().map(id => '/' + id).join(' 或 ')} 切换引擎\n/current 查看当前引擎与绑定\n/node [节点名] [路径] 切换运行位置（本机 / 开发机）\n/queue 内容 排队\n/steer 内容 引导任务\n/stop 停止任务\n此群使用普通文字回复和临时思考表情，会话管理请先在面板逐项授权此群。` });
     if (!detailed(msg) && command === 'status') return send(msg, { text: `my-agents 在线 · ${contextLabel(msg)}独立会话\n当前引擎：${catalog().label(binding ? engineOf(binding) : defaultEngine())}\n${engines.switchHint(binding ? engineOf(binding) : defaultEngine())} 切换引擎\n此群使用简洁显示：普通文字回复，处理时显示思考表情。` });
     // /<引擎 id 或别名> [问题] 直接切换；/use 与 /engine 带参数时同样切换
     if (command && engines.find(command) && !['new', 'use', 'engine'].includes(command)) return useEngine(msg, engines.find(command), arg);
@@ -372,9 +431,24 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       return useEngine(msg, target);
     }
     if (command === 'help') return send(msg, { text: helpText(engines) });
+    if (command === 'node' || command === 'nodes') {
+      if (!arg) return nodesCard(msg);
+      const [name, ...rest] = arg.split(/\s+/), node = findNode(name);
+      if (!node) throw new Error(`没有找到节点「${name}」。发送 /node 查看可用节点`);
+      return useNode(msg, node, rest.join(' ').trim());
+    }
     if (command === 'sessions') return sessionsCard(msg, arg);
     if (command === 'route') return routesCard(msg, await applyRoute(msg, parseRoute(arg)));
     if (command === 'projects' || command === 'new' && !newTarget && !config.defaultProject) return projectsCard(msg, 0, newEngine);
+    if (command === 'new' && binding && nodeOf(binding) !== 'local') {
+      const node = nodeOf(binding);
+      // Without a target, start fresh in the same directory on that node.
+      if (!newTarget) { bind(key, { id: crypto.randomUUID(), cwd: binding.cwd, engine: newEngine, node }); return currentCard(msg, state.bindings[key]); }
+      const target = newTarget.replace(/^(["'])(.*)\1$/s, '$2'), rows = nodeProjects(node);
+      const cwd = /^\d+$/.test(target) ? rows[Number(target) - 1] : target.startsWith('/') || target === '~' || target.startsWith('~/') ? target : rows.find(folder => path.posix.basename(folder) === target);
+      if (!cwd) throw new Error(`未找到该项目。请用 /projects 列出${nodeLabel(node)}上的项目，或用 /new 绝对路径`);
+      bind(key, { id: crypto.randomUUID(), cwd, engine: newEngine, node }); return currentCard(msg, state.bindings[key]);
+    }
     if (command === 'new') {
       const rows = projects();
       let cwd;
@@ -397,7 +471,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (matches.length !== 1) { await sessionsCard(msg, /^\d+$/.test(arg) ? '' : arg); return; }
       bind(key, bindingFor(matches[0])); return currentCard(msg, state.bindings[key]);
     }
-    if (command === 'status') return send(msg, { text: `my-agents 在线\n${runtime.status().keepAwake ? 'Mac 保活已开启' : 'Mac 保活未开启'}\n绑定范围：${contextLabel(msg)}\n当前会话：${binding ? session(binding.id)?.title || binding.id : '尚未选择'}\n当前引擎：${catalog().label(binding ? engineOf(binding) : defaultEngine())}\n默认引擎：${catalog().label(defaultEngine())}\n默认项目：${config.defaultProject || '未配置'}` });
+    if (command === 'status') return send(msg, { text: `my-agents 在线\n${runtime.status().keepAwake ? 'Mac 保活已开启' : 'Mac 保活未开启'}\n绑定范围：${contextLabel(msg)}\n当前会话：${binding ? session(binding.id)?.title || binding.id : '尚未选择'}\n运行位置：${nodeLabel(binding ? nodeOf(binding) : 'local')}\n当前引擎：${catalog().label(binding ? engineOf(binding) : defaultEngine())}\n默认引擎：${catalog().label(defaultEngine())}\n默认项目：${config.defaultProject || '未配置'}` });
     if (['current', 'history', 'rename', 'stop'].includes(command)) {
       if (command === 'current') { const current = binding || defaultBinding(msg); return current ? currentCard(msg, current) : projectsCard(msg); }
       if (!binding) return sessionsCard(msg);
@@ -453,9 +527,15 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (value.action === 'engine') return engineCard(msg);
       if (value.action === 'use_engine') { if (!catalog().has(value.engine)) throw new Error('引擎无效'); return useEngine(msg, value.engine); }
       if (value.action === 'sessions') return sessionsCard(msg, String(value.query || ''), value.page);
-      if (value.action === 'projects') return projectsCard(msg, value.page, value.engine);
+      if (value.action === 'projects') return projectsCard(msg, value.page, value.engine, typeof value.node === 'string' ? value.node : null);
+      if (value.action === 'nodes') return nodesCard(msg);
+      if (value.action === 'use_node') { const node = typeof value.node === 'string' && (value.node === 'local' || remoteNodes().some(item => item.id === value.node)) ? value.node : ''; if (!node) throw new Error('节点无效'); return useNode(msg, node); }
       if (value.action === 'route') return routesCard(msg, await applyRoute(msg, { ...(typeof value.selected === 'string' ? { selected: value.selected } : {}), ...(['failover', 'round-robin'].includes(value.mode) ? { mode: value.mode } : {}), ...(value.reset === true ? { reset: true } : {}), ...(typeof value.codexCapture === 'boolean' ? { codexCapture: value.codexCapture } : {}) }));
-      if (value.action === 'new') { if (!projects().includes(value.cwd)) throw new Error('此项目当前不可用'); bind(key, { id: crypto.randomUUID(), cwd: value.cwd, engine: catalog().fallback(value.engine, defaultEngine()) }); return currentCard(msg, state.bindings[key]); }
+      if (value.action === 'new') {
+        const node = typeof value.node === 'string' && value.node !== 'local' ? value.node : 'local';
+        if (!nodeProjects(node).includes(value.cwd)) throw new Error('此项目当前不可用');
+        bind(key, { id: crypto.randomUUID(), cwd: value.cwd, engine: catalog().fallback(value.engine, defaultEngine()), ...(node !== 'local' ? { node } : {}) }); return currentCard(msg, state.bindings[key]);
+      }
       const original = state.cards[msg.messageId];
       const targetId = original?.originalSessionId === value.id ? original.sessionId : value.id;
       const item = session(targetId);
@@ -505,7 +585,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (next.enabled && (!/^[a-zA-Z0-9_-]{8,100}$/.test(next.appId) || !next.appSecret || next.appSecret.length > 1000)) throw new Error('请填写有效的 App ID 和 App Secret');
     if (next.defaultProject) { next.defaultProject = fs.realpathSync(next.defaultProject); if (!fs.statSync(next.defaultProject).isDirectory()) throw new Error('默认项目必须是文件夹'); }
     if (next.model && !/^[\w.\/:\[\]-]{1,100}$/.test(next.model)) throw new Error('模型名称无效');
-    if (next.appId !== config.appId || next.domain !== config.domain) { next.cardCallbacksReady = input.cardCallbacksReady || false; next.allowAllUsers = input.allowAllUsers || false; next.allowAllGroups = input.allowAllGroups || false; next.allowedUserIds = input.allowedUserIds || []; next.disabledUserIds = input.disabledUserIds || []; pairing = null; state = { bindings: {}, engineBindings: {}, cards: {}, listings: {}, receipts: [], projects: [] }; persist(); }
+    if (next.appId !== config.appId || next.domain !== config.domain) { next.cardCallbacksReady = input.cardCallbacksReady || false; next.allowAllUsers = input.allowAllUsers || false; next.allowAllGroups = input.allowAllGroups || false; next.allowedUserIds = input.allowedUserIds || []; next.disabledUserIds = input.disabledUserIds || []; pairing = null; state = { bindings: {}, engineBindings: {}, cards: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} }; persist(); }
     const reconnect = next.enabled !== config.enabled || next.appId !== config.appId || next.appSecret !== config.appSecret || next.domain !== config.domain;
     if (reconnect) await stop();
     config = next; atomic(configFile, config); runtime.keepAwake(config.keepAwake);

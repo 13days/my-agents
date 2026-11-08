@@ -667,3 +667,61 @@ test('fresh Feishu sessions request isolation and retain the resolved workspace 
   await f.gateway.receive(f.msg('/new claude')); await f.gateway.receive(f.msg('Shared task'));
   assert.equal(f.calls.at(-1).worktree, false);
 });
+
+test('/node moves a topic to a remote node; turns, engine switches and project lists stay on that node', async t => {
+  const f = await fixture(t); await f.pair();
+  let online = true;
+  f.panel.nodes = () => [{ id: 'devbox', label: '开发机', connected: online, home: '/home/me' }];
+  f.panel.engineInfo = (engine, node) => ({ path: `/${node}/bin/${engine}`, version: '9.9' });
+  const original = f.panel.submit;
+  f.panel.submit = async input => { await original(input); const row = f.rows.find(item => item.id === input.sessionId); if (input.node) row.node = input.node; return { sessionId: input.sessionId, cwd: input.cwd.replace('~', '/home/me') }; };
+
+  await f.gateway.receive(f.msg('/node'));
+  const picker = JSON.stringify(f.sent.at(-1).content);
+  assert.match(picker, /选择运行位置/); assert.match(picker, /开发机/); assert.match(picker, /use_node/);
+  await f.gateway.receive(f.msg('/node devbox ~/repos/app'));
+  assert.match(JSON.stringify(f.sent.at(-1).content), /开发机 · app/);
+  await f.gateway.receive(f.msg('Run on the dev machine'));
+  assert.equal(f.calls.at(-1).node, 'devbox'); assert.equal(f.calls.at(-1).cwd, '~/repos/app');
+  assert.match(f.calls.at(-1).gatewayContext, /远程节点「开发机」上的 Claude Code CLI，实际运行版本为 9\.9，可执行文件为 "\/devbox\/bin\/claude"/);
+  const devboxClaude = f.calls.at(-1).sessionId;
+  await f.gateway.receive(f.msg('Continue there'));
+  assert.equal(f.calls.at(-1).sessionId, devboxClaude); assert.equal(f.calls.at(-1).cwd, '/home/me/repos/app', 'the resolved remote directory is kept');
+
+  await f.gateway.receive(f.msg('/codex Codex on the dev machine'));
+  assert.equal(f.calls.at(-1).engine, 'codex'); assert.equal(f.calls.at(-1).node, 'devbox'); assert.equal(f.calls.at(-1).cwd, '/home/me/repos/app');
+  await f.gateway.receive(f.msg('/projects'));
+  const projects = JSON.stringify(f.sent.at(-1).content);
+  assert.match(projects, /\/home\/me\/repos/); assert.ok(!projects.includes(f.dir), 'local folders are not offered for the remote node');
+  await f.gateway.receive(f.msg('/claude'));
+  await f.gateway.receive(f.msg('Back to Claude')); assert.equal(f.calls.at(-1).sessionId, devboxClaude);
+
+  await f.gateway.receive(f.msg('/node local'));
+  await f.gateway.receive(f.msg('Now on the Mac'));
+  assert.equal(f.calls.at(-1).node, undefined); assert.equal(fs.realpathSync(f.calls.at(-1).cwd), fs.realpathSync(f.dir));
+  await f.gateway.receive(f.msg('/node devbox'));
+  await f.gateway.receive(f.msg('Back on the dev machine')); assert.equal(f.calls.at(-1).sessionId, devboxClaude, 'returning resumes that node\'s session');
+
+  online = false;
+  await f.gateway.receive(f.msg('/node local')); await f.gateway.receive(f.msg('/node devbox'));
+  assert.match(JSON.stringify(f.sent.at(-1).content), /未连接/);
+  await f.gateway.receive(f.msg('/node nowhere')); assert.match(JSON.stringify(f.sent.at(-1).content), /没有找到节点/);
+  await f.gateway.receive(f.msg('/node devbox relative/path')); assert.match(JSON.stringify(f.sent.at(-1).content), /未连接|绝对路径/);
+});
+
+test('node picker card buttons switch the topic to the chosen machine', async t => {
+  const f = await fixture(t); await f.pair();
+  f.panel.nodes = () => [{ id: 'devbox', label: '开发机', connected: true, home: '/home/me' }];
+  const key = contextKey(f.msg(''));
+  const click = value => f.gateway.action({ action: { value: { owner: 'ou_owner', key, ...value } }, operator: { openId: 'ou_owner' }, chatId: 'oc_private', messageId: 'card_' + Math.random() });
+  await click({ action: 'use_node', node: 'devbox' });
+  const card = JSON.stringify(f.sent.at(-1).content);
+  assert.match(card, /选择工作项目/); assert.match(card, /\/home\/me/);
+  await click({ action: 'new', node: 'devbox', cwd: '/home/me', engine: 'claude' });
+  await f.gateway.receive(f.msg('hello devbox'));
+  assert.equal(f.calls.at(-1).node, 'devbox'); assert.equal(f.calls.at(-1).cwd, '/home/me');
+  await click({ action: 'new', node: 'devbox', cwd: '/etc', engine: 'claude' });
+  assert.match(JSON.stringify(f.sent.at(-1).content), /不可用/);
+  await click({ action: 'use_node', node: 'evil' });
+  assert.match(JSON.stringify(f.sent.at(-1).content), /节点无效/);
+});
