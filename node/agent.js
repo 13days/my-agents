@@ -34,7 +34,11 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id }) {
 
   peer.handle('session.open', async ({ sid, engine: name, sessionId, resume, cwd, model, routeEnv }) => {
     const engine = engineOf(name);
-    if (routeEnv?.ANTHROPIC_BASE_URL) routeEnv = { ...routeEnv, ANTHROPIC_BASE_URL: await relay.url() };
+    if (routeEnv?.ANTHROPIC_BASE_URL) {
+      // The relay is on loopback; a corporate HTTP(S)_PROXY in the shell must not swallow it.
+      const noProxy = [...new Set([...String(process.env.NO_PROXY || process.env.no_proxy || '').split(','), '127.0.0.1', 'localhost'].map(s => s.trim()).filter(Boolean))].join(',');
+      routeEnv = { ...routeEnv, ANTHROPIC_BASE_URL: await relay.url(), NO_PROXY: noProxy, no_proxy: noProxy };
+    }
     let session = null;
     const notify = (method, extra = {}) => peer.notify(method, { sid, ...extra, state: state(session) });
     session = await engine.open({

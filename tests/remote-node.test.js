@@ -195,6 +195,7 @@ test('routed engines reach the hub proxy through the node link; others keep thei
   assert.equal(env.ANTHROPIC_AUTH_TOKEN, 'local-token');
   assert.match(env.ANTHROPIC_BASE_URL, /^http:\/\/127\.0\.0\.1:\d+$/);
   assert.notEqual(env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:4322', 'the base URL points at the node-local relay');
+  assert.ok(env.NO_PROXY.split(',').includes('127.0.0.1') && env.no_proxy === env.NO_PROXY, 'an HTTP proxy in the shell cannot intercept the relay');
 
   const res = await fetch(env.ANTHROPIC_BASE_URL + '/v1/messages?beta=true', { method: 'POST', headers: { authorization: 'Bearer local-token', 'content-type': 'application/json' }, body: '{"model":"m"}' });
   assert.equal(res.status, 200);
