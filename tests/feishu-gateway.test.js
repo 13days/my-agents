@@ -755,3 +755,78 @@ test('session accordions enrich only the current page and browsing user messages
   await click(f.sent.at(-1), back); assert.match(JSON.stringify(f.sent.at(-1).content), /16\. /);
   assert.equal(f.calls.length, 0); assert.equal(binding(), original);
 });
+
+test('stopping immediately after completion drains the final card instead of leaving thinking status', async t => {
+  const f = await fixture(t); await f.pair();
+  await f.gateway.receive(f.msg('Finish before restart'));
+  await f.gateway.stop();
+  assert.equal(f.updated.at(-1).card.header.title.content, '已完成');
+  assert.equal(f.updated.at(-1).card.header.template, 'green');
+  assert.match(JSON.stringify(f.updated.at(-1).card), /A complete response/);
+  const state = JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json')));
+  assert.equal(Object.keys(state.taskCards).length, 0);
+});
+
+test('closing an unfinished monitor records a truthful connection-ended state and removes task actions', async t => {
+  const f = await fixture(t); await f.pair();
+  f.panel.watch = (id, listener) => { listener('turn', { messageId: f.calls.at(-1).messageId }); listener('text', { messageId: f.calls.at(-1).messageId, text: 'Work so far' }); return () => {}; };
+  await f.gateway.receive(f.msg('Still working during restart')); await f.gateway.stop();
+  const card = f.updated.at(-1).card;
+  assert.equal(card.header.title.content, '连接已结束'); assert.match(JSON.stringify(card), /Work so far/);
+  assert.doesNotMatch(JSON.stringify(card), /停止任务/); assert.match(JSON.stringify(card), /任务是否完成请查看会话记录/);
+});
+
+test('failed final delivery is persisted and repaired after gateway restart', async t => {
+  const f = await fixture(t); await f.pair();
+  const update = f.channel.updateCard;
+  f.channel.updateCard = async () => { throw new Error('temporary transport failure'); };
+  await f.gateway.receive(f.msg('Result must survive reconnect')); await f.gateway.stop();
+  assert.equal(Object.keys(JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json'))).taskCards).length, 1);
+  f.channel.updateCard = update;
+  const restored = createFeishuGateway(f.options); await restored.start();
+  try {
+    assert.equal(f.updated.at(-1).card.header.title.content, '已完成');
+    assert.equal(Object.keys(JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json'))).taskCards).length, 0);
+  } finally { await restored.stop(); }
+});
+
+test('terminal events cannot be overwritten by late thinking events', async t => {
+  const f = await fixture(t); await f.pair();
+  f.panel.watch = (id, listener) => {
+    const messageId = f.calls.at(-1).messageId;
+    listener('text', { messageId, text: 'Final result' }); listener('done', { messageId });
+    listener('reasoning', { messageId, id: 'late', text: 'late diagnostic' }); listener('turn', { messageId });
+    return () => {};
+  };
+  await f.gateway.receive(f.msg('Terminal status is final')); await f.gateway.stop();
+  assert.equal(f.updated.at(-1).card.header.title.content, '已完成');
+  assert.doesNotMatch(JSON.stringify(f.updated.at(-1).card), /late diagnostic/);
+});
+
+test('a task card left by an abrupt exit is recovered without claiming the task completed', async t => {
+  const f = await fixture(t); await f.pair(); await f.gateway.stop();
+  const filename = path.join(f.dir, 'panel-feishu-state.json'), state = JSON.parse(fs.readFileSync(filename));
+  const cards = require('../feishu-cards');
+  state.taskCards = { abandoned: { appId: 'cli_test_app', done: false, card: cards.task({ owner: 'ou_owner', key: contextKey(f.msg('')), binding: { id: f.rows[0].id, cwd: f.dir }, title: 'Abandoned task', elapsed: 1000, view: { phase: '正在思考', text: 'Saved partial output', done: false, tools: new Map(), permissions: new Map() } }) } };
+  fs.writeFileSync(filename, JSON.stringify(state));
+  const restored = createFeishuGateway(f.options); await restored.start();
+  try {
+    const card = f.updated.at(-1).card;
+    assert.equal(card.header.title.content, '连接已结束'); assert.notEqual(card.header.template, 'green');
+    assert.match(JSON.stringify(card), /Saved partial output/); assert.doesNotMatch(JSON.stringify(card), /停止任务/);
+  } finally { await restored.stop(); }
+});
+
+test('shutdown waits for an older card update before writing the terminal state', async t => {
+  const f = await fixture(t); await f.pair();
+  let listener, release, started;
+  const began = new Promise(resolve => { started = resolve; });
+  f.panel.watch = (id, next) => { listener = next; listener('turn', { messageId: f.calls.at(-1).messageId }); return () => {}; };
+  const original = f.channel.updateCard; let first = true;
+  f.channel.updateCard = async (...args) => { if (first) { first = false; started(); await new Promise(resolve => { release = resolve; }); } return original(...args); };
+  await f.gateway.receive(f.msg('Slow card transport'));
+  await began;
+  listener('done', { messageId: f.calls.at(-1).messageId });
+  const stopping = f.gateway.stop(); release(); await stopping;
+  assert.equal(f.updated.at(-1).card.header.title.content, '已完成');
+});

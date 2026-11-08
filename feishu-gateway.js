@@ -49,9 +49,10 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   const configFile = path.join(dir, 'panel-feishu.json'), stateFile = path.join(dir, 'panel-feishu-state.json');
   const inbox = createFeishuInbox(dir);
   const defaults = { allowAllUsers: false, allowAllGroups: false, enabled: false, appId: '', appSecret: '', domain: 'feishu', allowedUserIds: [], disabledUserIds: [], allowedChatIds: [], defaultProject: '', defaultEngine: 'claude', worktree: true, model: '', keepAwake: false };
-  let config = defaults, state = { bindings: {}, engineBindings: {}, cards: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} }, phase = 'disabled', lastError = '', channel = null, connecting = null, pairing = null;
+  let config = defaults, state = { bindings: {}, engineBindings: {}, cards: {}, taskCards: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} }, phase = 'disabled', lastError = '', channel = null, connecting = null, pairing = null;
   try { config = { ...defaults, ...load(configFile, {}) }; state = { ...state, ...load(stateFile, {}) }; }
   catch (e) { lastError = e.message; phase = 'error'; }
+  state.taskCards ||= {};
   // Engines come from the panel registry; unknown defaults fall back at use time.
   const catalog = () => engineCatalog(panel.engines?.());
   const defaultEngine = () => catalog().fallback(config.defaultEngine, 'claude');
@@ -368,24 +369,54 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     const startedAt = now();
     const progress = () => cards.task({ engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), detailed: detailed(msg), binding, title: session(binding.id)?.title || clip(prompt, 80) || '图片对话', view, elapsed: now() - startedAt });
     const sent = await send(msg, { card: progress() }); rememberCard(sent, msg, binding);
+    const transport = channel;
+    const saveTask = card => {
+      state.taskCards[sent.messageId] = { appId: config.appId, sessionId: binding.id, done: view.done, card, updatedAt: now(), owner: msg.senderId, chatId: msg.chatId, chatType: msg.chatType };
+      persist();
+    };
+    saveTask(progress());
     try { await submit(binding, { prompt, images, messageId: id, mode, gatewayContext: deliveryContext(msg) }); }
-    catch (e) { view.phase = '失败'; view.text = errorText(e); if (await channel.updateCard(sent.messageId, progress()).then(() => true, () => false)) e.reported = true; throw e; }
-    let timer, heartbeat, unsub, dirty = false, busy = false, closed = false, updateFailures = 0;
-    const finish = () => { if (closed) return; closed = true; clearTimeout(timer); clearInterval(heartbeat); unsub?.(); monitors.delete(finish); };
+    catch (e) { view.phase = '失败'; view.text = errorText(e); view.done = true; saveTask(progress()); if (await transport.updateCard(sent.messageId, progress()).then(() => true, () => false)) { delete state.taskCards[sent.messageId]; persist(); e.reported = true; } throw e; }
+    let timer, heartbeat, unsub, updating, shuttingDown = false, dirty = false, busy = false, closed = false, updateFailures = 0;
+    const finish = () => { if (closed) return; closed = true; clearTimeout(timer); clearInterval(heartbeat); unsub?.(); monitors.delete(shutdownMonitor); };
     const flush = async () => {
       if (closed || busy) { dirty = true; return; }
       busy = true; dirty = false;
-      try { await channel.updateCard(sent.messageId, progress()); updateFailures = 0; }
+      try {
+        const terminal = view.done, card = progress(); saveTask(card);
+        updating = transport.updateCard(sent.messageId, card);
+        await updating; updateFailures = 0;
+        if (terminal && !shuttingDown) { delete state.taskCards[sent.messageId]; persist(); }
+      }
       catch (e) {
         rememberError(e); updateFailures++;
+        if (shuttingDown) return;
         if (updateFailures <= 3) { busy = false; timer = setTimeout(flush, 1000 * updateFailures); return; }
         if (view.done) { try { await sendLong(msg, view.phase + '\n' + (view.text || '请用 /history 查看已保存结果')); } catch (fallbackError) { rememberError(fallbackError); } finish(); }
       }
-      finally { busy = false; }
-      if (dirty) { timer = setTimeout(flush, 1000); return; }
+      finally { busy = false; updating = null; }
+      if (shuttingDown) return;
+      if (dirty) { timer = setTimeout(flush, view.done ? 0 : 1000); return; }
       if (view.done && !closed) { if (view.text.length > cards.REPLY_PREVIEW) { try { await sendLong(msg, view.text); } catch (e) { rememberError(e); } } finish(); }
     };
     const schedule = immediate => { clearTimeout(timer); if (busy) { dirty = true; return; } timer = setTimeout(flush, immediate ? 0 : 1200); };
+    const shutdownMonitor = async () => {
+      if (closed) return;
+      shuttingDown = true; clearTimeout(timer); clearInterval(heartbeat); unsub?.();
+      if (!view.done) {
+        view.done = true; view.phase = '连接已结束';
+        view.text += '\n\n网关连接已关闭，已停止同步进展。任务是否完成请查看会话记录。';
+        for (const tool of view.tools.values()) if (tool.state === '执行中') tool.state = '结果未同步';
+      }
+      const card = progress(); saveTask(card);
+      try {
+        // A previously sent thinking update must finish before the terminal update.
+        await updating?.catch(rememberError);
+        await transport.updateCard(sent.messageId, card);
+        delete state.taskCards[sent.messageId]; persist();
+      } catch (error) { rememberError(error); }
+      finally { finish(); }
+    };
     heartbeat = setInterval(() => {
       if (view.done || closed) return;
       if (!view.text && !view.tools.size && now() - startedAt >= 30000 && !view.warning) {
@@ -395,8 +426,9 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       schedule(true);
     }, 15000);
     heartbeat.unref?.();
-    monitors.add(finish);
-    unsub = panel.watch(binding.id, (event, data) => {
+    monitors.add(shutdownMonitor);
+    unsub = panel.watch(binding.id, (event, data = {}) => {
+      if (closed || shuttingDown || view.done) return;
       if (event === 'stopped') { view.phase = '已停止'; view.done = true; schedule(true); return; }
       if (event === 'end' && !view.done) { view.phase = '连接已结束'; view.done = true; if (!view.text) view.text = '本轮未完成，可用 /history 查看已保存内容后继续发送。'; schedule(true); return; }
       if (data.messageId !== id) return;
@@ -410,6 +442,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (event === 'tool_result') { const tool = view.tools.get(data.id); if (tool) { tool.state = data.isError ? '失败' : '已完成'; tool.output = typeof data.output === 'string' ? data.output : JSON.stringify(data.output); } }
       if (event === 'error') { view.text += '\n⚠ ' + data.error; view.phase = '失败'; view.done = true; }
       if (event === 'done') { view.phase = data.isError ? '失败' : data.interrupted ? '已按补充消息继续' : '已完成'; view.done = true; }
+      if (view.done) saveTask(progress());
       schedule(view.done);
     });
   }
@@ -561,6 +594,32 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       return currentCard(msg, state.bindings[key]);
     } catch (e) { rememberError(e); await send(msg, { text: errorText(e) }); }
   }
+  async function recoverTaskCards() {
+    const pending = Object.entries(state.taskCards);
+    for (const [messageId, saved] of pending) {
+      if (saved.appId !== config.appId) continue;
+      let card = saved.card;
+      if (!saved.done) {
+        card = JSON.parse(JSON.stringify(card));
+        card.header.title.content = '连接已结束'; card.header.template = 'grey';
+        card.config.summary = { content: '网关已重启，旧任务进展已停止同步' };
+        card.body.elements.unshift(cards.markdown('网关已重启，这张卡片的实时连接已结束。任务是否完成请查看会话记录。'));
+        const stripActions = node => {
+          if (!node || typeof node !== 'object') return;
+          if (Array.isArray(node)) {
+            for (let index = node.length - 1; index >= 0; index--) {
+              const item = node[index];
+              if (item?.tag === 'button' && item.behaviors?.some(behavior => ['stop', 'permission'].includes(behavior.value?.action))) node.splice(index, 1);
+              else stripActions(item);
+            }
+          } else Object.values(node).forEach(stripActions);
+        };
+        stripActions(card);
+      }
+      try { await channel.updateCard(messageId, card); delete state.taskCards[messageId]; persist(); }
+      catch (error) { rememberError(error); }
+    }
+  }
   async function stop() {
     await Promise.allSettled([...monitors].map(finish => finish()));
     const old = channel; channel = null;
@@ -580,6 +639,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       channel.on('message', msg => { receive(msg).catch(rememberError); }); channel.on('cardAction', evt => { action(evt).catch(rememberError); });
       channel.on('error', rememberError); channel.on('reconnecting', () => { phase = 'reconnecting'; }); channel.on('reconnected', () => { phase = 'connected'; if (/\[ws\]|ENOTFOUND|EAI_AGAIN|ECONNRESET|ETIMEDOUT|WebSocket/i.test(lastError)) lastError = ''; });
       await channel.connect(); phase = 'connected';
+      await recoverTaskCards();
       await inbox.ready;
       contacts.refresh(false).catch(() => {});
     })().catch(async e => { rememberError(e); await stop(); phase = 'error'; throw new Error(lastError || '飞书连接失败'); }).finally(() => { connecting = null; });
@@ -598,7 +658,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (next.enabled && (!/^[a-zA-Z0-9_-]{8,100}$/.test(next.appId) || !next.appSecret || next.appSecret.length > 1000)) throw new Error('请填写有效的 App ID 和 App Secret');
     if (next.defaultProject) { next.defaultProject = fs.realpathSync(next.defaultProject); if (!fs.statSync(next.defaultProject).isDirectory()) throw new Error('默认项目必须是文件夹'); }
     if (next.model && !/^[\w.\/:\[\]-]{1,100}$/.test(next.model)) throw new Error('模型名称无效');
-    if (next.appId !== config.appId || next.domain !== config.domain) { next.cardCallbacksReady = input.cardCallbacksReady || false; next.allowAllUsers = input.allowAllUsers || false; next.allowAllGroups = input.allowAllGroups || false; next.allowedUserIds = input.allowedUserIds || []; next.disabledUserIds = input.disabledUserIds || []; pairing = null; state = { bindings: {}, engineBindings: {}, cards: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} }; persist(); }
+    if (next.appId !== config.appId || next.domain !== config.domain) { next.cardCallbacksReady = input.cardCallbacksReady || false; next.allowAllUsers = input.allowAllUsers || false; next.allowAllGroups = input.allowAllGroups || false; next.allowedUserIds = input.allowedUserIds || []; next.disabledUserIds = input.disabledUserIds || []; pairing = null; state = { bindings: {}, engineBindings: {}, cards: {}, taskCards: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} }; persist(); }
     const reconnect = next.enabled !== config.enabled || next.appId !== config.appId || next.appSecret !== config.appSecret || next.domain !== config.domain;
     if (reconnect) await stop();
     config = next; atomic(configFile, config); runtime.keepAwake(config.keepAwake);
