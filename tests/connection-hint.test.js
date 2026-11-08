@@ -9,3 +9,10 @@ test('node hint fills this machine address, prioritizes LAN over tunnels and fla
   assert.match(connectionHint({ port: 1234, bindHost: '2001:db8::1', interfaces }).hint, /ws:\/\/\[2001:db8::1\]:1234/);
   assert.match(connectionHint({ port: 4321, bindHost: '127.0.0.1', interfaces: {} }).hint, /127\.0\.0\.1/);
 });
+
+test('node command includes the install token so copying it requires no manual substitutions', () => {
+  const token = 'ab'.repeat(32);
+  const { hint } = connectionHint({ port: 4321, bindHost: '0.0.0.0', token, interfaces });
+  assert.equal(hint, `my-agents node --hub ws://192.168.1.20:4321 --token ${token}`);
+  assert.doesNotMatch(hint, /<panel-token>|<本机地址>/);
+});

@@ -1931,7 +1931,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (type === 'nodes') {
-      if (req.method === 'GET' && parts.length === 2) return sendJSON(res, 200, { nodes: nodeHub.list(), ...require('./node/connection-hint').connectionHint({ port: PORT, bindHost: BIND_HOST }) });
+      res.setHeader('Cache-Control', 'no-store');
+      if (req.method === 'GET' && parts.length === 2) return sendJSON(res, 200, { nodes: nodeHub.list(), ...require('./node/connection-hint').connectionHint({ port: PORT, bindHost: BIND_HOST, token: auth.token }) });
       try {
         if (req.method === 'POST' && parts.length === 2) return sendJSON(res, 201, { node: nodeHub.add(JSON.parse(await readBody(req, 64 * 1024) || '{}')) });
         const id = decodeURIComponent(parts[2] || '');
