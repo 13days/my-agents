@@ -31,6 +31,7 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id }) {
   }));
   peer.handle('engine.owns', async ({ engine, id: sessionId }) => !!await engineOf(engine).owns(sessionId));
   peer.handle('host.resolveDir', ({ dir }) => host.resolveDir(dir));
+  peer.handle('host.createWorktree', async ({ dir }) => host.createWorktree(await host.resolveDir(dir)));
 
   peer.handle('session.open', async ({ sid, engine: name, sessionId, resume, cwd, model, routeEnv }) => {
     const engine = engineOf(name);

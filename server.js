@@ -539,6 +539,7 @@ function knownProjects() {
   const seen = new Set();
   for (const e of readHistory()) if (e.project) seen.add(e.project);
   for (const session of codexSessions.list()) if (session.project) seen.add(session.project);
+  for (const meta of Object.values(sessionStore.read())) if (!meta.deleted && meta.project) seen.add(meta.project);
   return [...seen].filter(p => {
     try { return path.isAbsolute(p) && fs.statSync(p).isDirectory(); } catch { return false; }
   }).sort();
@@ -791,7 +792,7 @@ function listSessions() {
     const meta = sessionMetadata[s.id] || {}, manual = isManualTitle(meta, s.firstTitle);
     const pendingInput = manager.busy(s.id);
     const automatic = meta.autoTitle && (pendingInput || meta.autoTitleAt >= (s.promptAt || 0)) ? meta.autoTitle : s.promptAt ? s.title : meta.title || s.title;
-    return { ...s, engine: s.engine || 'claude', title: manual ? meta.title : automatic || meta.title || s.id, titleSource: manual ? 'manual' : 'auto', last: Math.max(s.last, meta.lastAt || 0) };
+    return { ...s, ...(meta.worktree ? { worktree: meta.worktree } : {}), engine: s.engine || 'claude', title: manual ? meta.title : automatic || meta.title || s.id, titleSource: manual ? 'manual' : 'auto', last: Math.max(s.last, meta.lastAt || 0) };
   }).sort((a, b) => b.last - a.last);
 }
 
@@ -1765,16 +1766,16 @@ const manager = createSessionManager({
   history: {
     async ownerOf(id) {
       const meta = sessionStore.read()[id] || {};
-      if (meta.engine && registry.has(meta.engine)) return { engine: meta.engine, node: meta.node || 'local' };
+      if (meta.engine && registry.has(meta.engine)) return { engine: meta.engine, node: meta.node || 'local', project: meta.project, worktree: meta.worktree };
       // Unrecorded sessions (started in a terminal) can only be found on this machine.
       for (const engine of registry.node('local').engines.values()) if (await engine.owns(id)) return { engine: engine.id, node: 'local' };
       return null;
     },
     messages: id => sessionMessages(id),
-    touch(id, { engine, node, cwd, prompt }) {
+    touch(id, { engine, node, cwd, worktree, prompt }) {
       const meta = sessionStore.read()[id] || {};
       const fp = transcriptPathFor(id);
-      const created = engine ? { engine, ...(node && node !== 'local' ? { node } : {}), project: cwd, initialPrompt: meta.initialPrompt || prompt, createdAt: meta.createdAt || Date.now() } : {};
+      const created = engine ? { engine, ...(node && node !== 'local' ? { node } : {}), project: cwd, ...(worktree ? { worktree } : {}), initialPrompt: meta.initialPrompt || prompt, createdAt: meta.createdAt || Date.now() } : {};
       sessionStore.update(id, { ...autoTitlePatch(meta, prompt, fp ? transcriptHead(fp).title : ''), ...created, lastAt: Date.now() });
     },
   },
@@ -1798,8 +1799,8 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
       const run = manager.get(input.sessionId), live = run && !run.job.closed;
       if (!live && accountRouter.sessions().items.some(item => item.id === input.sessionId && item.running)) throw new Error('此会话正在外部 CLI 中运行，请等本轮结束后续接；可先用 /history 查看记录');
       if (live) { manager.send(input.sessionId, { ...input, context: gatewayContext }); return { sessionId: run.id }; }
-      const { sessionId } = await manager.start({ ...input, context: gatewayContext });
-      return { sessionId };
+      const { sessionId, run: started } = await manager.start({ ...input, context: gatewayContext });
+      return { sessionId, cwd: started.job.meta.cwd, worktree: started.job.meta.worktree };
     },
     engine: id => sessionEngine(id),
     engines: () => registry.list().map(engine => ({ id: engine.id, ...engine.meta, capabilities: engine.capabilities })),
@@ -1924,7 +1925,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (type === 'nodes') {
-      if (req.method === 'GET' && parts.length === 2) return sendJSON(res, 200, { nodes: nodeHub.list(), hint: `my-agents node --hub ws://<本机地址>:${PORT} --token <panel-token>` });
+      if (req.method === 'GET' && parts.length === 2) return sendJSON(res, 200, { nodes: nodeHub.list(), ...require('./node/connection-hint').connectionHint({ port: PORT, bindHost: BIND_HOST }) });
       try {
         if (req.method === 'POST' && parts.length === 2) return sendJSON(res, 201, { node: nodeHub.add(JSON.parse(await readBody(req, 64 * 1024) || '{}')) });
         const id = decodeURIComponent(parts[2] || '');
@@ -2182,13 +2183,13 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'GET' && parts.length === 4 && parts[3] === 'messages') {
         res.setHeader('Cache-Control', 'no-store');
         const id = decodeURIComponent(parts[2]), running = manager.get(id);
-        if (running && !url.searchParams.has('before')) return sendJSON(res, 200, { ...running.baseHistory, id: running.id, project: running.job.meta.cwd, messages: running.baseMessages, liveReplay: true, jobId: running.job.meta.jobId });
+        if (running && !url.searchParams.has('before')) return sendJSON(res, 200, { ...running.baseHistory, id: running.id, project: running.job.meta.cwd, worktree: running.job.meta.worktree, messages: running.baseMessages, liveReplay: true, jobId: running.job.meta.jobId });
         const fp = transcriptPathFor(id) || codexSessions.pathFor(id);
         let revision = '';
         if (fp) { const st = fs.statSync(fp); revision = `${st.mtimeMs}:${st.size}`; }
         if (revision && url.searchParams.get('since') === revision) return sendJSON(res, 200, { unchanged: true, revision });
         const r = sessionMessages(id, { before: url.searchParams.has('before') ? url.searchParams.get('before') : undefined, limit: Math.max(1, Number(url.searchParams.get('limit')) || 80) });
-        return r ? sendJSON(res, 200, { ...r, revision }) : sendJSON(res, 404, { error: T(lang, 'errNotFound') });
+        return r ? sendJSON(res, 200, { ...r, worktree: sessionStore.read()[id]?.worktree || null, revision }) : sendJSON(res, 404, { error: T(lang, 'errNotFound') });
       }
       if (req.method === 'GET' && parts.length === 4 && parts[3] === 'replay') {
         const r = sessionReplay(decodeURIComponent(parts[2]));

@@ -406,3 +406,11 @@ A consistent visual system across all sections: grouped navigation, a separate r
 ## Rename and migration
 
 The project, npm package and executable are named `my-agents`. The repository is [13days/my-agents](https://github.com/13days/my-agents). The npm package is not published yet; `npx my-agents` will be available after release. Existing Git history and local user data are preserved. See [migration and release instructions](docs/migration.md) for data locations, compatibility, backup and service migration.
+
+## Concurrent tasks and isolated workspaces
+
+New chats default to an isolated Git worktree, created from the selected project's current commit on the first message. Claude Code and Codex use the same mechanism; remote sessions create their worktree on the selected node. Reopening a session preserves its directory. Disable isolation in the new-chat checkbox or the Feishu gateway's default settings when needed.
+
+Worktrees live under the application's data directory in `workspaces/`. Uncommitted changes, untracked files (including `.env`) and dependencies are not copied. Prepare dependencies in the task directory as needed. Non-Git folders use their original directory; Git repositories need an initial commit.
+
+Worktrees remain after tasks finish or fail to start. Use `git worktree list` from the source repository to locate them, review and commit changes, merge the task branch, then use `git worktree remove <directory>` when no session needs it. The panel never automatically merges or deletes task files.

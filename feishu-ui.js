@@ -36,6 +36,7 @@ async function renderFeishuGateway() {
         <p class="gateway-engine-hint route-muted">${esc(feishuEngineSupported(c) ? rt('新话题首次发送消息，或 /new 未指定引擎时，使用此默认值。已有话题继续使用各自绑定的引擎。', 'Used for the first message in an unbound topic and /new without an engine. Existing topics retain their engine.') : rt('当前运行的服务尚未加载引擎设置，请重启面板后使用默认引擎和 /engine 命令。', 'Restart the panel service to enable default-engine settings and /engine commands.'))}</p>
         <label>${esc(rt('Claude Code 模型（选填）', 'Claude Code model (optional)'))}<input id="feishu-model" value="${esc(c.model)}" placeholder="${esc(rt('沿用 Claude Code 默认模型', 'Use Claude Code default'))}"></label>
         <label>${esc(rt('默认项目', 'Default project'))}<div class="gateway-project"><input id="feishu-project" readonly value="${esc(c.defaultProject)}" placeholder="${esc(rt('未选择时，飞书里用 /new 选择项目', 'Use /new in Feishu when no default is selected'))}"><button type="button" class="btn" id="feishu-project-pick">${esc(rt('选择文件夹', 'Choose folder'))}</button></div></label>
+        <label class="gateway-check"><input type="checkbox" id="feishu-worktree" ${c.worktree !== false ? 'checked' : ''}>${esc(rt('新会话使用独立 Git worktree，避免并发任务修改同一目录', 'Use an isolated Git worktree for new sessions'))}</label><p class="route-muted">${esc(rt('从当前提交创建分支，未提交改动不带入；已有会话继续原目录。普通文件夹使用原目录。', 'Branches from the current commit without uncommitted changes. Existing sessions and non-Git folders retain their directory.'))}</p>
         <details id="feishu-access" class="gateway-access" open><summary>${esc(rt('访问权限 · 自动发现的用户与群', 'Access · discovered users and groups'))}</summary>
           <label class="gateway-check"><input type="checkbox" id="feishu-all-users" ${c.allowAllUsers ? 'checked' : ''}>${esc(rt('放行所有私聊用户（无需配对）', 'Allow all private-chat users (no pairing required)'))}</label>
           <p class="gateway-access-warning">${esc(rt('此开关和下方用户勾选仅控制私聊。放行群内任何人 @机器人都可使用，无需单独授权。禁用用户优先于所有放行规则，群聊和私聊均不再处理；消息仍记录。', 'This switch and user selections control private chats only. Anyone may @mention the bot in allowed groups. Disabled users cannot use private or group chats, even with open access; their messages are still logged.'))}</p>
@@ -187,7 +188,7 @@ async function renderFeishuGateway() {
   let accessSave = Promise.resolve(), accessRevision = 0;
   const saveAccess = () => {
     const revision = ++accessRevision;
-    const input = { allowAllUsers: $('#feishu-all-users').checked, allowAllGroups: $('#feishu-all-groups').checked, allowedUserIds: [...ids('#feishu-users')], disabledUserIds: [...ids('#feishu-disabled-users')], allowedChatIds: [...ids('#feishu-chats')] };
+    const input = { worktree: $('#feishu-worktree').checked, allowAllUsers: $('#feishu-all-users').checked, allowAllGroups: $('#feishu-all-groups').checked, allowedUserIds: [...ids('#feishu-users')], disabledUserIds: [...ids('#feishu-disabled-users')], allowedChatIds: [...ids('#feishu-chats')] };
     $('#feishu-access-result').textContent = rt('正在保存权限…', 'Saving access…');
     accessSave = accessSave.then(async () => {
       try {
@@ -340,7 +341,7 @@ async function renderFeishuGateway() {
     e.preventDefault(); const button = $('#feishu-save'); button.disabled = true; $('#feishu-save-result').textContent = rt('正在保存…', 'Saving…');
     try {
       await accessSave;
-      const input = { allowAllUsers: $('#feishu-all-users').checked, allowAllGroups: $('#feishu-all-groups').checked, enabled: $('#feishu-enabled').checked, appId: $('#feishu-app-id').value, appSecret: secretDirty ? secretInput.value : '', domain: $('#feishu-domain').value, defaultProject: $('#feishu-project').value, defaultEngine: $('#feishu-default-engine').value, model: $('#feishu-model').value, keepAwake: $('#feishu-awake').checked, allowedUserIds: $('#feishu-users').value.split(/[\s,]+/).filter(Boolean), disabledUserIds: [...ids('#feishu-disabled-users')], allowedChatIds: $('#feishu-chats').value.split(/[\s,]+/).filter(Boolean) };
+      const input = { worktree: $('#feishu-worktree').checked, allowAllUsers: $('#feishu-all-users').checked, allowAllGroups: $('#feishu-all-groups').checked, enabled: $('#feishu-enabled').checked, appId: $('#feishu-app-id').value, appSecret: secretDirty ? secretInput.value : '', domain: $('#feishu-domain').value, defaultProject: $('#feishu-project').value, defaultEngine: $('#feishu-default-engine').value, model: $('#feishu-model').value, keepAwake: $('#feishu-awake').checked, allowedUserIds: $('#feishu-users').value.split(/[\s,]+/).filter(Boolean), disabledUserIds: [...ids('#feishu-disabled-users')], allowedChatIds: $('#feishu-chats').value.split(/[\s,]+/).filter(Boolean) };
       if ($('#feishu-autostart').checked !== autoStart) input.autoStart = $('#feishu-autostart').checked;
       const result = await api('PUT', 'feishu', input); autoStart = result.runtime.autoStart; owners = result.config.allowedUserIds.join('\n'); paint(result); $('#feishu-save-result').textContent = rt('已保存', 'Saved');
       $('#feishu-app-secret').placeholder = result.config.hasSecret ? rt('已保存，留空保持不变', 'Saved; leave blank to keep it') : '';

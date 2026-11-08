@@ -197,13 +197,13 @@ test('group card clicks cannot bypass a revoked group permission by masquerading
 
 test('session pagination callbacks keep visible global numbers consistent with /switch', async t => {
   const f = await fixture(t); await f.pair();
-  for (let i = 2; i < 13; i++) f.rows.push({ id: `session-${i}`, title: `会话 ${i}`, project: f.dir });
+  for (let i = 2; i < 33; i++) f.rows.push({ id: `session-${i}`, title: `会话 ${i}`, project: f.dir });
   await f.gateway.receive(f.msg('/sessions'));
   await f.gateway.action({ action: { value: { action: 'sessions', page: 1, owner: 'ou_owner', key: contextKey(f.msg('')) } }, operator: { openId: 'ou_owner' }, chatId: 'oc_private', messageId: 'list-card' });
-  assert.match(JSON.stringify(f.sent.at(-1)), /6\. /);
-  await f.gateway.receive(f.msg('/switch 6'));
+  assert.match(JSON.stringify(f.sent.at(-1)), /16\. /);
+  await f.gateway.receive(f.msg('/switch 16'));
   await f.gateway.receive(f.msg('继续分页选择的会话'));
-  assert.equal(f.calls.at(-1).sessionId, f.rows[5].id);
+  assert.equal(f.calls.at(-1).sessionId, f.rows[15].id);
 });
 
 test('changing access permissions preserves the live connection and task card updates', async t => {
@@ -625,4 +625,45 @@ test('gateway context identifies the selected CLI version instead of another exe
   await f.gateway.receive(f.msg('Which Claude version is running?'));
   assert.match(f.calls.at(-1).gatewayContext, /实际运行版本为 2\.1\.283/);
   assert.match(f.calls.at(-1).gatewayContext, /\$CLAUDE_CLI/);
+});
+
+test('history callback reports audit failure instead of failing silently', async t => {
+  const f = await fixture(t); await f.pair(); await f.gateway.receive(f.msg('/sessions')); await f.gateway.receive(f.msg('/switch 1'));
+  f.panel.history = () => [{ role: 'assistant', text: 'blocked-history-body' }];
+  const original = f.channel.send;
+  f.channel.send = async (...args) => { if (JSON.stringify(args).includes('blocked-history-body')) throw new Error('The messages do NOT pass the audit, ext=contain sensitive data: EMAIL_ADDRESS'); return original(...args); };
+  await f.gateway.action({ messageId: f.sent.at(-1).messageId, chatId: 'oc_private', operator: { openId: 'ou_owner' }, action: { value: { owner: 'ou_owner', key: contextKey(f.msg('')), action: 'history', id: f.rows[0].id } } });
+  assert.match(JSON.stringify(f.sent.at(-1).content), /飞书审核拦截/);
+  assert.equal(f.calls.length, 0);
+});
+
+test('history previews redact emails and shorten long messages without mutating saved history', async t => {
+  const f = await fixture(t); await f.pair(); await f.gateway.receive(f.msg('/sessions')); await f.gateway.receive(f.msg('/switch 1'));
+  const history = [{ role: 'assistant', text: 'Contact person@example.invalid\n' + '长'.repeat(1000) }], original = JSON.stringify(history);
+  f.panel.history = () => history;
+  await f.gateway.receive(f.msg('/history'));
+  const text = JSON.stringify(f.sent.at(-1).content);
+  assert.doesNotMatch(text, /person@example/); assert.match(text, /邮箱已隐藏/); assert.match(text, /前 600 字/);
+  assert.equal(JSON.stringify(history), original);
+  f.panel.history = () => [];
+  await f.gateway.receive(f.msg('/history')); assert.match(JSON.stringify(f.sent.at(-1).content), /暂无已保存的对话/);
+  f.panel.history = () => { throw new Error('read failed'); };
+  await f.gateway.receive(f.msg('/history')); assert.match(JSON.stringify(f.sent.at(-1).content), /读取或发送最近对话失败/);
+});
+
+test('fresh Feishu sessions request isolation and retain the resolved workspace across engine switches', async t => {
+  const f = await fixture(t); await f.pair();
+  const workspaceDir = path.join(f.dir, 'task-workspace'); fs.mkdirSync(workspaceDir);
+  const workspace = { cwd: workspaceDir, path: workspaceDir, branch: 'my-agents/task-one', repository: f.dir };
+  const original = f.panel.submit;
+  f.panel.submit = async input => { await original({ ...input, cwd: workspaceDir }); return { sessionId: input.sessionId, cwd: workspaceDir, worktree: workspace }; };
+  await f.gateway.receive(f.msg('/new claude')); await f.gateway.receive(f.msg('First isolated task'));
+  assert.equal(f.calls.at(-1).worktree, true);
+  await f.gateway.receive(f.msg('Continue'));
+  assert.equal(f.calls.at(-1).cwd, workspaceDir); assert.equal(f.calls.at(-1).worktree, false);
+  await f.gateway.receive(f.msg('/codex')); await f.gateway.receive(f.msg('/claude'));
+  await f.gateway.receive(f.msg('Back to Claude')); assert.equal(f.calls.at(-1).cwd, workspaceDir);
+  await f.gateway.configure({ worktree: false });
+  await f.gateway.receive(f.msg('/new claude')); await f.gateway.receive(f.msg('Shared task'));
+  assert.equal(f.calls.at(-1).worktree, false);
 });

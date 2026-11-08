@@ -1,6 +1,7 @@
 const path = require('path');
 const { engineCatalog } = require('./channels/engine-catalog');
 const PAGE_SIZE = 5;
+const SESSION_PAGE_SIZE = 15;
 const REPLY_PREVIEW = 2200;
 const clip = (value, max) => { const chars = Array.from(String(value || '')); return chars.length > max ? chars.slice(0, max).join('') + '…' : chars.join(''); };
 const escape = value => String(value || '').replace(/([\\`*_[\]<>])/g, '\\$1').replace(/\s+/g, ' ');
@@ -23,14 +24,14 @@ function row(title, detail, operation) {
   ] };
 }
 function sessionList({ rows, total, page, query, selected, ...context }) {
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pages = Math.max(1, Math.ceil(total / SESSION_PAGE_SIZE));
   const elements = [muted(`${context.location ? context.location + ' · ' : ''}共 ${total} 个会话 · 第 ${page + 1} / ${pages} 页${query ? ' · 筛选：' + escape(clip(query, 50)) : ''}`)];
   rows.forEach((item, index) => {
-    const number = page * PAGE_SIZE + index + 1, current = item.id === selected;
-    elements.push(row(`${number}. ${escape(clip(item.title || '未命名会话', 70))}`, `${catalogOf(context).label(item.engine || 'claude')} · ${escape(path.basename(item.project || '') || '未指定项目')} · ${current ? '● 当前会话' : item.running ? '● 运行中' : '可接续'}`, button(current ? '继续' : '切换', action(context, { action: 'switch', id: item.id }), current ? 'primary' : 'default')));
+    const number = page * SESSION_PAGE_SIZE + index + 1, current = item.id === selected;
+    elements.push(row(`${number}. ${escape(clip(item.title || '未命名会话', 70))}`, `${catalogOf(context).label(item.engine || 'claude')} · ${escape(path.basename(item.worktree?.repository || item.project || '') || '未指定项目')} · ${current ? '● 当前会话' : item.running ? '● 运行中' : '可接续'}`, button(current ? '继续' : '切换', action(context, { action: 'switch', id: item.id }), current ? 'primary' : 'default')));
   });
   if (!rows.length) elements.push(markdown('没有找到匹配的会话。试试其他关键词，或新建一个会话。'));
-  if (rows.length) elements.push(collapse('项目路径与会话 ID', rows.map((item, index) => markdown(`**${page * PAGE_SIZE + index + 1}. ${escape(clip(item.title || '未命名会话', 60))}**\n${escape(item.project)}\n\`${item.id}\``, true))));
+  if (rows.length) elements.push(collapse('项目路径与会话 ID', rows.map((item, index) => markdown(`**${page * SESSION_PAGE_SIZE + index + 1}. ${escape(clip(item.title || '未命名会话', 60))}**\n${escape(item.project)}\n\`${item.id}\``, true))));
   const navigation = [];
   if (page > 0) navigation.push(button('← 上一页', action(context, { action: 'sessions', page: page - 1, query })));
   if (page + 1 < pages) navigation.push(button('下一页 →', action(context, { action: 'sessions', page: page + 1, query })));
@@ -71,8 +72,9 @@ function permissions(context, binding, requests) {
 }
 function currentSession({ binding, item, running, requests = [], ...context }) {
   const pending = !item, title = item?.title || '新会话', engines = catalogOf(context), engineId = item?.engine || binding.engine || 'claude', engine = engines.label(engineId);
-  const projectName = path.basename(binding.cwd) || binding.cwd, project = escape(projectName);
+  const projectName = path.basename(binding.worktree?.repository || binding.cwd) || binding.cwd, project = escape(projectName);
   const elements = pending ? [markdown(`**当前项目：${project}**`), muted(`${context.location || '当前位置'} · ${engine} · 项目确认后，直接发送问题开始对话`)] : [markdown(`**${escape(clip(title, 100))}**`), muted(`${context.location ? context.location + ' · ' : ''}${engine} · ${project} · ${running ? '● 正在运行' : '已就绪，直接发消息继续'}`)];
+  if (binding.worktree) elements.push(muted(`独立工作区 · ${escape(binding.worktree.branch)}`));
   elements.push(...permissions(context, binding, requests), collapse(pending ? '项目位置' : '会话信息', [markdown(pending ? escape(binding.cwd) : `${escape(binding.cwd)}\n\`${binding.id}\``, true)]));
   const actions = pending ? [button('切换项目', action(context, { action: 'projects', engine: engineId }), 'primary'), button('切换引擎', action(context, { action: 'engine' }))] : [button('最近对话', action(context, { action: 'history', id: binding.id })), button('切换会话', action(context, { action: 'sessions' })), button('换项目新建', action(context, { action: 'projects', engine: engineId })), button('切换引擎', action(context, { action: 'engine' }))];
   if (running) actions.push(button('停止任务', action(context, { action: 'stop', id: binding.id }), 'danger'));
@@ -109,6 +111,7 @@ function task({ binding, title, view, elapsed, ...context }) {
     elements.push(collapse(`执行详情 · ${tools.length} 个工具`, steps, false, 'execution_details'));
   }
   elements.push(collapse('会话信息', [markdown(`**${escape(clip(title, 80))}**\n${escape(binding.cwd)}\n\`${binding.id}\``, true)]));
+  if (binding.worktree) elements.push(muted(`独立工作区 · ${escape(binding.worktree.branch)}`));
   const actions = [button('查看会话', action(context, { action: 'switch', id: binding.id })), button('会话列表', action(context, { action: 'sessions' })), button('查看 / 切换引擎', action(context, { action: 'engine' }))];
   if (!view.done) actions.push(button('停止任务', action(context, { action: 'stop', id: binding.id }), 'danger'));
   elements.push(buttons(actions));
@@ -139,4 +142,4 @@ function routes({ status, codex, pinned, notice = '', now = Date.now(), ...conte
   elements.push(buttons(controls), muted('/route 序号或名称 切换账号；/route auto 故障转移；/route rr 轮询；/route reset 清除冷却；/route pin 序号|off 固定当前会话；/route codex direct|proxy'));
   return card('代理路由', elements, { subtitle: '切换立即生效，无需经过模型', template: accounts.some(a => a.enabled && (a.cooldownUntil || 0) > now) ? 'orange' : 'grey', summary: `路由：${MODE_NAMES[mode] || mode}` });
 }
-module.exports = { PAGE_SIZE, REPLY_PREVIEW, card, markdown, button, buttons, collapse, sessionList, projectList, enginePicker, currentSession, task, routes, MODE_NAMES };
+module.exports = { PAGE_SIZE, SESSION_PAGE_SIZE, REPLY_PREVIEW, card, markdown, button, buttons, collapse, sessionList, projectList, enginePicker, currentSession, task, routes, MODE_NAMES };

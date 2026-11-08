@@ -2447,7 +2447,7 @@ async function openNewChat() {
   chatAbort?.abort();
   state.current = null; routeView = ''; writeRoute(); renderList();
   sessionEngine = 'all'; localStorage.setItem('panel-session-engine', 'all'); renderSessionEngines();
-  chatView = { sessionId: '', cwd, messages: [], engine: knownEngine(localStorage.getItem('panel-chat-engine')) };
+  chatView = { sessionId: '', cwd, messages: [], worktreeEnabled: true, engine: knownEngine(localStorage.getItem('panel-chat-engine')) };
   chatChrome(ui('新对话', 'New chat', '新しいチャット'), '');
   renderChat();
 }
@@ -2460,7 +2460,7 @@ async function openSessionChat(id) {
   try {
     const d = await api('GET', `sessions/${encodeURIComponent(id)}/messages`);
     if (state.type !== 'sessions' || state.current !== id || revision !== detailRevision) return;
-    chatView = { sessionId: id, cwd: d.project || '', messages: d.messages, truncated: d.truncated, historyBefore: d.historyBefore, revision: d.revision, engine: d.engine || LEGACY_ENGINE };
+    chatView = { sessionId: id, cwd: d.project || '', worktree: d.worktree, messages: d.messages, truncated: d.truncated, historyBefore: d.historyBefore, revision: d.revision, engine: d.engine || LEGACY_ENGINE };
     const first = d.messages.find(m => m.role === 'user');
     chatChrome(state.items.find(item => item.key === id)?.name || (first ? first.text.replace(/\s+/g, ' ').slice(0, 60) : id.slice(0, 8)), (d.project || '').replace(/^\/Users\/[^/]+/, '~'));
     renderChat();
@@ -2483,7 +2483,7 @@ function renderChat() {
     <div class="chat-top" id="chat-settings-panel" hidden>
       <label class="chat-field chat-model">${esc(rt('模型', 'Model'))}<input id="chat-model" type="text" placeholder="${esc(rt('默认', 'Default'))}" value="${esc(chatModel)}"></label>
       <div class="chat-field chat-route"${can(v.engine, 'accounts') ? '' : ' hidden'}><span>${esc(rt('代理账号', 'Proxy account'))}</span><select id="chat-route" aria-label="${esc(rt('代理账号', 'Proxy account'))}" title="${esc(rt('只影响这个会话；其他会话可以走不同账号', 'Only affects this session; other sessions can use other accounts'))}">${routeOptions(existing ? ((routeInfo && routeInfo.routes[v.sessionId.toLowerCase()]) || '') : (v.accountId || ''))}</select></div>
-    </div></header>
+    </div>${!existing ? `<label class="chat-worktree"><input type="checkbox" id="chat-worktree" ${v.worktreeEnabled !== false ? 'checked' : ''}>${esc(rt('独立工作区（Git worktree）', 'Isolated workspace (Git worktree)'))}<small>${esc(rt('从当前提交新建分支；原目录未提交的改动不带入。普通文件夹使用原目录。', 'Creates a branch from the current commit. Uncommitted changes stay in the original folder. Non-Git folders use the original directory.'))}</small></label>` : v.worktree ? `<p class="chat-worktree" title="${esc(v.cwd)}">${esc(rt('独立工作区', 'Isolated workspace'))} · <code>${esc(v.worktree.branch)}</code></p>` : ''}</header>
     <div class="chat-conversation"><div class="chat-messages" id="chat-messages"></div><div class="chat-scroll-controls" hidden><button type="button" id="chat-scroll-top" title="${esc(rt('会话顶部', 'Top of conversation'))}" aria-label="${esc(rt('会话顶部', 'Top of conversation'))}">↑</button><button type="button" id="chat-scroll-bottom" title="${esc(rt('会话底部', 'Bottom of conversation'))}" aria-label="${esc(rt('会话底部', 'Bottom of conversation'))}">↓</button></div></div>
     <form class="chat-compose" id="chat-form"><div id="chat-attachments" class="chat-attachments" hidden></div><textarea autocomplete="off" autocorrect="off" spellcheck="false" id="chat-prompt" rows="3" placeholder="${esc(existing ? rt('在这个会话里继续… 可粘贴图片', 'Continue this session… Paste images here') : rt(`问 ${engineName} 关于这个项目的问题… 可粘贴图片`, `Ask ${engineName} about this project… Paste images here`))}"></textarea>
       <div class="chat-compose-footer"><button type="button" class="btn chat-attach" id="chat-attach"${can(v.engine, 'images') ? '' : ' hidden'}>${esc(rt('＋ 图片', '+ Image'))}</button><input type="file" id="chat-image-file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden><span id="chat-status">${esc(rt('回车发送 · Shift + 回车换行', 'Enter to send · Shift + Enter for a new line'))}</span><button class="btn" type="submit" data-mode="queue" id="chat-queue" title="${esc(rt('等当前轮完成后处理', 'Process after the current turn'))}" hidden>${esc(rt('排队', 'Queue'))}</button><button class="btn primary" type="submit" id="chat-send">${esc(rt('发送', 'Send'))}</button><button class="btn" type="button" id="chat-stop" hidden>${esc(rt('停止', 'Stop'))}</button></div>
@@ -2500,6 +2500,7 @@ function renderChat() {
     v.engine = button.dataset.engine; localStorage.setItem('panel-chat-engine', v.engine);
     renderChat(); $('#chat-prompt').value = draft;
   });
+  if ($('#chat-worktree')) $('#chat-worktree').onchange = e => { v.worktreeEnabled = e.target.checked; };
   const box = $('#chat-messages');
   if (!v.messages.length) box.innerHTML = `<div class="chat-welcome"><span class="empty-icon">${icon('sessions')}</span><h3>${esc(existing ? rt('这个会话里还没有可显示的对话', 'No messages to show in this session') : rt(`和 ${engineName} 开始一段新会话`, `Start a new ${engineName} session`))}</h3><p>${esc(engineCopy(v.engine, 'welcome') || rt(`由本机 ${engineName} CLI 执行；发出后会出现在左侧会话列表，之后可随时回来接续。`, `Runs on the local ${engineName} CLI. It appears in the session list so you can come back and continue.`, `ローカルの ${engineName} CLI で実行されます。送信後はセッション一覧に表示され、いつでも続きから再開できます。`))}</p></div>`;
   else {
@@ -2717,6 +2718,14 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
         if (state.current === previous) { state.current = payload.sessionId; if (state.type === 'sessions') { writeRoute(); renderList(); } }
       }
       if (payload.engine) v.engine = payload.engine;
+      if (payload.cwd) v.cwd = payload.cwd;
+      if (payload.worktree) v.worktree = payload.worktree;
+      if (shown && payload.cwd) {
+        const project = $('.chat-project-current');
+        if (project) { project.title = v.cwd; project.querySelector('span').textContent = v.worktree ? v.worktree.branch : v.cwd.split('/').pop(); project.querySelector('small').textContent = v.cwd; }
+        const option = $('.chat-worktree');
+        if (option) option.textContent = v.worktree ? rt('独立工作区', 'Isolated workspace') + ' · ' + v.worktree.branch : rt('使用原项目目录', 'Using the original project directory');
+      }
       v.liveId = payload.sessionId; v.lastReplayJobId = payload.jobId; resolveReady(); refreshRoutes();
       if (!shown) return;
       const picker = document.querySelector('.chat-engine');
@@ -2815,7 +2824,7 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
         if (resume && attempt) resetRun();
         const response = await fetch(resume ? `/api/chat/${encodeURIComponent(v.sessionId)}/events` : '/api/chat', {
           method: resume ? 'GET' : 'POST', headers: resume ? undefined : { 'Content-Type': 'application/json' },
-          body: resume ? undefined : JSON.stringify({ prompt, images, cwd: v.cwd, model: chatModel, sessionId: v.sessionId, messageId: turn.id, accountId: can(v.engine, 'accounts') ? v.accountId : undefined, engine: v.engine }), signal: abort.signal,
+          body: resume ? undefined : JSON.stringify({ prompt, images, cwd: v.cwd, worktree: v.worktreeEnabled !== false, model: chatModel, sessionId: v.sessionId, messageId: turn.id, accountId: can(v.engine, 'accounts') ? v.accountId : undefined, engine: v.engine }), signal: abort.signal,
         });
         if (!response.ok) throw await responseError(response);
         const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
@@ -2956,11 +2965,12 @@ async function renderNodesPanel() {
       ${node.error ? `<small class="codex-warn">${esc(node.error)}</small>` : ''}</div>
       <div class="node-actions">${node.ssh ? `<button class="btn" data-node-action="reconnect">${esc(rt('重连', 'Reconnect'))}</button>` : ''}<button class="btn" data-node-action="remove">${esc(node.ssh ? rt('删除', 'Remove') : rt('断开', 'Disconnect'))}</button></div></div>`).join('');
     box.innerHTML = `${rows || `<p class="route-muted">${esc(rt('还没有远程节点。', 'No remote nodes yet.'))}</p>`}
-      <details class="node-guide"><summary>${esc(rt('方式一：节点主动连接（WebSocket）', 'Option 1: node dials in (WebSocket)'))}</summary><p class="route-muted">${esc(rt('在远端机器安装 my-agents 后运行下面的命令。令牌见本机数据目录下的 panel-token；Hub 需要能被远端访问（例如 SSH 端口转发或内网地址）。', 'Install my-agents on the remote machine and run this. The token is in panel-token in the data directory; the hub must be reachable from the remote machine.'))}</p><code class="node-cmd">${esc(data.hint)}</code></details>
+      <details class="node-guide"><summary>${esc(rt('方式一：节点主动连接（WebSocket）', 'Option 1: node dials in (WebSocket)'))}</summary><p class="route-muted">${esc(rt('在远端机器安装 my-agents 后运行下面的命令。令牌见本机数据目录下的 panel-token；Hub 需要能被远端访问（例如 SSH 端口转发或内网地址）。', 'Install my-agents on the remote machine and run this. The token is in panel-token in the data directory; the hub must be reachable from the remote machine.'))}</p><code class="node-cmd" id="node-connect-command">${esc(data.hint)}</code><button class="btn" type="button" id="node-copy-command">${esc(rt('复制命令', 'Copy command'))}</button>${data.loopback ? `<p class="route-muted">${esc(rt('当前服务仅监听本机。此地址已自动填入；远端直连需要使用 MY_AGENTS_BIND=0.0.0.0 启动面板，或使用下方 SSH 方式。', 'The panel currently listens on loopback only. To connect directly to this detected address, start with MY_AGENTS_BIND=0.0.0.0, or use SSH below.'))}</p>` : ''}</details>
       <form id="node-form" class="node-form"><strong>${esc(rt('方式二：通过 SSH 启动节点', 'Option 2: launch over SSH'))}</strong><p class="route-muted">${esc(rt('需要本机可以免密 SSH 登录（BatchMode），且远端已安装 my-agents。', 'Requires passwordless SSH (BatchMode) and my-agents installed remotely.'))}</p>
         <div class="gateway-form-row"><label>${esc(rt('节点名称', 'Node id'))}<input name="id" required pattern="[\\w.\\-]{1,64}" placeholder="devbox"></label><label>${esc(rt('SSH 目标', 'SSH target'))}<input name="ssh" required placeholder="user@host"></label></div>
         <label>${esc(rt('远端命令（选填）', 'Remote command (optional)'))}<input name="command" placeholder="my-agents node --stdio"></label>
         <p id="node-form-error" class="codex-warn" role="alert"></p><button class="btn primary" type="submit">＋ ${esc(rt('添加 SSH 节点', 'Add SSH node'))}</button></form>`;
+    $('#node-copy-command').onclick = async () => { try { await navigator.clipboard.writeText(data.hint); toast(rt('已复制连接命令', 'Connection command copied')); } catch { toast(rt('复制失败，请选择命令手动复制', 'Select the command and copy it manually'), false); } };
     $('#node-form').onsubmit = async e => {
       e.preventDefault();
       const form = new FormData(e.target), button = e.target.querySelector('[type=submit]');

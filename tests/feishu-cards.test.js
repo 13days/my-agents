@@ -6,12 +6,12 @@ const nodes = value => value && typeof value === 'object' ? [value, ...Object.va
 const actions = card => nodes(card).filter(node => node.type === 'callback').map(node => node.value);
 
 test('session pages retain global command numbers and callback routing while hiding technical paths', () => {
-  const rows = Array.from({ length: 5 }, (_, i) => ({ id: 'session-' + (i + 5), title: '*title* ' + i, project: '/workspace/project', running: i === 0 }));
-  const card = cards.sessionList({ ...context, rows, total: 17, page: 1, query: 'project', selected: rows[1].id });
+  const rows = Array.from({ length: cards.SESSION_PAGE_SIZE }, (_, i) => ({ id: 'session-' + (i + 5), title: '*title* ' + i, project: '/workspace/project', running: i === 0 }));
+  const card = cards.sessionList({ ...context, rows, total: 47, page: 1, query: 'project', selected: rows[1].id });
   assert.equal(card.schema, '2.0');
   const details = card.body.elements.find(node => node.tag === 'collapsible_panel');
   assert.equal(details.expanded, false);
-  assert.match(JSON.stringify(card), /6\. /);
+  assert.match(JSON.stringify(card), /16\. /);
   assert.ok(actions(card).some(value => value.action === 'sessions' && value.page === 2 && value.query === 'project'));
   assert.ok(actions(card).some(value => value.action === 'switch' && value.id === rows[1].id));
   assert.ok(actions(card).every(value => value.owner === context.owner && value.key === context.key));
@@ -80,4 +80,12 @@ test('new session cards confirm project and engine without offering nonexistent 
 test('detailed task cards show available Codex reasoning summaries and real tool results', () => {
   const task = cards.task({ ...context, binding: { id: 'codex-session', cwd: '/project', engine: 'codex' }, title: 'Check file', view: { text: 'Done', phase: '已完成', done: true, reasoning: new Map([['r', 'Public summary']]), tools: new Map([['t', { name: 'shell', state: '已完成', input: 'pwd', output: '/project' }]]), permissions: new Map() }, elapsed: 1000 });
   const text = JSON.stringify(task); assert.match(text, /思考摘要/); assert.match(text, /Public summary/); assert.match(text, /pwd/); assert.match(text, /shell/);
+});
+
+test('15 session choices with long CJK titles fit the Feishu message budget', () => {
+  const rows = Array.from({ length: cards.SESSION_PAGE_SIZE }, (_, i) => ({ id: '11111111-2222-4333-8444-' + String(i).padStart(12, '0'), title: '任务'.repeat(60), project: '/workspace/' + '项目'.repeat(35) }));
+  const card = cards.sessionList({ owner: 'ou_' + 'a'.repeat(32), key: JSON.stringify(['ou_' + 'a'.repeat(32), 'oc_' + 'b'.repeat(32), 'om_' + 'c'.repeat(32)]), rows, total: 100, page: 0 });
+  assert.equal(actions(card).filter(value => value.action === 'switch').length, 15);
+  assert.ok(Buffer.byteLength(JSON.stringify({ msg_type: 'interactive', content: JSON.stringify(card) })) < 30000);
+  assert.equal(cards.PAGE_SIZE, 5);
 });

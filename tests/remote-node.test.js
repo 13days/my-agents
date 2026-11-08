@@ -218,3 +218,19 @@ test('the relay refuses paths that could leave the panel proxy', async () => {
   await assert.rejects(node.call('relay.request', { rid: 'x', method: 'GET', path: '//evil.example/x', headers: {}, body: '' }), /无效/);
   await assert.rejects(node.call('relay.request', { rid: 'x', method: 'GET', path: 'http://evil.example/', headers: {}, body: '' }), /无效/);
 });
+
+test('worktree creation is routed to the session node', async () => {
+  const [hubSide, nodeSide] = pairTransports(), engine = echoEngine();
+  const host = createLocalHost(); let directory;
+  const workspace = { cwd: os.tmpdir(), branch: 'my-agents/task-remote', path: os.tmpdir(), repository: '/remote/repo' };
+  host.createWorktree = async dir => { directory = dir; return workspace; };
+  serveNode({ peer: createPeer(nodeSide), host, engines: [engine], id: 'worktree-node' });
+  const registry = createRegistry({ defaultEngine: 'echo' }), peer = createPeer(hubSide);
+  await attachRemoteNode({ peer, registry });
+  const manager = createSessionManager({ registry, history: { ownerOf: () => null, messages: () => null, touch() {} } });
+  try {
+    const { run } = await manager.start({ node: 'worktree-node', prompt: 'Task', cwd: os.tmpdir(), worktree: true });
+    assert.equal(directory, fs.realpathSync(os.tmpdir())); assert.deepEqual(run.job.meta.worktree, workspace);
+    assert.equal(engine.opened[0].cwd, fs.realpathSync(workspace.cwd));
+  } finally { manager.shutdown(); peer.close(); }
+});

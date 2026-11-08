@@ -104,3 +104,26 @@ test('auth: loopback needs no token but blocks foreign hosts and cross-site orig
   assert.equal(remote.check({ headers: { host: 'dev-box:4321', cookie: `my_agents_token=${remote.token}` } }), '');
   assert.equal((fs.statSync(path.join(dir, 'panel-token')).mode & 0o777).toString(8), '600');
 });
+
+test('fresh tasks open in their isolated directory and resume keeps its persisted directory', async () => {
+  const { manager, registry, opened, touched } = setup();
+  const host = registry.node('local').host;
+  let creates = 0;
+  const workspace = { cwd: os.tmpdir(), branch: 'my-agents/task-test', path: os.tmpdir(), repository: '/source' };
+  host.createWorktree = async () => { creates++; return workspace; };
+  const { sessionId, run } = await manager.start({ sessionId: 'isolated-new-thread', prompt: 'Task', cwd: os.tmpdir(), worktree: true });
+  assert.equal(creates, 1); assert.equal(opened[0].cwd, workspace.cwd);
+  assert.deepEqual(run.job.meta.worktree, workspace); assert.deepEqual(touched[0][1].worktree, workspace);
+  manager.shutdown();
+  const second = createSessionManager({ registry, history: { ownerOf: () => ({ engine: 'assigned', node: 'local', project: os.tmpdir(), worktree: workspace }), messages: () => null, touch() {} } });
+  await second.start({ sessionId, prompt: 'Continue', cwd: '/missing-ignored-client-path', worktree: true });
+  assert.equal(creates, 1); assert.equal(opened[1].cwd, fs.realpathSync(os.tmpdir())); second.shutdown();
+});
+
+test('shared mode and known CLI sessions never create a fresh worktree', async () => {
+  const { manager, registry } = setup(); let creates = 0;
+  registry.node('local').host.createWorktree = async () => { creates++; return null; };
+  await manager.start({ sessionId: 'shared-new-thread', prompt: 'Shared', cwd: os.tmpdir(), worktree: false });
+  await manager.start({ sessionId: 'existing-thread', prompt: 'Existing', cwd: os.tmpdir(), worktree: true });
+  assert.equal(creates, 0); manager.shutdown();
+});

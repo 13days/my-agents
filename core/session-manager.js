@@ -43,7 +43,7 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
     const engine = registry.adapter(engineId, nodeId);
     if (!engine) throw httpError(400, `节点 ${nodeId} 上没有引擎：${engineId}`);
     const host = registry.node(nodeId).host;
-    const cwd = await host.resolveDir(input.cwd);
+    let cwd = await host.resolveDir(owner?.project || input.cwd);
 
     const previous = requested && runs.get(requested);
     if (live(previous)) {
@@ -52,6 +52,13 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
     }
     // Engines that discover their own ids treat unknown ids as new sessions.
     const known = !!requested && await engine.owns(requested);
+    // A resumed session keeps its original directory; only fresh tasks isolate.
+    let worktree = owner?.worktree || null;
+    if (!known && !owner && input.worktree === true) {
+      if (!host.createWorktree) throw httpError(400, '此节点不支持独立工作区，请更新节点 my-agents');
+      worktree = await host.createWorktree(cwd);
+      if (worktree) cwd = worktree.cwd;
+    }
     const sessionId = engine.capabilities.sessionId === 'discovered' ? (known ? requested : '') : (requested || crypto.randomUUID());
     const model = typeof input.model === 'string' && input.model.trim() && engine.validModel(input.model.trim()) ? input.model.trim() : '';
     const baseHistory = known ? await history.messages(requested) : null;
@@ -90,9 +97,9 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
       throw e.status ? e : httpError(503, e.message);
     }
     if (requested && realId !== requested) aliases.set(requested, realId);
-    history.touch(realId, { engine: engineId, node: host.id, cwd, prompt: turn.prompt, created: !known });
+    history.touch(realId, { engine: engineId, node: host.id, cwd, worktree, prompt: turn.prompt, created: !known });
 
-    const job = createChatJob({ routed: !!session.routed, engine: engineId, node: host.id, cwd, sessionId: realId, jobId: crypto.randomUUID() });
+    const job = createChatJob({ routed: !!session.routed, engine: engineId, node: host.id, cwd, worktree, sessionId: realId, jobId: crypto.randomUUID() });
     run = { id: realId, engine: engineId, node: host.id, job, session, baseHistory, baseMessages: baseHistory?.messages || [], stopped: false, requestedId: requested };
     runs.set(realId, run);
     for (const [event, data] of buffered.splice(0)) job.publish(event, data);
