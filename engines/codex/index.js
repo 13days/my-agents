@@ -1,5 +1,6 @@
 const { resolveCodex, codexEnvironment } = require('./cli');
 const { createCodexRunner } = require('./runner');
+const { codexRelayConfig, RELAY_TOKEN_ENV } = require('./proxy');
 
 const MODEL = /^[\w.\/:-]{1,100}$/;
 const isClaudeModel = model => /^(claude|opus|sonnet|haiku|default)\b/i.test(model);
@@ -26,10 +27,13 @@ function createCodexEngine({ sessions, capture = () => null, env = process.env }
     detect: () => resolveCodex({ env }),
     validModel: model => MODEL.test(model) && !isClaudeModel(model),
     owns: id => !!sessions.pathFor(id),
-    open({ host, sessionId, cwd, model, emit, onIdle, onClosed }) {
+    // `routeEnv` comes from a hub when this adapter runs inside a remote node: the hub's proxy
+    // via this node's relay, authenticated with a relay token instead of a local Codex login.
+    open({ host, sessionId, cwd, model, routeEnv, emit, onIdle, onClosed }) {
       // Resumed threads keep their original provider: terminal threads (openai) cannot move to the panel and vice versa.
       const provider = sessionId ? sessions.provider(sessionId) : '';
-      const proxy = capture({ provider });
+      const relayed = routeEnv?.MY_AGENTS_CODEX_BASE && routeEnv[RELAY_TOKEN_ENV] ? routeEnv : null;
+      const proxy = relayed ? { config: codexRelayConfig(relayed.MY_AGENTS_CODEX_BASE) } : capture({ provider });
       const info = resolveCodex({ env });
       let stopping = false, closed = false;
       const close = () => {
@@ -40,7 +44,7 @@ function createCodexEngine({ sessions, capture = () => null, env = process.env }
       };
       const runner = createCodexRunner({
         cli: info.path, cwd, threadId: sessionId, model, config: proxy?.config || [],
-        env: codexEnvironment({ ...env, PWD: cwd }, info), spawnImpl: host.spawn, tmpDir: host.join(host.tmpDir(), 'my-agents-codex'),
+        env: codexEnvironment({ ...env, ...(relayed ? { [RELAY_TOKEN_ENV]: relayed[RELAY_TOKEN_ENV], NO_PROXY: relayed.NO_PROXY, no_proxy: relayed.no_proxy } : {}), PWD: cwd }, info), spawnImpl: host.spawn, tmpDir: host.join(host.tmpDir(), 'my-agents-codex'),
         emit: (event, data) => {
           emit(event, data);
           if (event === 'done' && stopping) close();

@@ -1,10 +1,14 @@
 const http = require('http');
 const https = require('https');
+const crypto = require('crypto');
 const { upstreamNetwork } = require('../../upstream-network');
 
 // Pass-through capture for Codex. Codex keeps its own credentials (ChatGPT
 // subscription OAuth or OPENAI_API_KEY); the panel only relays the bytes and
 // records request/response bodies. Header values are never persisted.
+// Exception: Codex on a remote node has no login of its own. It sends the panel's
+// relay token instead, which is swapped here for this machine's Codex credentials,
+// so only this machine ever refreshes the (rotating) ChatGPT login.
 const ROUTES = [
   { prefix: '/backend-api/codex/', origin: 'https://chatgpt.com', strip: '', mode: 'chatgpt' },
   { prefix: '/codex-openai/v1/', origin: 'https://api.openai.com', strip: '/codex-openai', mode: 'api-key' },
@@ -20,6 +24,22 @@ function codexProviderConfig(proxyPort, { apiKey = false } = {}) {
   // requires_openai_auth makes Codex attach its stored login (ChatGPT token or API key).
   return [`model_providers.panel={name="my-agents",base_url="${base}",wire_api="responses",requires_openai_auth=true}`, 'model_provider="panel"'];
 }
+
+// Same, for Codex on a remote node: `base` is the node's relay URL plus the route prefix,
+// the relay token comes from MY_AGENTS_CODEX_TOKEN and never Codex's own (absent) login.
+const RELAY_TOKEN_ENV = 'MY_AGENTS_CODEX_TOKEN';
+function codexRelayConfig(base) {
+  return [`model_providers.panel={name="my-agents",base_url="${base}",wire_api="responses",env_key="${RELAY_TOKEN_ENV}",requires_openai_auth=false}`, 'model_provider="panel"'];
+}
+
+// Headers that replace the relay token, from this machine's ~/.codex/auth.json.
+function codexCredentials(auth, mode) {
+  if (mode === 'api-key') return auth?.OPENAI_API_KEY ? { authorization: `Bearer ${auth.OPENAI_API_KEY}` } : null;
+  const tokens = auth?.tokens;
+  if (!tokens?.access_token) return null;
+  return { authorization: `Bearer ${tokens.access_token}`, ...(tokens.account_id ? { 'chatgpt-account-id': tokens.account_id } : {}) };
+}
+const sameSecret = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
 
 function textOf(content) {
   if (typeof content === 'string') return content;
@@ -89,13 +109,22 @@ function extractResponses(reqText, resText, isStream) {
   return rec;
 }
 
-function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), request = { http, https } } = {}) {
+// `relay`: { token, credentials(mode) → headers | null } for remote-node Codex (see above).
+function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), request = { http, https }, relay = null } = {}) {
   const live = new Map();
   function handle(req, res) {
     const route = routeFor(req.url);
     if (!route || req.headers.origin) {
       res.writeHead(route ? 403 : 404, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ error: route ? '模型代理不接受浏览器跨域请求' : 'not found' }));
+    }
+    let swap = null;
+    if (relay?.token && sameSecret(req.headers.authorization || '', `Bearer ${relay.token}`)) {
+      swap = relay.credentials(route.mode);
+      if (!swap) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: { message: '面板所在机器上的 Codex 未登录，无法代远端节点请求', type: 'invalid_request_error' } }));
+      }
     }
     const info = reserveCapture();
     const sessionId = String(req.headers['session-id'] || req.headers['thread-id'] || '').slice(0, 100);
@@ -111,6 +140,7 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
       if (turn && sessionId) { const e = live.get(sessionId) || { inflight: 0 }; e.inflight++; e.lastAt = Date.now(); live.set(sessionId, e); res.on('close', () => { e.inflight = Math.max(0, e.inflight - 1); e.lastAt = Date.now(); }); }
       const headers = {};
       for (const [k, v] of Object.entries(req.headers)) if (!HOP.has(k.toLowerCase())) headers[k] = v;
+      if (swap) Object.assign(headers, swap);
       headers['accept-encoding'] = 'identity';
       if (body.length) headers['content-length'] = body.length;
       const target = new URL(route.origin + req.url.slice(route.strip.length));
@@ -142,4 +172,4 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
   const sessions = () => [...live.entries()].map(([id, e]) => ({ id, running: e.inflight > 0, lastAt: e.lastAt, engine: 'codex' }));
   return { handle, sessions };
 }
-module.exports = { createCodexProxy, codexProviderConfig, extractResponses, isCodexPath, normalizeUsage };
+module.exports = { createCodexProxy, codexProviderConfig, codexRelayConfig, codexCredentials, RELAY_TOKEN_ENV, extractResponses, isCodexPath, normalizeUsage };

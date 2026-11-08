@@ -9,7 +9,7 @@ const VERSION = require('../package.json').version;
 // Calls (hub → node): hello, engine.owns, host.resolveDir, session.open,
 // session.submit, session.stop, session.close, session.permission.
 // `session.open` may carry `routeEnv` pointing the engine at the hub's proxy; its base
-// URL is replaced with this node's relay (node/relay.js) back over the same link.
+// URL (ANTHROPIC_BASE_URL, or the MY_AGENTS_CODEX_BASE path) is put on this node's relay (node/relay.js) back over the same link.
 // Notifications (node → hub): session.event, session.idle, session.ready,
 // session.failed, session.accepted, session.closed. Each carries the session
 // state so the hub can answer currentId / busy synchronously.
@@ -35,11 +35,15 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id }) {
 
   peer.handle('session.open', async ({ sid, engine: name, sessionId, resume, cwd, model, routeEnv }) => {
     const engine = engineOf(name);
-    if (routeEnv?.ANTHROPIC_BASE_URL) {
+    const codexPath = String(routeEnv?.MY_AGENTS_CODEX_BASE || '');
+    if (routeEnv?.ANTHROPIC_BASE_URL || /^\/(?!\/)/.test(codexPath)) {
       // The relay is on loopback; a corporate HTTP(S)_PROXY in the shell must not swallow it.
       const noProxy = [...new Set([...String(process.env.NO_PROXY || process.env.no_proxy || '').split(','), '127.0.0.1', 'localhost'].map(s => s.trim()).filter(Boolean))].join(',');
-      routeEnv = { ...routeEnv, ANTHROPIC_BASE_URL: await relay.url(), NO_PROXY: noProxy, no_proxy: noProxy };
-    }
+      const url = await relay.url();
+      routeEnv = { ...routeEnv, NO_PROXY: noProxy, no_proxy: noProxy };
+      if (routeEnv.ANTHROPIC_BASE_URL) routeEnv.ANTHROPIC_BASE_URL = url;
+      if (codexPath) routeEnv.MY_AGENTS_CODEX_BASE = url + codexPath;
+    } else routeEnv = null;
     let session = null;
     const notify = (method, extra = {}) => peer.notify(method, { sid, ...extra, state: state(session) });
     session = await engine.open({

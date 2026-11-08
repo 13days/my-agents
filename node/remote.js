@@ -8,6 +8,7 @@ const MODEL = /^[\w.\/:\[\]-]{1,100}$/;
 
 // `pin` fixes the id/label for nodes the hub launched itself (saved SSH nodes).
 // `routing` lets remote engines use the hub's proxy: { target: proxy URL, engines: { [id]: options => env | null } }.
+// A hook with `accounts = false` routes without offering the hub's account picker.
 async function attachRemoteNode({ peer, registry, transport = 'ws', pin = null, routing = null, log = console }) {
   const info = { ...await peer.call('hello', {}, { timeout: 15000 }), ...(pin?.id ? { id: pin.id } : {}), ...(pin?.label ? { label: pin.label } : {}) };
   const id = String(info?.id || '').trim();
@@ -41,7 +42,7 @@ async function attachRemoteNode({ peer, registry, transport = 'ws', pin = null, 
     registry.register({
       id: engine.id,
       meta: { ...engine.meta },
-      capabilities: { ...engine.capabilities, accounts: !!routeEnv, capture: !!routeEnv },
+      capabilities: { ...engine.capabilities, accounts: !!routeEnv && routeEnv.accounts !== false, capture: !!routeEnv },
       detect: () => engine.cli,
       validModel: model => MODEL.test(model),
       owns: sessionId => peer.call('engine.owns', { engine: engine.id, id: sessionId }).catch(() => false),
@@ -58,7 +59,7 @@ async function attachRemoteNode({ peer, registry, transport = 'ws', pin = null, 
         let opened;
         try {
           const env = routeEnv ? await routeEnv(options) : null;
-          opened = await peer.call('session.open', { sid, engine: engine.id, sessionId: options.sessionId, resume: options.resume, cwd: options.cwd, model: options.model, ...(env?.ANTHROPIC_BASE_URL ? { routeEnv: env } : {}) }, { timeout: 60000 });
+          opened = await peer.call('session.open', { sid, engine: engine.id, sessionId: options.sessionId, resume: options.resume, cwd: options.cwd, model: options.model, ...(env ? { routeEnv: env } : {}) }, { timeout: 60000 });
         }
         catch (e) { sessions.delete(sid); throw e; }
         const send = (method, params = {}) => peer.call(method, { sid, ...params }).catch(e => { if (!done) options.emit('warning', { warning: `${host.label}：${e.message}` }); });

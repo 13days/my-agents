@@ -350,6 +350,6 @@ curl -X POST localhost:4321/api/nodes -H 'Content-Type: application/json' \
 ### 6.4 已知限制
 
 - 远程会话的历史回放、会话标题来自 Hub 的会话元数据；节点上的 transcript 不回传，重开远程会话时看不到之前的消息正文。
-- 远程节点不走 Hub 的账号路由和抓包代理（`capabilities.accounts/capture` 被置为 false），使用节点本机 CLI 的登录。
+- 远程节点上的 Claude 和 Codex 经节点链路中继到 Hub 的代理（`node/relay.js`），请求进 Inspector。Claude 用 Hub 的账号路由；Codex 用 Hub 机器的 Codex 登录：节点只拿到面板进程内的中继令牌，代理在 Hub 侧换成 `~/.codex/auth.json` 的凭据，刷新只发生在 Hub 机器上。其他引擎使用节点本机 CLI 的登录。
 - Claude 的工具结果补齐（transcript 同步）在远程节点上关闭。
 - Codex 工具调用 ID 在实时流与历史中不同。

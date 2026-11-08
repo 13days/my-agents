@@ -36,7 +36,7 @@ const { createLocalHost } = require('./hosts/local');
 const { createClaudeEngine, accountRouteEnv } = require('./engines/claude');
 const { createCodexEngine } = require('./engines/codex');
 const { createUpstreams } = require('./core/upstreams');
-const { createCodexProxy, codexProviderConfig, extractResponses, isCodexPath } = require('./engines/codex/proxy');
+const { createCodexProxy, codexProviderConfig, codexCredentials, RELAY_TOKEN_ENV, extractResponses, isCodexPath } = require('./engines/codex/proxy');
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 const codexSessions = createCodexSessions({ home: CODEX_HOME });
 const codexStats = require('./engines/codex/stats').createCodexStats({ home: CODEX_HOME });
@@ -1722,7 +1722,13 @@ const accountRouter = require('./proxy-router').createRouter({
   dir: DATA_DIR, claudeDir: CLAUDE_DIR, port: PROXY_PORT, record: recordExchange,
   reserveCapture: () => ({ id: captureStore.nextId(), startedAt: new Date().toISOString() }),
 });
-const codexProxy = createCodexProxy({ record: recordExchange, reserveCapture: () => ({ id: captureStore.nextId(), startedAt: new Date().toISOString() }) });
+// Codex on remote nodes authenticates with this per-process token; the proxy swaps it for this machine's login.
+const codexRelayToken = crypto.randomBytes(24).toString('hex');
+const readCodexAuth = () => { try { return JSON.parse(fs.readFileSync(path.join(CODEX_HOME, 'auth.json'), 'utf8')); } catch { return null; } };
+const codexProxy = createCodexProxy({
+  record: recordExchange, reserveCapture: () => ({ id: captureStore.nextId(), startedAt: new Date().toISOString() }),
+  relay: { token: codexRelayToken, credentials: mode => codexCredentials(readCodexAuth(), mode) },
+});
 const upstreams = createUpstreams();
 upstreams.add({ id: 'anthropic', engine: 'claude', handle: accountRouter.handle }, { isDefault: true });
 upstreams.add({
@@ -2366,7 +2372,7 @@ server.on('error', e => {
   process.exit(1); // 干净退出，不抛未捕获堆栈
 });
 // Remote nodes dial in over WebSocket on the panel port, or are launched over SSH.
-// Claude on remote nodes goes through this panel's proxy accounts, relayed over the node link.
+// Claude and Codex on remote nodes go through this panel's proxy, relayed over the node link.
 const nodeHub = require('./node/hub').createNodeHub({ registry, token: auth?.token, dir: DATA_DIR, routing: {
   target: `http://127.0.0.1:${PROXY_PORT}`,
   engines: {
@@ -2377,6 +2383,12 @@ const nodeHub = require('./node/hub').createNodeHub({ registry, token: auth?.tok
       if (!env.ANTHROPIC_MODEL) { try { const { model } = JSON.parse(fs.readFileSync(path.join(CLAUDE_DIR, 'settings.json'), 'utf8')); if (typeof model === 'string' && model) env.ANTHROPIC_MODEL = model; } catch {} }
       return env;
     },
+    // Codex uses this machine's Codex login, which never leaves it (see engines/codex/proxy.js).
+    codex: Object.assign(() => {
+      const mode = codexAuthMode() === 'apikey' ? 'api-key' : 'chatgpt';
+      if (!codexCredentials(readCodexAuth(), mode)) return null;
+      return { MY_AGENTS_CODEX_BASE: mode === 'api-key' ? '/codex-openai/v1' : '/backend-api/codex', [RELAY_TOKEN_ENV]: codexRelayToken };
+    }, { accounts: false }),
   },
 } });
 server.on('upgrade', (req, socket, head) => { if (!nodeHub.upgrade(req, socket, head)) socket.destroy(); });
