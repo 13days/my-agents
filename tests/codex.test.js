@@ -243,3 +243,23 @@ test('Codex public reasoning summaries stream once per update alongside tools an
     assert.ok(!JSON.stringify(messages).includes('never shown'));
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });
+
+test('Codex config deprecations are diagnostics, while assistant text remains unchanged', async () => {
+  const notice = '`[features].codex_hooks` is deprecated. Use `[features].hooks` instead.';
+  const { spawnImpl } = fakeSpawn(({ child }) => {
+    emitLines(child, [
+      { type: 'thread.started', thread_id: 'config-notice' },
+      { type: 'error', message: notice },
+      { type: 'item.completed', item: { id: 'notice', type: 'error', message: notice } },
+      { type: 'item.completed', item: { id: 'answer', type: 'agent_message', text: notice + '\nThis is an explanation requested by the user.' } },
+      { type: 'turn.completed', usage: {} },
+    ]); child.stdout.end(); setImmediate(() => child.emit('close', 0, null));
+  });
+  const events = []; let finish; const idle = new Promise(resolve => finish = resolve);
+  const runner = createCodexRunner({ cli: 'codex', cwd: '/work', spawnImpl, emit: (event, data) => events.push([event, data]), onIdle: finish });
+  runner.submit('notice-test-turn', { prompt: 'Hello' }); await idle;
+  assert.equal(events.filter(([event]) => event === 'diagnostic').length, 2);
+  assert.equal(events.some(([event]) => event === 'warning' || event === 'error'), false);
+  assert.match(events.find(([event]) => event === 'text')[1].text, /This is an explanation requested by the user/);
+  assert.equal(events.find(([event]) => event === 'done')[1].isError, false);
+});
