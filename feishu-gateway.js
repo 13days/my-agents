@@ -190,11 +190,16 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   const pageOf = (page, total, size = cards.PAGE_SIZE) => Math.max(0, Math.min(Math.max(0, Math.ceil(total / size) - 1), Math.trunc(Number(page) || 0)));
   async function sessionsCard(msg, query = '', requestedPage = 0) {
     if (!detailed(msg)) return managementNotice(msg);
+    query = clip(String(query || ''), 80);
     const key = contextKey(msg), all = panel.sessions().filter(item => !query || `${item.title} ${item.project}`.toLowerCase().includes(query.toLowerCase()));
     const page = pageOf(requestedPage, all.length, cards.SESSION_PAGE_SIZE), rows = all.slice(page * cards.SESSION_PAGE_SIZE, (page + 1) * cards.SESSION_PAGE_SIZE);
     state.listings[key] = all.map(item => item.id); persist();
-    const result = await send(msg, { card: cards.sessionList({ engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), rows: rows.map(item => ({ ...item, running: panel.running(item.id) })), total: all.length, page, query, selected: state.bindings[key]?.id }) });
+    let previews = [];
+    try { previews = panel.sessionPreviews ? await panel.sessionPreviews(rows) : []; } catch (error) { rememberError(error); }
+    const byId = new Map(previews.map(preview => [preview.id, preview]));
+    const result = await send(msg, { card: cards.sessionList({ engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), rows: rows.map(item => ({ ...item, ...byId.get(item.id), running: panel.running(item.id) })), total: all.length, page, query, selected: state.bindings[key]?.id }) });
     rememberCard(result, msg);
+    if (result?.messageId) { state.cards[result.messageId].listing = { page, query }; persist(); }
   }
   function projects() {
     return [...new Set([config.defaultProject, ...panel.projects(), ...state.projects].filter(Boolean))].filter(folder => { try { return fs.statSync(folder).isDirectory(); } catch { return false; } });
@@ -543,6 +548,14 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (!item) throw new Error('会话不存在或已删除，请发送 /sessions 刷新');
       if (value.action === 'permission') { await panel.permission(item.id, value.requestId, value.behavior); return send(msg, { text: value.behavior === 'allow' ? '已允许本次工具调用。' : '已拒绝本次工具调用。' }); }
       if (value.action === 'stop') { await panel.stop(item.id); return send(msg, { text: '已发送停止请求。' }); }
+      if (value.action === 'user_messages') {
+        const data = panel.sessionUserPage ? await panel.sessionUserPage(item, value.page) : require('./core/session-previews').userMessagePage({ messages: await panel.history(item.id) }, value.page, item);
+        const listing = state.cards[msg.messageId]?.listing || { page: value.listPage || 0, query: value.query || '' };
+        const result = await send(msg, { card: cards.sessionUserMessages({ engines: catalog(), owner: msg.senderId, key, item, data, listPage: listing.page, query: listing.query }) });
+        rememberCard(result, msg);
+        if (result?.messageId) { state.cards[result.messageId].listing = listing; persist(); }
+        return result;
+      }
       if (value.action === 'history') return historyReply(msg, bindingFor(item));
       bind(key, bindingFor(item));
       return currentCard(msg, state.bindings[key]);

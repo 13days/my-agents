@@ -9,7 +9,7 @@ test('session pages retain global command numbers and callback routing while hid
   const rows = Array.from({ length: cards.SESSION_PAGE_SIZE }, (_, i) => ({ id: 'session-' + (i + 5), title: '*title* ' + i, project: '/workspace/project', running: i === 0 }));
   const card = cards.sessionList({ ...context, rows, total: 47, page: 1, query: 'project', selected: rows[1].id });
   assert.equal(card.schema, '2.0');
-  const details = card.body.elements.find(node => node.tag === 'collapsible_panel');
+  const details = nodes(card).find(node => node.tag === 'collapsible_panel');
   assert.equal(details.expanded, false);
   assert.match(JSON.stringify(card), /16\. /);
   assert.ok(actions(card).some(value => value.action === 'sessions' && value.page === 2 && value.query === 'project'));
@@ -88,4 +88,22 @@ test('15 session choices with long CJK titles fit the Feishu message budget', ()
   assert.equal(actions(card).filter(value => value.action === 'switch').length, 15);
   assert.ok(Buffer.byteLength(JSON.stringify({ msg_type: 'interactive', content: JSON.stringify(card) })) < 30000);
   assert.equal(cards.PAGE_SIZE, 5);
+});
+
+test('each session folds user messages and shows actual rounds, creation and activity times', () => {
+  const card = cards.sessionList({ ...context, timeZone: 'Asia/Shanghai', rows: [{ id: 'session-user', title: '<image path="/tmp/private.png"></image>帮我修复', engine: 'codex', project: '/work/repo', turns: 12, createdAt: '2026-11-01T01:00:00Z', lastAt: '2026-11-09T01:00:00Z', userMessages: [{ round: 11, text: '用户之前的问题', timestamp: '2026-11-08T01:00:00Z' }, { round: 12, text: '用户最近的问题', timestamp: '2026-11-09T01:00:00Z' }] }], total: 1, page: 0 });
+  const fold = nodes(card).find(node => node.tag === 'collapsible_panel');
+  assert.equal(fold.expanded, false); assert.match(fold.header.title.content, /帮我修复/);
+  assert.match(JSON.stringify(card), /12 轮/); assert.match(JSON.stringify(card), /创建 2026\/11\/01 09:00/);
+  assert.match(JSON.stringify(fold), /用户最近的问题/); assert.doesNotMatch(JSON.stringify(card), /private.png/);
+  assert.ok(actions(card).some(value => value.action === 'user_messages' && value.id === 'session-user'));
+});
+
+test('15 expanded-capable session entries with CJK previews still fit Feishu limits', () => {
+  const rows = Array.from({ length: 15 }, (_, i) => ({ id: '11111111-2222-4333-8444-' + String(i).padStart(12, '0'), title: '任务'.repeat(60), project: '/workspace/' + '项目'.repeat(35), turns: 200, first: Date.now(), last: Date.now(), userMessages: [199, 200].map(round => ({ round, text: '中'.repeat(100), timestamp: new Date().toISOString() })) }));
+  const card = cards.sessionList({ owner: 'ou_' + 'a'.repeat(32), key: JSON.stringify(['ou_' + 'a'.repeat(32), 'oc_' + 'b'.repeat(32), 'om_' + 'c'.repeat(32)]), rows, total: 100, page: 0, query: '中'.repeat(80) });
+  assert.equal(nodes(card).filter(node => node.tag === 'collapsible_panel').length, 15);
+  assert.equal(actions(card).filter(value => value.action === 'switch').length, 15);
+  assert.ok(Buffer.byteLength(JSON.stringify({ msg_type: 'interactive', content: JSON.stringify(card) })) < 30000);
+  assert.ok(nodes(card).filter(node => node.tag).length < 200);
 });

@@ -725,3 +725,33 @@ test('node picker card buttons switch the topic to the chosen machine', async t 
   await click({ action: 'use_node', node: 'evil' });
   assert.match(JSON.stringify(f.sent.at(-1).content), /节点无效/);
 });
+
+test('session accordions enrich only the current page and browsing user messages preserves bindings and list filters', async t => {
+  const f = await fixture(t); await f.pair();
+  for (let i = 2; i < 33; i++) f.rows.push({ id: `session-details-${i}`, title: `work ${i}`, project: f.dir });
+  f.rows.forEach(item => { item.title = 'work ' + item.title; });
+  const history = { messages: Array.from({ length: 12 }, (_, i) => ({ role: 'user', text: `question ${i + 1}`, timestamp: '2026-11-09T01:00:00Z' })) };
+  const { sessionPreview, userMessagePage } = require('../core/session-previews');
+  let enriched = [];
+  f.panel.sessionPreviews = async items => { enriched = items.map(item => item.id); return items.map(item => sessionPreview(history, item)); };
+  f.panel.sessionUserPage = async (item, page) => userMessagePage(history, page, item);
+  await f.gateway.receive(f.msg('/sessions work')); await f.gateway.receive(f.msg('/switch 1'));
+  const key = contextKey(f.msg(''));
+  const binding = () => JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json'))).bindings[key].id;
+  const original = binding();
+  const click = (card, value, owner = 'ou_owner') => f.gateway.action({ messageId: card.messageId, chatId: 'oc_private', operator: { openId: owner }, action: { value: { owner: 'ou_owner', key, ...value } } });
+  await f.gateway.receive(f.msg('/sessions work'));
+  await click(f.sent.at(-1), { action: 'sessions', page: 1, query: 'work' });
+  assert.equal(enriched.length, 15); assert.equal(enriched[0], f.rows[15].id);
+  const list = f.sent.at(-1), before = f.sent.length;
+  await click(list, { action: 'user_messages', id: f.rows[15].id }, 'ou_stranger'); assert.equal(f.sent.length, before);
+  await click(list, { action: 'user_messages', id: f.rows[15].id });
+  assert.match(JSON.stringify(f.sent.at(-1).content), /第 12 轮/); assert.equal(binding(), original);
+  await click(f.sent.at(-1), { action: 'user_messages', id: f.rows[15].id, page: 1 });
+  assert.match(JSON.stringify(f.sent.at(-1).content), /第 7 轮/); assert.equal(binding(), original);
+  const allNodes = value => value && typeof value === 'object' ? [value, ...Object.values(value).flatMap(allNodes)] : [];
+  const back = allNodes(f.sent.at(-1).content).find(node => node.type === 'callback' && node.value.action === 'sessions').value;
+  assert.equal(back.page, 1); assert.equal(back.query, 'work');
+  await click(f.sent.at(-1), back); assert.match(JSON.stringify(f.sent.at(-1).content), /16\. /);
+  assert.equal(f.calls.length, 0); assert.equal(binding(), original);
+});

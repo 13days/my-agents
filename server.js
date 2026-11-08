@@ -745,6 +745,28 @@ function isCodexSession(id) {
   return !!codexSessions.pathFor(id) && !transcriptPathFor(id);
 }
 function sessionEngine(id) { return isCodexSession(id) || sessionStore.read()[id]?.engine === 'codex' ? 'codex' : 'claude'; }
+const sessionPreviewCache = new Map();
+function readSessionPreviews(items) {
+  const { sessionPreview } = require('./core/session-previews');
+  return items.map(item => {
+    try {
+      const fp = transcriptPathFor(item.id) || codexSessions.pathFor(item.id);
+      const stat = fp ? fs.statSync(fp) : null;
+      const signature = JSON.stringify([stat?.mtimeMs, stat?.size, item.first, item.last]);
+      const cached = sessionPreviewCache.get(item.id);
+      if (cached?.signature === signature) return cached.value;
+      const history = sessionMessages(item.id, { limit: 0 });
+      const value = sessionPreview(history, { ...item, historyAvailable: !!fp });
+      sessionPreviewCache.set(item.id, { signature, value });
+      if (sessionPreviewCache.size > 200) sessionPreviewCache.delete(sessionPreviewCache.keys().next().value);
+      return value;
+    } catch { return sessionPreview(null, item); }
+  });
+}
+function readSessionUserPage({ item, page }) {
+  const fp = transcriptPathFor(item.id) || codexSessions.pathFor(item.id);
+  return require('./core/session-previews').userMessagePage(sessionMessages(item.id, { limit: 0 }), page, { ...item, historyAvailable: !!fp });
+}
 function listSessions() {
   const sessionMetadata = sessionStore.read();
   // 只列磁盘上仍有 transcript 的会话——这些才能查看详情/回放/关联抓包。
@@ -1822,6 +1844,8 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
     permission: async (id, requestId, behavior) => manager.respondPermission(id, requestId, behavior),
     pendingPermissions: id => manager.pendingPermissions(id),
     history: id => sessionMessages(id)?.messages || [],
+    sessionPreviews: items => historyWorker.read('sessionPreviews', items),
+    sessionUserPage: (item, page) => historyWorker.read('sessionUserPage', { item, page }),
     rename: (id, title) => { if (!listSessions().some(item => item.id === id)) throw new Error('会话不存在'); if (!title.trim() || title.trim().length > 80) throw new Error('名称需为 1–80 个字符'); sessionStore.update(id, { title: title.trim(), titleSource: 'manual' }); },
     stop: async id => { if (!manager.stop(id)) throw new Error('当前没有可停止的 Panel 任务；外部 CLI 进程请在其原入口停止'); },
   },
@@ -2420,7 +2444,7 @@ process.once('SIGINT', stopPanel);
 
 if (HISTORY_WORKER) parentPort.on('message', ({ id, type, input }) => {
   try {
-    const handlers = { stats: readStats, usage: usageCounts, wrapped: wrappedStats, live: liveSnapshot, search: searchTranscripts, captureOwners };
+    const handlers = { stats: readStats, usage: usageCounts, wrapped: wrappedStats, live: liveSnapshot, search: searchTranscripts, captureOwners, sessionPreviews: readSessionPreviews, sessionUserPage: readSessionUserPage };
     if (!Object.hasOwn(handlers, type)) throw new Error('Unknown history operation');
     parentPort.postMessage({ id, value: handlers[type](input) });
   } catch (error) { parentPort.postMessage({ id, error: error.message }); }

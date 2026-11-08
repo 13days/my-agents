@@ -1,4 +1,5 @@
 const path = require('path');
+const { previewText } = require('./core/session-previews');
 const { engineCatalog } = require('./channels/engine-catalog');
 const PAGE_SIZE = 5;
 const SESSION_PAGE_SIZE = 15;
@@ -23,21 +24,59 @@ function row(title, detail, operation) {
     { tag: 'column', width: 'auto', vertical_align: 'center', elements: [operation] },
   ] };
 }
+function sessionTime(value, timeZone) {
+  if (!value) return '未记录';
+  const at = typeof value === 'number' ? (value < 1e11 ? value * 1000 : value) : value;
+  const date = new Date(at);
+  return Number.isNaN(date.getTime()) ? '未记录' : new Intl.DateTimeFormat('zh-CN', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(date);
+}
 function sessionList({ rows, total, page, query, selected, ...context }) {
   const pages = Math.max(1, Math.ceil(total / SESSION_PAGE_SIZE));
-  const elements = [muted(`${context.location ? context.location + ' · ' : ''}共 ${total} 个会话 · 第 ${page + 1} / ${pages} 页${query ? ' · 筛选：' + escape(clip(query, 50)) : ''}`)];
-  rows.forEach((item, index) => {
-    const number = page * SESSION_PAGE_SIZE + index + 1, current = item.id === selected;
-    elements.push(row(`${number}. ${escape(clip(item.title || '未命名会话', 70))}`, `${catalogOf(context).label(item.engine || 'claude')} · ${escape(path.basename(item.worktree?.repository || item.project || '') || '未指定项目')} · ${current ? '● 当前会话' : item.running ? '● 运行中' : '可接续'}`, button(current ? '继续' : '切换', action(context, { action: 'switch', id: item.id }), current ? 'primary' : 'default')));
-  });
-  if (!rows.length) elements.push(markdown('没有找到匹配的会话。试试其他关键词，或新建一个会话。'));
-  if (rows.length) elements.push(collapse('项目路径与会话 ID', rows.map((item, index) => markdown(`**${page * SESSION_PAGE_SIZE + index + 1}. ${escape(clip(item.title || '未命名会话', 60))}**\n${escape(item.project)}\n\`${item.id}\``, true))));
+  const timeZone = context.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const render = (previewSize, titleSize, previewCount) => {
+    const elements = [muted(`${context.location ? context.location + ' · ' : ''}共 ${total} 个会话 · 第 ${page + 1} / ${pages} 页${query ? ' · 筛选：' + escape(clip(query, 50)) : ''}`)];
+    rows.forEach((item, index) => {
+      const number = page * SESSION_PAGE_SIZE + index + 1, current = item.id === selected;
+      const title = previewText(item.title) || (item.title ? '图片会话' : '未命名会话');
+      const turns = Number.isInteger(item.turns) ? `${item.turns} 轮` : '轮次未记录';
+      const messages = (item.userMessages || []).slice(-previewCount);
+      const previews = messages.map(message => `**第 ${message.round} 轮 · ${sessionTime(message.timestamp, timeZone)}**\n${escape(clip(message.text, previewSize))}`);
+      if (!previews.length) previews.push(item.previewUnavailable ? '暂时无法读取用户消息；远程历史可能尚未同步。' : '暂无已保存的用户消息。');
+      const contents = [markdown(previews.join('\n\n'), true)];
+      if (messages.length) contents.push(button('查看全部用户消息', action(context, { action: 'user_messages', id: item.id })));
+      const line = row('', `${catalogOf(context).label(item.engine || 'claude')} · ${escape(clip(path.basename(item.worktree?.repository || item.project || ''), 24)) || '未指定项目'} · ${turns} · ${current ? '● 当前会话' : item.running ? '● 运行中' : '可接续'}\n创建 ${sessionTime(item.createdAt || item.first, timeZone)} · 最近 ${sessionTime(item.lastAt || item.last, timeZone)}`, button(current ? '继续' : '切换', action(context, { action: 'switch', id: item.id }), current ? 'primary' : 'default'));
+      line.columns[0].elements[0] = { tag: 'collapsible_panel', expanded: false, header: { title: plain(`${number}. ${clip(title, titleSize)}`), icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined' }, icon_position: 'left' }, elements: contents };
+      delete line.flex_mode; delete line.horizontal_spacing; delete line.columns[1].vertical_align;
+      elements.push(line);
+    });
+    if (!rows.length) elements.push(markdown('没有找到匹配的会话。试试其他关键词，或新建一个会话。'));
+    const navigation = [];
+    if (page > 0) navigation.push(button('← 上一页', action(context, { action: 'sessions', page: page - 1, query })));
+    if (page + 1 < pages) navigation.push(button('下一页 →', action(context, { action: 'sessions', page: page + 1, query })));
+    navigation.push(button('刷新', action(context, { action: 'sessions', page, query })), button('＋ 新建会话', action(context, { action: 'engine' }), 'primary'));
+    elements.push(buttons(navigation), muted(`点击会话标题展开用户消息；轮次按实际用户发送次数统计。时间：${timeZone}。/sessions 关键词筛选；/switch 序号切换。`));
+    return card('最近会话', elements, { summary: `${total} 个会话 · 选择一个继续工作` });
+  };
+  // Collapsed content still counts toward Feishu's 30 KB limit.
+  let output;
+  for (const [previewSize, titleSize, previewCount] of [[90, 60, 2], [50, 45, 2], [24, 30, 1]]) {
+    output = render(previewSize, titleSize, previewCount);
+    if (Buffer.byteLength(JSON.stringify({ msg_type: 'interactive', content: JSON.stringify(output) })) < 28000) break;
+  }
+  return output;
+}
+function sessionUserMessages({ item, data, listPage = 0, query = '', ...context }) {
+  const timeZone = context.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const elements = [markdown(`**${escape(clip(previewText(item.title) || '图片会话', 90))}**`), muted(`${catalogOf(context).label(item.engine || 'claude')} · ${data.turns === null ? '轮次未记录' : data.turns + ' 轮'} · 第 ${data.page + 1} / ${data.pages} 页`), muted(`创建 ${sessionTime(data.createdAt || item.first, timeZone)} · 最近 ${sessionTime(data.lastAt || item.last, timeZone)}`)];
+  for (const message of data.messages) elements.push(markdown(`**第 ${message.round} 轮 · ${sessionTime(message.timestamp, timeZone)}**\n${escape(clip(message.text, 1000))}`));
+  if (!data.messages.length) elements.push(markdown(data.previewUnavailable ? '暂时无法读取用户消息。' : '暂无用户消息。'));
+  const values = { action: 'user_messages', id: item.id, listPage, query };
   const navigation = [];
-  if (page > 0) navigation.push(button('← 上一页', action(context, { action: 'sessions', page: page - 1, query })));
-  if (page + 1 < pages) navigation.push(button('下一页 →', action(context, { action: 'sessions', page: page + 1, query })));
-  navigation.push(button('刷新', action(context, { action: 'sessions', page, query })), button('＋ 新建会话', action(context, { action: 'engine' }), 'primary'));
-  elements.push(buttons(navigation), muted('切换仅修改当前位置的绑定。/sessions 关键词筛选；/switch 序号切换；/new 使用默认项目新建。'));
-  return card('最近会话', elements, { summary: `${total} 个会话 · 选择一个继续工作` });
+  if (data.page + 1 < data.pages) navigation.push(button('← 更早消息', action(context, { ...values, page: data.page + 1 })));
+  if (data.page > 0) navigation.push(button('较新消息 →', action(context, { ...values, page: data.page - 1 })));
+  navigation.push(button('返回会话列表', action(context, { action: 'sessions', page: listPage, query })), button('继续此会话', action(context, { action: 'switch', id: item.id }), 'primary'));
+  elements.push(collapse('项目路径与会话 ID', [markdown(`${escape(item.project)}\n\`${item.id}\``, true)]), buttons(navigation), muted('这里只展示用户发送的消息；长消息显示摘要，邮箱已隐藏。完整原文保留在本机面板。'));
+  return card('会话用户消息', elements);
 }
 function projectList({ rows, total, page, defaultProject, engine = 'claude', node = 'local', nodeLabel = '本机', ...context }) {
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE)), engines = catalogOf(context), remote = node !== 'local';
@@ -156,4 +195,4 @@ function routes({ status, codex, pinned, notice = '', now = Date.now(), ...conte
   elements.push(buttons(controls), muted('/route 序号或名称 切换账号；/route auto 故障转移；/route rr 轮询；/route reset 清除冷却；/route pin 序号|off 固定当前会话；/route codex direct|proxy'));
   return card('代理路由', elements, { subtitle: '切换立即生效，无需经过模型', template: accounts.some(a => a.enabled && (a.cooldownUntil || 0) > now) ? 'orange' : 'grey', summary: `路由：${MODE_NAMES[mode] || mode}` });
 }
-module.exports = { PAGE_SIZE, SESSION_PAGE_SIZE, REPLY_PREVIEW, card, markdown, button, buttons, collapse, sessionList, projectList, nodePicker, enginePicker, currentSession, task, routes, MODE_NAMES };
+module.exports = { PAGE_SIZE, SESSION_PAGE_SIZE, REPLY_PREVIEW, card, markdown, button, buttons, collapse, sessionList, sessionUserMessages, projectList, nodePicker, enginePicker, currentSession, task, routes, MODE_NAMES };
