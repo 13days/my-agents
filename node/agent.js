@@ -22,7 +22,7 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id }) {
   const state = session => ({ currentId: session?.currentId || '', pendingCount: session?.pendingCount || 0, busy: !!session?.busy });
 
   peer.handle('hello', () => ({
-    id, label, platform: host.platform, version: VERSION, home: host.homeDir(),
+    id, label, platform: host.platform, version: VERSION, home: host.homeDir(), worktrees: typeof host.createWorktree === 'function',
     engines: engines.map(engine => {
       let cli = null;
       try { const info = engine.detect?.(); if (info) cli = { path: info.path, version: info.version }; } catch {}

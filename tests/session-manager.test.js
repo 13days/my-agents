@@ -127,3 +127,10 @@ test('shared mode and known CLI sessions never create a fresh worktree', async (
   await manager.start({ sessionId: 'existing-thread', prompt: 'Existing', cwd: os.tmpdir(), worktree: true });
   assert.equal(creates, 0); manager.shutdown();
 });
+
+test('older nodes give an actionable update error when isolation is requested', async () => {
+  const { manager, registry, opened } = setup();
+  registry.node('local').host.createWorktree = undefined;
+  await assert.rejects(manager.start({ prompt: 'Task', cwd: os.tmpdir(), worktree: true }), error => error.status === 400 && /更新节点/.test(error.message));
+  assert.equal(opened.length, 0); manager.shutdown();
+});
