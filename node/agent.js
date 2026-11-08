@@ -1,4 +1,5 @@
 const os = require('os');
+const { createRelayClient } = require('./relay');
 const VERSION = require('../package.json').version;
 
 // Node side of the hub ↔ node protocol: serves this machine's engine adapters
@@ -7,6 +8,8 @@ const VERSION = require('../package.json').version;
 //
 // Calls (hub → node): hello, engine.owns, host.resolveDir, session.open,
 // session.submit, session.stop, session.close, session.permission.
+// `session.open` may carry `routeEnv` pointing the engine at the hub's proxy; its base
+// URL is replaced with this node's relay (node/relay.js) back over the same link.
 // Notifications (node → hub): session.event, session.idle, session.ready,
 // session.failed, session.accepted, session.closed. Each carries the session
 // state so the hub can answer currentId / busy synchronously.
@@ -15,6 +18,7 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id }) {
   const sessions = new Map();
   const engineOf = name => { const engine = byId.get(name); if (!engine) throw Object.assign(new Error(`节点上没有引擎：${name}`), { status: 400 }); return engine; };
   const sessionOf = sid => { const session = sessions.get(sid); if (!session) throw Object.assign(new Error('节点上的会话已结束'), { status: 409 }); return session; };
+  const relay = createRelayClient(peer);
   const state = session => ({ currentId: session?.currentId || '', pendingCount: session?.pendingCount || 0, busy: !!session?.busy });
 
   peer.handle('hello', () => ({
@@ -28,12 +32,13 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id }) {
   peer.handle('engine.owns', async ({ engine, id: sessionId }) => !!await engineOf(engine).owns(sessionId));
   peer.handle('host.resolveDir', ({ dir }) => host.resolveDir(dir));
 
-  peer.handle('session.open', async ({ sid, engine: name, sessionId, resume, cwd, model }) => {
+  peer.handle('session.open', async ({ sid, engine: name, sessionId, resume, cwd, model, routeEnv }) => {
     const engine = engineOf(name);
+    if (routeEnv?.ANTHROPIC_BASE_URL) routeEnv = { ...routeEnv, ANTHROPIC_BASE_URL: await relay.url() };
     let session = null;
     const notify = (method, extra = {}) => peer.notify(method, { sid, ...extra, state: state(session) });
     session = await engine.open({
-      host, sessionId, resume, cwd: host.resolveDir(cwd), model: model && engine.validModel(model) ? model : '',
+      host, sessionId, resume, cwd: host.resolveDir(cwd), model: model && engine.validModel(model) ? model : '', routeEnv: routeEnv || null,
       emit: (event, data) => notify('session.event', { event, data }),
       onIdle: () => notify('session.idle'),
       onClosed: () => { sessions.delete(sid); notify('session.closed'); },

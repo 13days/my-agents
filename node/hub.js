@@ -21,7 +21,7 @@ const DEFAULT_COMMAND = 'my-agents node --stdio';
 // closes inherited descriptors as an interactive login shell; set a custom command there.)
 const remoteCommand = command => `exec "\${SHELL:-/bin/sh}" -ilc '${`exec 0<&3 3<&-; ${command}`.replace(/'/g, `'\\''`)}' 3<&0 </dev/null`;
 
-function createNodeHub({ registry, token, dir, log = console, spawnImpl = spawn, retryMs = 30000 }) {
+function createNodeHub({ registry, token, dir, routing = null, log = console, spawnImpl = spawn, retryMs = 30000 }) {
   const file = path.join(dir, 'panel-nodes.json');
   let saved = [];
   try { saved = JSON.parse(fs.readFileSync(file, 'utf8')).nodes || []; } catch {}
@@ -47,7 +47,7 @@ function createNodeHub({ registry, token, dir, log = console, spawnImpl = spawn,
     if (!wss) { const { WebSocketServer } = require('ws'); wss = new WebSocketServer({ noServer: true, maxPayload: 32 * 1024 * 1024 }); }
     wss.handleUpgrade(req, socket, head, ws => {
       const peer = createPeer(wsTransport(ws));
-      attachRemoteNode({ peer, registry, transport: 'ws', log })
+      attachRemoteNode({ peer, registry, transport: 'ws', routing, log })
         .then(node => log.log?.(`节点已连接：${node.id}（WebSocket）`))
         .catch(e => { log.warn?.(`节点连接被拒绝：${e.message}`); peer.close(); });
     });
@@ -65,7 +65,7 @@ function createNodeHub({ registry, token, dir, log = console, spawnImpl = spawn,
     let stderr = '';
     child.stderr?.on('data', chunk => { stderr = (stderr + chunk).slice(-2000); });
     const peer = createPeer(streamTransport(child.stdout, child.stdin, { onEnd: () => child.kill() }));
-    attachRemoteNode({ peer, registry, transport: 'ssh', pin: { id: config.id, label: config.label }, log })
+    attachRemoteNode({ peer, registry, transport: 'ssh', pin: { id: config.id, label: config.label }, routing, log })
       .then(() => { link.state = 'connected'; log.log?.(`节点已连接：${config.id}（SSH ${config.ssh}）`); })
       .catch(e => { link.error = e.message; child.kill(); });
     child.on('exit', code => {

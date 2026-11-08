@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { serveRelay } = require('./relay');
 
 // Hub side of the hub ↔ node protocol (see node/agent.js). A connected node
 // becomes a registry node whose engines are proxy adapters with the same
@@ -6,7 +7,8 @@ const crypto = require('crypto');
 const MODEL = /^[\w.\/:\[\]-]{1,100}$/;
 
 // `pin` fixes the id/label for nodes the hub launched itself (saved SSH nodes).
-async function attachRemoteNode({ peer, registry, transport = 'ws', pin = null, log = console }) {
+// `routing` lets remote engines use the hub's proxy: { target: proxy URL, engines: { [id]: options => env | null } }.
+async function attachRemoteNode({ peer, registry, transport = 'ws', pin = null, routing = null, log = console }) {
   const info = { ...await peer.call('hello', {}, { timeout: 15000 }), ...(pin?.id ? { id: pin.id } : {}), ...(pin?.label ? { label: pin.label } : {}) };
   const id = String(info?.id || '').trim();
   if (!/^[\w.-]{1,64}$/.test(id) || id === 'local') throw new Error(`节点名称无效：${id || '(空)'}`);
@@ -22,6 +24,8 @@ async function attachRemoteNode({ peer, registry, transport = 'ws', pin = null, 
   const node = registry.addNode({ id, label: info.label || id, host, remote: true, info: { platform: info.platform, version: info.version, transport } });
   node.peer = peer;
 
+  if (routing?.target) serveRelay({ peer, target: routing.target });
+
   const route = (method, fn) => peer.on(method, params => { const proxy = sessions.get(params.sid); if (proxy) { if (params.state) Object.assign(proxy.state, params.state); fn(proxy, params); } });
   route('session.event', (proxy, { event, data }) => proxy.options.emit(event, data));
   route('session.idle', proxy => proxy.options.onIdle());
@@ -31,11 +35,12 @@ async function attachRemoteNode({ peer, registry, transport = 'ws', pin = null, 
   route('session.closed', proxy => proxy.closed());
 
   for (const engine of info.engines || []) {
+    // Engines with a routing hook use the hub's accounts through the relay; others keep the node's own login.
+    const routeEnv = routing?.target && routing.engines?.[engine.id];
     registry.register({
       id: engine.id,
       meta: { ...engine.meta },
-      // Account routing and capture rely on the hub's local proxy; remote runs use the node's own login.
-      capabilities: { ...engine.capabilities, accounts: false, capture: false },
+      capabilities: { ...engine.capabilities, accounts: !!routeEnv, capture: !!routeEnv },
       detect: () => engine.cli,
       validModel: model => MODEL.test(model),
       owns: sessionId => peer.call('engine.owns', { engine: engine.id, id: sessionId }).catch(() => false),
@@ -50,7 +55,10 @@ async function attachRemoteNode({ peer, registry, transport = 'ws', pin = null, 
         };
         sessions.set(sid, proxy);
         let opened;
-        try { opened = await peer.call('session.open', { sid, engine: engine.id, sessionId: options.sessionId, resume: options.resume, cwd: options.cwd, model: options.model }, { timeout: 60000 }); }
+        try {
+          const env = routeEnv ? await routeEnv(options) : null;
+          opened = await peer.call('session.open', { sid, engine: engine.id, sessionId: options.sessionId, resume: options.resume, cwd: options.cwd, model: options.model, ...(env?.ANTHROPIC_BASE_URL ? { routeEnv: env } : {}) }, { timeout: 60000 });
+        }
         catch (e) { sessions.delete(sid); throw e; }
         const send = (method, params = {}) => peer.call(method, { sid, ...params }).catch(e => { if (!done) options.emit('warning', { warning: `${host.label}：${e.message}` }); });
         return {

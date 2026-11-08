@@ -33,7 +33,7 @@ const { createCodexSessions } = require('./engines/codex/sessions');
 const { createRegistry } = require('./core/registry');
 const { createSessionManager } = require('./core/session-manager');
 const { createLocalHost } = require('./hosts/local');
-const { createClaudeEngine } = require('./engines/claude');
+const { createClaudeEngine, accountRouteEnv } = require('./engines/claude');
 const { createCodexEngine } = require('./engines/codex');
 const { createUpstreams } = require('./core/upstreams');
 const { createCodexProxy, codexProviderConfig, extractResponses, isCodexPath } = require('./engines/codex/proxy');
@@ -2365,7 +2365,11 @@ server.on('error', e => {
   process.exit(1); // 干净退出，不抛未捕获堆栈
 });
 // Remote nodes dial in over WebSocket on the panel port, or are launched over SSH.
-const nodeHub = require('./node/hub').createNodeHub({ registry, token: auth?.token, dir: DATA_DIR });
+// Claude on remote nodes goes through this panel's proxy accounts, relayed over the node link.
+const nodeHub = require('./node/hub').createNodeHub({ registry, token: auth?.token, dir: DATA_DIR, routing: {
+  target: `http://127.0.0.1:${PROXY_PORT}`,
+  engines: { claude: async options => { const env = await accountRouteEnv(accountRouter, options); return env.ANTHROPIC_BASE_URL ? env : null; } },
+} });
 server.on('upgrade', (req, socket, head) => { if (!nodeHub.upgrade(req, socket, head)) socket.destroy(); });
 if (!HISTORY_WORKER) server.listen(PORT, BIND_HOST, () => {
   console.log(`my-agents 已启动: http://localhost:${PORT}`);

@@ -159,3 +159,61 @@ test('the login profile cannot read the protocol stream', t => {
   const output = execFileSync('/bin/sh', ['-c', remoteCommand('read -r line; echo "got: $line"')], { input: '{"hello":1}\n', env: { SHELL: shell, HOME: dir, ZDOTDIR: dir, ENV: path.join(dir, '.profile'), PATH: process.env.PATH }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
   assert.equal(output.trim(), 'got: {"hello":1}');
 });
+
+test('routed engines reach the hub proxy through the node link; others keep their own login', async t => {
+  // Stands in for the panel proxy: checks the forwarded request and streams an answer.
+  const seen = [];
+  const proxy = http.createServer((req, res) => {
+    let body = ''; req.on('data', c => body += c);
+    req.on('end', () => {
+      seen.push({ method: req.method, url: req.url, auth: req.headers.authorization, body });
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.write('event: a\n\n'); setTimeout(() => res.end('event: b\n\n'), 20);
+    });
+  });
+  await new Promise(r => proxy.listen(0, '127.0.0.1', r));
+  t.after(() => proxy.close());
+  const [hubSide, nodeSide] = pairTransports();
+  const routed = echoEngine(), plain = echoEngine(); plain.id = 'plain';
+  serveNode({ peer: createPeer(nodeSide), host: createLocalHost(), engines: [routed, plain], id: 'devbox' });
+  const registry = createRegistry({ defaultEngine: 'echo' });
+  registry.addNode({ id: 'local', host: createLocalHost() });
+  const asked = [];
+  const routing = { target: `http://127.0.0.1:${proxy.address().port}`, engines: { echo: async options => { asked.push(options.accountId); return { ANTHROPIC_BASE_URL: 'http://127.0.0.1:4322', ANTHROPIC_AUTH_TOKEN: 'local-token' }; } } };
+  await attachRemoteNode({ peer: createPeer(hubSide), registry, routing, log: { warn() {} } });
+  t.after(() => hubSide.close());
+  assert.equal(registry.adapter('echo', 'devbox').capabilities.accounts, true);
+  assert.equal(registry.adapter('plain', 'devbox').capabilities.accounts, false);
+
+  const noop = () => {};
+  const events = { emit: noop, onIdle: noop, onClosed: noop, cwd: os.tmpdir() };
+  await registry.adapter('echo', 'devbox').open({ ...events, sessionId: 's1', accountId: 'acct-2' });
+  await registry.adapter('plain', 'devbox').open({ ...events, sessionId: 's2' });
+  assert.deepEqual(asked, ['acct-2']);
+  assert.equal(plain.opened[0].routeEnv, null, 'engines without a hook are not routed');
+  const env = routed.opened[0].routeEnv;
+  assert.equal(env.ANTHROPIC_AUTH_TOKEN, 'local-token');
+  assert.match(env.ANTHROPIC_BASE_URL, /^http:\/\/127\.0\.0\.1:\d+$/);
+  assert.notEqual(env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:4322', 'the base URL points at the node-local relay');
+
+  const res = await fetch(env.ANTHROPIC_BASE_URL + '/v1/messages?beta=true', { method: 'POST', headers: { authorization: 'Bearer local-token', 'content-type': 'application/json' }, body: '{"model":"m"}' });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'text/event-stream');
+  assert.equal(await res.text(), 'event: a\n\nevent: b\n\n');
+  assert.deepEqual(seen, [{ method: 'POST', url: '/v1/messages?beta=true', auth: 'Bearer local-token', body: '{"model":"m"}' }]);
+
+  proxy.close();
+  await new Promise(r => setTimeout(r, 20));
+  const down = await fetch(env.ANTHROPIC_BASE_URL + '/v1/messages', { method: 'POST', body: '{}' });
+  assert.equal(down.status, 502, 'an unreachable panel proxy becomes an API error the CLI can show');
+  assert.match((await down.json()).error.message, /面板代理不可用/);
+});
+
+test('the relay refuses paths that could leave the panel proxy', async () => {
+  const { serveRelay } = require('../node/relay');
+  const [a, b] = pairTransports();
+  serveRelay({ peer: createPeer(a), target: 'http://127.0.0.1:9' });
+  const node = createPeer(b);
+  await assert.rejects(node.call('relay.request', { rid: 'x', method: 'GET', path: '//evil.example/x', headers: {}, body: '' }), /无效/);
+  await assert.rejects(node.call('relay.request', { rid: 'x', method: 'GET', path: 'http://evil.example/', headers: {}, body: '' }), /无效/);
+});
