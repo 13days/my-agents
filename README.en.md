@@ -409,7 +409,7 @@ The project, npm package and executable are named `my-agents`. The repository is
 
 ## Concurrent tasks and isolated workspaces
 
-New chats default to an isolated Git worktree, created from the selected project's current commit on the first message. Claude Code and Codex use the same mechanism; remote sessions create their worktree on the selected node. Reopening a session preserves its directory. Disable isolation in the new-chat checkbox or the Feishu gateway's default settings when needed.
+New chats default to an isolated Git worktree, created from the selected project's current commit on the first message. Claude Code and Codex use the same mechanism; remote sessions create their worktree on the selected node. Reopening a session preserves its directory. Disable isolation with the new-chat workspace toggle or the Feishu gateway's default settings when needed.
 
 Worktrees live under the application's data directory in `workspaces/`. Uncommitted changes, untracked files (including `.env`) and dependencies are not copied. Prepare dependencies in the task directory as needed. Non-Git folders use their original directory; Git repositories need an initial commit.
 

@@ -816,6 +816,17 @@ body[data-nav-collapsed="true"] .resource-engine-switch button { padding: 5px 1p
 .node-form { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; border-top: 1px solid var(--border); }
 .node-form .btn.primary { align-self: flex-start; }
 
-.chat-worktree { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin: 8px 0 0; }
-.chat-worktree input { width: 14px; height: 14px; accent-color: var(--accent); }
-.chat-worktree small { flex-basis: 100%; font-size: 11px; }
+/* Workspace mode belongs to the project, alongside the engine and settings. */
+.chat-settings-bar .chat-top-actions { margin-left: auto; }
+.chat-settings-bar { flex-wrap: wrap; }
+.chat-project-group { display: flex; align-items: center; flex: 1 1 280px; gap: 14px; min-width: 0; }
+#chat-workspace { display: flex; flex: none; align-items: center; }
+#chat-workspace:empty { display: none; }
+.chat-workspace-mode { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.chat-workspace-mode button { border: 0; border-radius: 5px; padding: 5px 9px; background: transparent; color: var(--muted); font: inherit; font-size: 11px; line-height: 18px; white-space: nowrap; cursor: pointer; transition: background .15s, color .15s; }
+.chat-workspace-mode button:hover { color: var(--text); background: var(--hover); }
+.chat-workspace-mode button[aria-pressed="true"] { background: var(--selected); color: var(--accent2); }
+.chat-workspace-mode button:focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; }
+.chat-workspace-badge { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; font-size: 11px; }
+.chat-workspace-badge svg { width: 14px; height: 14px; color: var(--accent2); }
+@media (max-width: 760px) { .chat-project-group { flex-basis: 100%; gap: 8px; } }

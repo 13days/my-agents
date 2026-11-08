@@ -2467,6 +2467,12 @@ async function openSessionChat(id) {
     if (d.liveReplay) streamChat(chatView, { reconnect: true });
   } catch (e) { toast(t('loadFail') + e.message, false); }
 }
+function chatWorkspaceControl(v, existing) {
+  if (existing) return v.worktree ? `<span class="chat-workspace-badge" title="${esc(v.worktree.branch + '\n' + v.cwd)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="6" cy="5" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="6" cy="19" r="2.5"/><path d="M6 7.5v9M18 8.5c0 6-12 1-12 8"/></svg>${esc(rt('独立工作区', 'Isolated workspace'))}</span>` : '';
+  const isolated = v.worktreeEnabled !== false;
+  const hint = rt('独立工作区：从当前提交创建分支，不带入未提交改动。原目录：直接在项目中工作。普通文件夹始终使用原目录。', 'Isolated workspace: create a branch from the current commit without uncommitted changes. Original folder: work directly in the project. Non-Git folders always use the original folder.');
+  return `<div class="chat-workspace-mode" role="group" aria-label="${esc(rt('工作目录', 'Working directory'))}" title="${esc(hint)}"><button type="button" data-workspace="isolated" aria-pressed="${isolated}">${esc(rt('独立工作区', 'Isolated'))}</button><button type="button" data-workspace="shared" aria-pressed="${!isolated}">${esc(rt('原目录', 'Original folder'))}</button></div>`;
+}
 function renderChat() {
   chatScrollObserver?.disconnect();
   chatModel = modelPreference(chatView.engine);
@@ -2474,16 +2480,16 @@ function renderChat() {
   const engine = existing || ENGINES.length < 2
     ? `<span class="chat-engine-badge ${engineClass(v.engine)}" style="${esc(engineStyle(v.engine))}">${esc(engineName)}</span>`
     : `<div class="chat-engine" role="group" aria-label="${esc(rt('引擎', 'Engine', 'エンジン'))}">${ENGINES.map(item => `<button type="button" data-engine="${esc(item.id)}" aria-pressed="${v.engine === item.id}">${esc(item.label)}</button>`).join('')}</div>`;
-  const project =`<div class="chat-field chat-project"><span>${esc(rt('项目', 'Project'))}</span><div class="chat-project-current" title="${esc(v.cwd)}">${icon('folder')}<span>${esc(v.cwd.split('/').filter(Boolean).pop() || v.cwd || rt('未知', 'Unknown'))}</span><small>${esc(v.cwd.replace(/^\/Users\/[^/]+/, '~'))}</small></div></div>`;
+  const project =`<div class="chat-field chat-project"><span>${esc(rt('项目', 'Project'))}</span><div class="chat-project-current" title="${esc(v.cwd)}">${icon('folder')}<span>${esc((v.worktree?.repository || v.cwd).split('/').filter(Boolean).pop() || v.cwd || rt('未知', 'Unknown'))}</span><small>${esc(v.cwd.replace(/^\/Users\/[^/]+/, '~'))}</small></div></div>`;
   const actions = existing
     ? `<button class="btn" id="chat-detail">${esc(rt('详情', 'Details'))}</button><button class="btn" id="chat-replay">${esc(replayLabel(v.engine))}</button>`
     : '';
   $('#render').innerHTML = `<section class="chat-shell">
-    <header class="chat-settings"><div class="chat-settings-bar">${project}${engine}<span class="chat-live" id="chat-live" hidden></span><div class="chat-top-actions">${actions}<button type="button" class="btn" id="chat-settings-toggle" aria-controls="chat-settings-panel">${esc(rt('设置', 'Settings'))} ⌄</button></div></div>
+    <header class="chat-settings"><div class="chat-settings-bar"><div class="chat-project-group">${project}<div id="chat-workspace">${chatWorkspaceControl(v, existing)}</div></div>${engine}<span class="chat-live" id="chat-live" hidden></span><div class="chat-top-actions">${actions}<button type="button" class="btn" id="chat-settings-toggle" aria-controls="chat-settings-panel">${esc(rt('设置', 'Settings'))} ⌄</button></div></div>
     <div class="chat-top" id="chat-settings-panel" hidden>
       <label class="chat-field chat-model">${esc(rt('模型', 'Model'))}<input id="chat-model" type="text" placeholder="${esc(rt('默认', 'Default'))}" value="${esc(chatModel)}"></label>
       <div class="chat-field chat-route"${can(v.engine, 'accounts') ? '' : ' hidden'}><span>${esc(rt('代理账号', 'Proxy account'))}</span><select id="chat-route" aria-label="${esc(rt('代理账号', 'Proxy account'))}" title="${esc(rt('只影响这个会话；其他会话可以走不同账号', 'Only affects this session; other sessions can use other accounts'))}">${routeOptions(existing ? ((routeInfo && routeInfo.routes[v.sessionId.toLowerCase()]) || '') : (v.accountId || ''))}</select></div>
-    </div>${!existing ? `<label class="chat-worktree"><input type="checkbox" id="chat-worktree" ${v.worktreeEnabled !== false ? 'checked' : ''}>${esc(rt('独立工作区（Git worktree）', 'Isolated workspace (Git worktree)'))}<small>${esc(rt('从当前提交新建分支；原目录未提交的改动不带入。普通文件夹使用原目录。', 'Creates a branch from the current commit. Uncommitted changes stay in the original folder. Non-Git folders use the original directory.'))}</small></label>` : v.worktree ? `<p class="chat-worktree" title="${esc(v.cwd)}">${esc(rt('独立工作区', 'Isolated workspace'))} · <code>${esc(v.worktree.branch)}</code></p>` : ''}</header>
+    </div></header>
     <div class="chat-conversation"><div class="chat-messages" id="chat-messages"></div><div class="chat-scroll-controls" hidden><button type="button" id="chat-scroll-top" title="${esc(rt('会话顶部', 'Top of conversation'))}" aria-label="${esc(rt('会话顶部', 'Top of conversation'))}">↑</button><button type="button" id="chat-scroll-bottom" title="${esc(rt('会话底部', 'Bottom of conversation'))}" aria-label="${esc(rt('会话底部', 'Bottom of conversation'))}">↓</button></div></div>
     <form class="chat-compose" id="chat-form"><div id="chat-attachments" class="chat-attachments" hidden></div><textarea autocomplete="off" autocorrect="off" spellcheck="false" id="chat-prompt" rows="3" placeholder="${esc(existing ? rt('在这个会话里继续… 可粘贴图片', 'Continue this session… Paste images here') : rt(`问 ${engineName} 关于这个项目的问题… 可粘贴图片`, `Ask ${engineName} about this project… Paste images here`))}"></textarea>
       <div class="chat-compose-footer"><button type="button" class="btn chat-attach" id="chat-attach"${can(v.engine, 'images') ? '' : ' hidden'}>${esc(rt('＋ 图片', '+ Image'))}</button><input type="file" id="chat-image-file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden><span id="chat-status">${esc(rt('回车发送 · Shift + 回车换行', 'Enter to send · Shift + Enter for a new line'))}</span><button class="btn" type="submit" data-mode="queue" id="chat-queue" title="${esc(rt('等当前轮完成后处理', 'Process after the current turn'))}" hidden>${esc(rt('排队', 'Queue'))}</button><button class="btn primary" type="submit" id="chat-send">${esc(rt('发送', 'Send'))}</button><button class="btn" type="button" id="chat-stop" hidden>${esc(rt('停止', 'Stop'))}</button></div>
@@ -2500,7 +2506,10 @@ function renderChat() {
     v.engine = button.dataset.engine; localStorage.setItem('panel-chat-engine', v.engine);
     renderChat(); $('#chat-prompt').value = draft;
   });
-  if ($('#chat-worktree')) $('#chat-worktree').onchange = e => { v.worktreeEnabled = e.target.checked; };
+  document.querySelectorAll('[data-workspace]').forEach(button => button.onclick = () => {
+    v.worktreeEnabled = button.dataset.workspace === 'isolated';
+    document.querySelectorAll('[data-workspace]').forEach(option => option.setAttribute('aria-pressed', String((option.dataset.workspace === 'isolated') === v.worktreeEnabled)));
+  });
   const box = $('#chat-messages');
   if (!v.messages.length) box.innerHTML = `<div class="chat-welcome"><span class="empty-icon">${icon('sessions')}</span><h3>${esc(existing ? rt('这个会话里还没有可显示的对话', 'No messages to show in this session') : rt(`和 ${engineName} 开始一段新会话`, `Start a new ${engineName} session`))}</h3><p>${esc(engineCopy(v.engine, 'welcome') || rt(`由本机 ${engineName} CLI 执行；发出后会出现在左侧会话列表，之后可随时回来接续。`, `Runs on the local ${engineName} CLI. It appears in the session list so you can come back and continue.`, `ローカルの ${engineName} CLI で実行されます。送信後はセッション一覧に表示され、いつでも続きから再開できます。`))}</p></div>`;
   else {
@@ -2722,9 +2731,9 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
       if (payload.worktree) v.worktree = payload.worktree;
       if (shown && payload.cwd) {
         const project = $('.chat-project-current');
-        if (project) { project.title = v.cwd; project.querySelector('span').textContent = v.worktree ? v.worktree.branch : v.cwd.split('/').pop(); project.querySelector('small').textContent = v.cwd; }
-        const option = $('.chat-worktree');
-        if (option) option.textContent = v.worktree ? rt('独立工作区', 'Isolated workspace') + ' · ' + v.worktree.branch : rt('使用原项目目录', 'Using the original project directory');
+        if (project) { project.title = v.cwd; project.querySelector('span').textContent = (v.worktree?.repository || v.cwd).split('/').pop(); project.querySelector('small').textContent = v.cwd; }
+        const workspace = $('#chat-workspace');
+        if (workspace) workspace.innerHTML = chatWorkspaceControl(v, true);
       }
       v.liveId = payload.sessionId; v.lastReplayJobId = payload.jobId; resolveReady(); refreshRoutes();
       if (!shown) return;
