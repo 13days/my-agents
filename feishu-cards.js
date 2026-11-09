@@ -131,7 +131,7 @@ function modelPicker({ engine, sessionId, model = '', models = [], accountName =
   if (accountName) elements.push(muted(`代理账号：${escape(accountName)}`));
   if (forcedModel) elements.push(muted(`账号固定映射到 ${escape(forcedModel)}，会覆盖这里的模型选择。`));
   elements.push({ tag: 'select_static', placeholder: plain('选择模型'), width: 'fill', initial_option: model || '__default__', options: [
-    { text: plain('默认（跟随网关 / CLI 配置）'), value: '__default__' },
+    { text: plain(engine === 'codex' ? '默认（账号实时推荐）' : '默认（跟随网关 / CLI 配置）'), value: '__default__' },
     ...Array.from(options, ([id, name]) => ({ text: plain(clip(name, 48)), value: id })),
   ], behaviors: [{ type: 'callback', value: action(context, { action: 'set_model', id: sessionId, engine }) }] });
   elements.push(muted('下一轮生效，当前任务不受影响。/model 模型ID 可手动指定；/model default 恢复默认。模型选择按会话保存。'));

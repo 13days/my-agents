@@ -301,6 +301,8 @@ Add multiple env profiles under **Account routing**. Claude Code always talks to
 
 If a panel cannot reach the provider, Codex requests can use another online panel as network egress while keeping the shared account. Egress is independent of the machine that first logged in, and failed direct connections are temporarily skipped. **Check connection** reads the model list to verify credentials and connectivity without generating a response.
 
+The panel selects the default Codex model from the account’s live catalog and passes it explicitly to the CLI, avoiding stale machine-specific defaults. Explicit model choices are preserved.
+
 **Local bridge exception**: loopback providers, including an external TRAE bridge, still need the bridge service itself. Copying a URL and token does not deploy that service. The UI marks this dependency and disables an unavailable bridge while replicated accounts remain usable. Back up the cluster key together with the encrypted vault. Runtime-only nodes use their panel pool without separate logins; full cluster panels keep persistent replicas.
 
 **Storage and opting out**: accounts are stored in `CLAUDE_DIR/panel-proxy.json` (mode `600`, plaintext on this machine; keep it safe). Upstream tokens never appear in API responses or captured request headers. The pre-setup backup is `settings.json.proxy-backup-*` in the same directory; to leave local routing, merge the original env from it back into `settings.json` and restart Claude. **Keep the panel running while using account routing**; Claude won't fall back to direct connections when it's closed.

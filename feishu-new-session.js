@@ -10,7 +10,7 @@ function newSessionForm({ draft, machines, projects, engines, models = [], error
     markdown('自定义目录（仅选择「填写自定义目录」时使用）'),
     {tag:'input',name:'cwd',input_type:'text',default_value:draft.cwd||'',placeholder:plain('所选执行机器上的绝对路径或 ~/ 路径'),max_length:1000},
     ...select('engine','执行引擎',draft.engine,engines.map(e=>[e.id,e.label])),
-    ...select('model','模型',draft.model||'__default__',[['__default__','默认（CLI / 代理配置）'],...models.filter(m=>m.id!=='__default__').slice(0,limit).map(m=>[m.id,m.name||m.id])]),
+    ...select('model','模型',draft.model||'__default__',[['__default__',draft.engine === 'codex' ? '默认（账号实时推荐）' : '默认（CLI / 代理配置）'],...models.filter(m=>m.id!=='__default__').slice(0,limit).map(m=>[m.id,m.name||m.id])]),
     markdown('其他模型 ID（选填；填写后优先使用）'),
     {tag:'input',name:'modelId',input_type:'text',default_value:draft.modelId||'',max_length:100},
     ...select('worktree','工作区',draft.worktree===false?'original':'isolated',[['isolated','独立 Git worktree'],['original','使用项目原目录']]),

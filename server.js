@@ -1787,7 +1787,7 @@ async function checkCodexPool(accountId) {
       const chunks = []; let size = 0;
       response.on('data', chunk => { size += chunk.length; if (size > 4 * 1024 * 1024) request.destroy(new Error('模型列表过大')); else chunks.push(chunk); });
       response.on('error', () => reject(new Error('账号连接检查中断')));
-      response.on('end', () => { clearTimeout(timer); if (response.statusCode !== 200) return reject(new Error('账号检查失败：HTTP ' + response.statusCode)); let count = 0; try { const body = JSON.parse(Buffer.concat(chunks)); count = (body.models || body.data || []).length; } catch {} resolve({ ok: true, status: 200, models: count }); });
+      response.on('end', () => { clearTimeout(timer); if (response.statusCode !== 200) return reject(new Error('账号检查失败：HTTP ' + response.statusCode)); let body; try { body = JSON.parse(Buffer.concat(chunks)); } catch { return reject(new Error('账号模型列表响应无效')); } resolve({ ok: true, status: 200, models: (body.models || body.data || []).length, catalog: body }); });
     });
     const timer = setTimeout(() => request.destroy(new Error('账号连接检查超时')), 45000); timer.unref?.();
     request.on('error', () => { clearTimeout(timer); reject(new Error('账号连接检查失败，请检查集群出网状态')); });
@@ -1797,7 +1797,12 @@ function combinedAccountSessions() {
   const claude = accountRouter.sessions(), codex = accountPool.codexStatus();
   return { ...claude, codexRouting: { mode: codex.mode, selected: codex.selected }, accounts: [...claude.accounts.map(a => ({ ...a, engine: 'claude' })), ...codex.accounts.map(a => ({ ...a, engine: 'codex' }))], routes: { ...claude.routes, ...codex.routes }, items: [...claude.items, ...codexProxy.sessions()] };
 }
-function codexPoolModels() { try { const cache = JSON.parse(fs.readFileSync(path.join(CODEX_HOME, 'models_cache.json'), 'utf8')); return { models: (cache.models || []).map(item => ({ id: item.slug || item.id, name: item.display_name || item.slug || item.id })).filter(item => typeof item.id === 'string') }; } catch { return { models: [] }; } }
+const codexModelCatalog = require('./core/model-catalog').createModelCatalog({ load: async accountId => (await checkCodexPool(accountId)).catalog });
+async function codexPoolModels({ accountId = '', sessionId = '', refresh = false } = {}) {
+  const state = accountPool.codexStatus();
+  const selected = accountId || state.routes[sessionId] || accountPool.codexRoute(codexAuthMode() === 'apikey' ? 'api-key' : 'chatgpt', sessionId)?.accountId || '';
+  return codexModelCatalog.get(selected, refresh);
+}
 function codexStatus() {
   const cli = resolveCodex();
   return { cli: cli.path, version: cli.version, candidates: cli.candidates, home: CODEX_HOME, authMode: codexAuthMode(), capture: codexCaptureEnabled(), proxyPort: Number(PROXY_PORT), profile: codexProfile.status() };
@@ -1842,6 +1847,7 @@ const manager = createSessionManager({
   registry,
   ensureNode: async id => { if (registry.node(id)) return; const peer = clusterNetwork?.peer(id); if (peer) await attachClusterRuntime(id, peer); if (!registry.node(id)) await nodeHub.ensure(id); },
   resolveLocation: (input, owner) => workspaceStore.resolve(input, owner),
+  resolveModel: async input => input.engine === 'codex' ? (await codexPoolModels(input)).defaultModel : '',
   history: {
     async ownerOf(id) {
       const meta = sessionStore.read()[id] || conversations.get(id) || {};
@@ -1897,7 +1903,7 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
     engine: id => sessionEngine(id),
     engines: () => registry.list().map(engine => ({ id: engine.id, ...engine.meta, capabilities: engine.capabilities })),
     engineInfo: (engine, node = 'local') => registry.adapter(engine, node)?.detect?.() || {},
-    models: ({ engine, sessionId, refresh }) => engine === 'codex' ? Promise.resolve(codexPoolModels()) : registry.get(engine)?.capabilities?.accounts ? accountRouter.models({ sessionId, refresh }) : Promise.resolve({ models: [] }),
+    models: ({ engine, sessionId, refresh }) => engine === 'codex' ? codexPoolModels({ sessionId, refresh }) : registry.get(engine)?.capabilities?.accounts ? accountRouter.models({ sessionId, refresh }) : Promise.resolve({ models: [] }),
     validModel: (engine, model, node = 'local') => !!(registry.adapter(engine, node) || registry.get(engine))?.validModel(model),
     currentModel: id => { const run = manager.get(id); return run && !run.job.closed ? run.job.meta.model || '' : ''; },
     nodes: () => executionMachines().filter(item => item.id !== machineId()).map(item => ({ ...item, connected: item.online, home: registry.node(item.id)?.host.homeDir() })),
@@ -2130,7 +2136,7 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'GET' && parts.length === 2) { await accountPool?.refresh(); return sendJSON(res, 200, { ...accountRouter.status(), pool: accountPool?.status() || [] }); }
       if (req.method === 'GET' && parts[2] === 'sessions') return sendJSON(res, 200, combinedAccountSessions());
       if (req.method === 'GET' && parts[2] === 'models' && parts.length === 3) {
-        try { if (url.searchParams.get('engine') === 'codex') return sendJSON(res, 200, codexPoolModels()); return sendJSON(res, 200, await accountRouter.models({ accountId: url.searchParams.get('accountId') || '', sessionId: url.searchParams.get('sessionId') || '', refresh: url.searchParams.get('refresh') === '1' })); }
+        try { if (url.searchParams.get('engine') === 'codex') return sendJSON(res, 200, await codexPoolModels({ accountId: url.searchParams.get('accountId') || '', sessionId: url.searchParams.get('sessionId') || '', refresh: url.searchParams.get('refresh') === '1' })); return sendJSON(res, 200, await accountRouter.models({ accountId: url.searchParams.get('accountId') || '', sessionId: url.searchParams.get('sessionId') || '', refresh: url.searchParams.get('refresh') === '1' })); }
         catch (error) { return sendJSON(res, 400, { error: error.message }); }
       }
       if (!String(req.headers['content-type'] || '').startsWith('application/json')) return sendJSON(res, 415, { error: '需要 application/json' });
@@ -2153,7 +2159,7 @@ const server = http.createServer(async (req, res) => {
       let body; try { body = JSON.parse(await readBody(req) || '{}'); } catch { return sendJSON(res, 400, { error: 'JSON 格式无效' }); }
       if (parts[2] === 'accounts') {
         try {
-          if (req.method === 'POST' && parts[3] === 'check') return sendJSON(res, 200, await checkCodexPool(body.accountId || ''));
+          if (req.method === 'POST' && parts[3] === 'check') { const result = await checkCodexPool(body.accountId || ''); return sendJSON(res, 200, { ok: result.ok, status: result.status, models: result.models }); }
           if (req.method === 'POST' && parts.length === 3) accountPool.importCodex(body.auth || readCodexAuth(), body.name);
           else if (req.method === 'PUT' && parts[3] === 'routing') accountPool.setRouting(body);
           else if (req.method === 'PUT' && parts[3]) accountPool.configureCodex(decodeURIComponent(parts[3]), body);

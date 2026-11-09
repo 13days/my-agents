@@ -11,7 +11,7 @@ const httpError = (status, message) => Object.assign(new Error(message), { statu
 //
 // Every run publishes the same event vocabulary (see core/events.js) into a
 // replayable job so a reconnecting client resumes where it left off.
-function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, retentionMs = 5 * 60 * 1000, readyTimeoutMs = 90000, ensureNode = async () => {}, resolveLocation = null, log = console }) {
+function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, retentionMs = 5 * 60 * 1000, readyTimeoutMs = 90000, ensureNode = async () => {}, resolveLocation = null, resolveModel = null, log = console }) {
   const runs = new Map();
   const aliases = new Map();
   const resolveId = id => aliases.get(id) || id;
@@ -64,7 +64,8 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
       if (worktree) cwd = worktree.cwd;
     }
     const sessionId = engine.capabilities.sessionId === 'discovered' ? (known ? requested : '') : (location?.handoff ? crypto.randomUUID() : requested || crypto.randomUUID());
-    const model = typeof input.model === 'string' && input.model.trim() && engine.validModel(input.model.trim()) ? input.model.trim() : '';
+    let model = typeof input.model === 'string' && input.model.trim() && engine.validModel(input.model.trim()) ? input.model.trim() : '';
+    if (!model && resolveModel) model = await resolveModel({ engine: engineId, sessionId: requested, accountId: input.accountId || '', node: nodeId }) || '';
     const baseHistory = known || location?.handoff ? await history.messages(requested) : null;
     if (location?.handoff) {
       const checkpoint = (baseHistory?.messages || []).slice(-12).map(item => `${item.role}: ${String(item.text || '').slice(0,1500)}`).join('\n').slice(-7500);

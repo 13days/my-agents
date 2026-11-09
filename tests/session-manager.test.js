@@ -161,3 +161,15 @@ test('a machine handoff creates a fresh native session and carries checkpoints w
   await settle();assert.equal(result.run.job.events.filter(e=>e.event==='input').length,1);
   manager.shutdown();
 });
+
+test('model resolution pins a supported default at launch while preserving an explicit user model', async () => {
+  const opened = [], registry = createRegistry({ defaultEngine: 'discovered' }); registry.addNode({ id: 'local', host: createLocalHost() }); registry.register(fakeEngine('discovered', 'discovered', opened));
+  let resolutions = 0;
+  const manager = createSessionManager({ registry, resolveModel: async () => { resolutions++; return 'account-recommended'; }, history: { ownerOf: () => null, messages: () => ({ messages: [] }), touch() {} } });
+  await manager.start({ cwd: os.tmpdir(), prompt: 'first', engine: 'discovered' });
+  assert.equal(opened[0].model, 'account-recommended');
+  await new Promise(resolve => setImmediate(resolve));
+  await manager.start({ cwd: os.tmpdir(), prompt: 'second', engine: 'discovered', model: 'chosen-explicitly' });
+  assert.equal(opened[1].model, 'chosen-explicitly'); assert.equal(resolutions, 1);
+  manager.closeAll?.();
+});
