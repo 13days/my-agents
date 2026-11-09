@@ -7,6 +7,7 @@ const { resolveDataDir } = require('../core/data-dir');
 const SERVICE = 'my-agents-panel.service';
 const value = (argv, name, fallback = '') => { const i = argv.indexOf(name); return i < 0 ? fallback : argv[i + 1]; };
 const systemdQuote = input => `"${String(input).replace(/%/g, '%%').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+const systemdPath = input => String(input).replace(/%/g, '%%').replace(/\\/g, '\\\\').replace(/ /g, '\\x20');
 
 function linuxUnit({ serverPath, nodePath, workDir, dataDir, claudeDir, bind, port, proxyPort, env = process.env }) {
   const values = {
@@ -20,7 +21,7 @@ function linuxUnit({ serverPath, nodePath, workDir, dataDir, claudeDir, bind, po
     PATH: env.PATH || '/usr/local/bin:/usr/bin:/bin',
   };
   for (const key of ['CLAUDE_CLI', 'CODEX_CLI', 'CODEX_HOME', 'AGENTS_HOME']) if (env[key]) values[key] = env[key];
-  return `[Unit]\nDescription=my-agents panel cluster node\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nWorkingDirectory=${systemdQuote(workDir)}\nExecStart=${systemdQuote(nodePath)} ${systemdQuote(serverPath)}\nRestart=always\nRestartSec=5\nTimeoutStopSec=15\nKillSignal=SIGTERM\nUMask=0077\n${Object.entries(values).map(([key, item]) => `Environment=${systemdQuote(`${key}=${item}`)}`).join('\n')}\n\n[Install]\nWantedBy=default.target\n`;
+  return `[Unit]\nDescription=my-agents panel cluster node\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nWorkingDirectory=${systemdPath(workDir)}\nExecStart=${systemdQuote(nodePath)} ${systemdQuote(serverPath)}\nRestart=always\nRestartSec=5\nTimeoutStopSec=15\nKillSignal=SIGTERM\nUMask=0077\n${Object.entries(values).map(([key, item]) => `Environment=${systemdQuote(`${key}=${item}`)}`).join('\n')}\n\n[Install]\nWantedBy=default.target\n`;
 }
 
 function runCommand(command, args, exec = spawnSync) {

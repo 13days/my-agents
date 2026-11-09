@@ -20,6 +20,6 @@ test('Linux service installer writes a persistent cluster panel unit and starts 
 
 test('systemd unit escapes paths and percent specifiers', () => {
   const unit = linuxUnit({ serverPath: '/tmp/A B/100%/server.js', nodePath: '/usr/bin/node', workDir: '/tmp/A B', dataDir: '/tmp/data', claudeDir: '/tmp/claude', bind: '127.0.0.1', port: '4321', proxyPort: '4322', env: { PATH: '/usr/bin' } });
-  assert.match(unit, /WorkingDirectory="\/tmp\/A B"/);
+  assert.match(unit, /WorkingDirectory=\/tmp\/A\\x20B/);
   assert.match(unit, /100%%\/server\.js/);
 });
