@@ -17,7 +17,8 @@ function card(title, elements, { subtitle = 'my-agents · 工作空间', templat
 }
 // Cards name engines through the catalog the gateway passes in (`context.engines`).
 const catalogOf = context => context.engines || engineCatalog();
-const action = (context, value) => ({ ...value, owner: context.owner, key: context.key });
+const sessionReference = item => ({ id: item.id, machineId: item.machineId || (item.node !== 'local' ? item.node : undefined), engine: item.engine, cwd: item.cwd || item.project, workspaceId: item.workspaceId });
+const action = (context, value) => ({ ...value, ...(value.id && value.id === context.session?.id && (context.session.machineId || context.session.cwd) ? { session: context.session } : {}), owner: context.owner, key: context.key });
 function row(title, detail, operation) {
   return { tag: 'column_set', flex_mode: 'stretch', horizontal_spacing: '12px', columns: [
     { tag: 'column', width: 'weighted', weight: 1, elements: [markdown(`**${title}**`), muted(detail)] },
@@ -36,15 +37,16 @@ function sessionList({ rows, total, page, query, selected, ...context }) {
   const render = (previewSize, titleSize, previewCount) => {
     const elements = [muted(`${context.location ? context.location + ' · ' : ''}共 ${total} 个会话 · 第 ${page + 1} / ${pages} 页${query ? ' · 筛选：' + escape(clip(query, 50)) : ''}`)];
     rows.forEach((item, index) => {
+      const rowContext = { ...context, session: { ...sessionReference(item), cwd: undefined } };
       const number = page * SESSION_PAGE_SIZE + index + 1, current = item.id === selected;
       const title = previewText(item.title) || (item.title ? '图片会话' : '未命名会话');
       const turns = Number.isInteger(item.turns) ? `${item.turns} 轮` : '轮次未记录';
       const messages = previewCount ? (item.userMessages || []).slice(-previewCount) : [];
       const previews = messages.map(message => `**第 ${message.round} 轮 · ${sessionTime(message.timestamp, timeZone)}**\n${escape(clip(message.text, previewSize))}`);
       if (!previews.length) previews.push(!previewCount ? '点击下方按钮查看用户消息。' : item.previewUnavailable ? '暂时无法读取用户消息；远程历史可能尚未同步。' : '暂无已保存的用户消息。');
-      const contents = [markdown(previews.join('\n\n'), true)];
+      const contents = !previewCount && (item.userMessages || []).length ? [] : [markdown(previews.join('\n\n'), true)];
       if ((item.userMessages || []).length) contents.push(button('查看全部用户消息', action(context, { action: 'user_messages', id: item.id })));
-      const line = row('', `${escape(clip(item.machineId || item.node || '机器未记录',24))} · ${catalogOf(context).label(item.engine || 'claude')} · ${escape(clip(path.basename(item.worktree?.repository || item.project || ''), 24)) || '未指定项目'} · ${turns} · ${current ? '● 当前会话' : item.running ? '● 运行中' : '可接续'}\n创建 ${sessionTime(item.createdAt || item.first, timeZone)} · 最近 ${sessionTime(item.lastAt || item.last, timeZone)}`, button(current ? '继续' : '切换', action(context, { action: 'switch', id: item.id }), current ? 'primary' : 'default'));
+      const line = row('', `${escape(clip(item.machineId || item.node || '机器未记录',24))} · ${catalogOf(context).label(item.engine || 'claude')} · ${escape(clip(path.basename(item.worktree?.repository || item.project || ''), 24)) || '未指定项目'} · ${turns} · ${current ? '● 当前会话' : item.running ? '● 运行中' : '可接续'}\n创建 ${sessionTime(item.createdAt || item.first, timeZone)} · 最近 ${sessionTime(item.lastAt || item.last, timeZone)}`, button(current ? '继续' : '切换', action(rowContext, { action: 'switch', id: item.id }), current ? 'primary' : 'default'));
       line.columns[0].elements[0] = { tag: 'collapsible_panel', expanded: false, header: { title: plain(`${number}. ${clip(title, titleSize)}`), icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined' }, icon_position: 'left' }, elements: contents };
       delete line.flex_mode; delete line.horizontal_spacing; delete line.columns[1].vertical_align;
       elements.push(line);
@@ -66,6 +68,7 @@ function sessionList({ rows, total, page, query, selected, ...context }) {
   return output;
 }
 function sessionUserMessages({ item, data, listPage = 0, query = '', ...context }) {
+  context.session = sessionReference(item);
   const timeZone = context.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
   const elements = [markdown(`**${escape(clip(previewText(item.title) || '图片会话', 90))}**`), muted(`${catalogOf(context).label(item.engine || 'claude')} · ${data.turns === null ? '轮次未记录' : data.turns + ' 轮'} · 第 ${data.page + 1} / ${data.pages} 页`), muted(`创建 ${sessionTime(data.createdAt || item.first, timeZone)} · 最近 ${sessionTime(data.lastAt || item.last, timeZone)}`)];
   for (const message of data.messages) elements.push(markdown(`**第 ${message.round} 轮 · ${sessionTime(message.timestamp, timeZone)}**\n${escape(clip(message.text, 1000))}`));
@@ -141,6 +144,7 @@ function modelPicker({ engine, sessionId, model = '', models = [], accountName =
   return card('查看 / 切换模型', elements);
 }
 function currentSession({ binding, item, exists = false, running, model = '默认（CLI 配置）', requests = [], nodeLabel = '本机', ...context }) {
+  context.session = sessionReference(binding);
   const pending = !item && !exists, title = item?.title || '新会话', engines = catalogOf(context), engineId = item?.engine || binding.engine || 'claude', engine = engines.label(engineId);
   const projectName = path.posix.basename(binding.worktree?.repository || binding.cwd) || binding.cwd, project = escape(projectName), where = escape(nodeLabel);
   const elements = pending ? [markdown(`**当前项目：${project}**`), muted(`${context.location || '当前位置'} · ${engine} · ${where} · 项目确认后，直接发送问题开始对话`)] : [markdown(`**${escape(clip(title, 100))}**`), muted(`${context.location ? context.location + ' · ' : ''}${engine} · ${where} · ${project} · ${running ? '● 正在运行' : '已就绪，直接发消息继续'}`)];
@@ -156,6 +160,7 @@ function currentSession({ binding, item, exists = false, running, model = '默�
   return card(pending ? '新会话已就绪' : '当前会话', elements, { subtitle: `${engine} · ${nodeLabel} · ${projectName}`, template: requests.length ? 'orange' : 'grey' });
 }
 function task({ binding, title, view, elapsed, nodeLabel = '', model = '默认（CLI 配置）', ...context }) {
+  context.session = sessionReference(binding);
   const tools = [...view.tools.values()], requests = view.done ? [] : [...view.permissions.values()];
   const done = tools.filter(item => item.state === '已完成').length;
   const failed = view.phase === '失败' || view.phase === '连接已结束';

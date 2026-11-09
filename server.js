@@ -1843,19 +1843,31 @@ async function conversationHistory(id, sourceMachine) {
   return result || (saved ? { id, project: saved.project, engine: saved.engine, machineId: saved.machineId, messages: saved.messages || [], checkpoint: true } : null);
 }
 
+const resolveSessionReference = require('./core/session-reference').createSessionResolver({
+  metadata: id => ({ ...conversations.get(id), ...sessionStore.read()[id] }),
+  selfId: machineId,
+  nodes: () => registry.nodes().map(node => ({ id: node.id, engines: [...node.engines.keys()] })),
+  owns: (node, engine, id) => {
+    if (node === 'local') return registry.adapter(engine, node).owns(id);
+    const peer = clusterNetwork?.peer(node) || registry.node(node)?.peer;
+    if (!peer) throw new Error('执行机器未连接');
+    return peer.call('engine.owns', { engine, id }, { timeout: 3000 });
+  },
+  history: conversationHistory,
+  remember: ({ id, engine, machineId, node, project, worktree, workspaceId }) => {
+    const ownership = { engine, machineId, node, project, worktree, workspaceId };
+    sessionStore.update(id, ownership);
+    conversations.put(id, ownership);
+  },
+});
+
 const manager = createSessionManager({
   registry,
   ensureNode: async id => { if (registry.node(id)) return; const peer = clusterNetwork?.peer(id); if (peer) await attachClusterRuntime(id, peer); if (!registry.node(id)) await nodeHub.ensure(id); },
   resolveLocation: (input, owner) => workspaceStore.resolve(input, owner),
   resolveModel: async input => input.engine === 'codex' ? (await codexPoolModels(input)).defaultModel : '',
   history: {
-    async ownerOf(id) {
-      const meta = sessionStore.read()[id] || conversations.get(id) || {};
-      if (meta.engine && registry.has(meta.engine)) return { engine: meta.engine, machineId: meta.machineId, node: meta.node || 'local', project: meta.project, worktree: meta.worktree, workspaceId: meta.workspaceId };
-      // Unrecorded sessions (started in a terminal) can only be found on this machine.
-      for (const engine of registry.node('local').engines.values()) if (await engine.owns(id)) return { engine: engine.id, node: 'local' };
-      return null;
-    },
+    ownerOf: id => resolveSessionReference(id),
     messages: id => conversationHistory(id),
     record: (id,event,data) => conversations.record(id,event,data),
     touch(id, { engine, node, machineId: executionMachine, cwd, worktree, workspaceId, handoff, prompt }) {
@@ -1888,6 +1900,7 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
     resolveDirectory: (id, dir) => { const host = registry.node(!id || id === machineId() || id === 'local' ? 'local' : id)?.host; if (!host) throw new Error('执行机器未连接'); return host.resolveDir(dir); },
     validateExecution: ({ machineId: id, engine }) => { const adapter = registry.adapter(engine, id === machineId() ? 'local' : id); if (!adapter || !adapter.detect?.()?.path) throw new Error('所选机器未安装或未检测到该引擎，请安装 CLI 后重试'); },
     sessionExists: async binding => { const node = binding.machineId === machineId() ? 'local' : binding.machineId || binding.node || 'local'; try { return await registry.adapter(binding.engine, node)?.owns(binding.id); } catch { return false; } },
+    resolveSession: resolveSessionReference,
     sessions: listSessions,
     projects: knownProjects,
     nodeProjects: id => registry.node(id)?.info.projects || [],

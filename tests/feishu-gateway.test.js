@@ -1034,3 +1034,22 @@ test('Codex IM routes operate on the shared subscription pool and pin a manual c
   assert.equal(pins.at(-1)[1], 'sub-b'); assert.equal(pins.at(-1)[2], 'codex');
   await f.gateway.receive(f.msg('/route pin off')); assert.equal(pins.at(-1)[1], '');
 });
+
+test('an old remote card continues its own session after /new selects another executor', async t => {
+  const f = await fixture(t); await f.pair();
+  f.panel.machineId = () => 'sg';
+  const old = { id: '33333333-3333-4333-8333-333333333333', machineId: 'mac', engine: 'claude', cwd: '/mac/original' };
+  const lookups = [], reads = [];
+  f.panel.resolveSession = async (id, hint) => { lookups.push({ id, hint }); return id === old.id ? { ...old, project: old.cwd } : null; };
+  f.panel.history = async (id, machineId) => { reads.push({ id, machineId }); return [{ role: 'assistant', text: 'Original saved response' }]; };
+  await f.gateway.receive(f.msg('/new'));
+  const active = JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json'))).bindings[contextKey(f.msg(''))];
+  const click = action => f.gateway.action({ messageId: 'old_evicted_card', chatId: 'oc_private', chatType: 'p2p', operator: { openId: 'ou_owner' }, action: { value: { owner: 'ou_owner', key: contextKey(f.msg('')), action, id: old.id } } });
+  // No new payload hints: this card predates the fix and has left the cache.
+  await click('history');
+  assert.deepEqual(reads.at(-1), { id: old.id, machineId: 'mac' });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json'))).bindings[contextKey(f.msg(''))].id, active.id);
+  await click('switch'); await f.gateway.receive(f.msg('Continue the old task'));
+  assert.equal(f.calls.at(-1).sessionId, old.id); assert.equal(f.calls.at(-1).machineId, 'mac'); assert.equal(f.calls.at(-1).cwd, old.cwd);
+  assert.ok(lookups.some(item => item.id === old.id));
+});

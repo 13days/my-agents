@@ -120,11 +120,11 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     return send(msg, { markdown: text || '没有可显示的内容' });
   }
   function rememberCard(result, msg, binding) {
-    if (result?.messageId) { state.cards[result.messageId] = { ...(binding ? { sessionId: binding.id, cwd: binding.cwd, machineId: binding.machineId, engine: binding.engine } : {}), owner: msg.senderId, chatId: msg.chatId, chatType: msg.chatType, key: contextKey(msg), threadId: threadOf(msg) }; persist(); }
+    if (result?.messageId) { state.cards[result.messageId] = { ...(binding ? { sessionId: binding.id, cwd: binding.cwd, machineId: binding.machineId, engine: binding.engine, node: binding.node, workspaceId: binding.workspaceId, worktree: binding.worktree } : {}), owner: msg.senderId, chatId: msg.chatId, chatType: msg.chatType, key: contextKey(msg), threadId: threadOf(msg) }; persist(); }
   }
   function session(id) { return panel.sessions().find(item => item.id === id); }
-  function engineOf(binding) { return catalog().fallback(session(binding.id)?.engine || binding.engine || panel.engine?.(binding.id), 'claude'); }
-  function bindingFor(item) { return { workspaceId: item.workspaceId, id: item.id, cwd: item.project, worktree: item.worktree, engine: engineOf(item), machineId: item.machineId || (item.node && item.node !== 'local' ? item.node : panel.machineId?.()), ...(item.node && item.node !== 'local' ? { node: item.node } : {}) }; }
+  function engineOf(binding) { return catalog().fallback(binding.engine || session(binding.id)?.engine || panel.engine?.(binding.id), 'claude'); }
+  function bindingFor(item) { return { started: !!item.started, workspaceId: item.workspaceId, id: item.id, cwd: item.project, worktree: item.worktree, engine: engineOf(item), machineId: item.machineId || (item.node && item.node !== 'local' ? item.node : panel.machineId?.()), ...(item.node && item.node !== 'local' ? { node: item.node } : {}) }; }
   // Where a binding runs: 'local' (this Mac) or a remote node id (see node/). A session stays on its node.
   function nodeOf(binding) { if (binding.machineId) return binding.machineId === panel.machineId?.() ? 'local' : binding.machineId; return session(binding.id)?.node || binding.node || 'local'; }
   const remoteNodes = () => (panel.nodes?.() || []).filter(node => node.id !== 'local');
@@ -349,6 +349,10 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   }
   // 有的引擎（如 Codex）由 CLI 生成会话 ID：提交后改绑到 Panel 返回的真实 ID
   async function submit(binding, input) {
+    if (panel.resolveSession && !binding.sourceSessionId && (binding.started || !binding.machineId)) {
+      const resolved = await panel.resolveSession(binding.id, binding);
+      if (resolved) Object.assign(binding, bindingFor({ ...resolved, started: true }));
+    }
     const engine = engineOf(binding);
     if (binding.engine !== engine) { binding.engine = engine; persist(); }
     if (panel.machineId?.() && panel.machineId() !== 'local' && !binding.machineId) throw new Error('此旧会话尚未记录执行机器，请发送 /node 选择机器和项目，再继续。系统不会把旧目录默认用于当前主节点');
@@ -703,14 +707,18 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       }
       const original = state.cards[msg.messageId];
       const targetId = original?.originalSessionId === value.id ? original.sessionId : value.id;
-      const item = session(targetId) || (original?.sessionId === targetId ? { id: targetId, project: original.cwd, machineId: original.machineId, engine: original.engine, title: '原会话' } : null);
+      const remembered = original?.sessionId === targetId ? { ...original, id: targetId, project: original.cwd } : null;
+      const cached = [state.bindings[key], ...Object.values(state.engineBindings[key] || {})].find(item => item?.id === targetId);
+      const hint = value.session?.id === targetId ? value.session : remembered || cached;
+      const resolved = panel.resolveSession ? await panel.resolveSession(targetId, hint || {}) : null;
+      const item = resolved ? { ...session(targetId), ...resolved, started: true } : session(targetId) || (hint ? { ...hint, id: targetId, project: hint.project || hint.cwd, title: '原会话' } : null);
       if (!item && value.action === 'history' && state.bindings[key]?.id === targetId) return send(msg, { text: '这段会话暂无已保存的对话，发送问题开始后可再查看。' });
-      if (!item) throw new Error('会话不存在或已删除，请发送 /sessions 刷新');
+      if (!item) throw new Error('当前未能定位此会话，请检查原执行机器连接，或发送 /sessions 刷新；历史不会因此被删除');
       if (['stop','permission'].includes(value.action) && value.taskMessageId && panel.activeMessageId && panel.activeMessageId(item.id) !== value.taskMessageId) throw new Error('这张卡片对应的任务已结束，请发送 /current 查看当前任务');
       if (value.action === 'permission') { await panel.permission(item.id, value.requestId, value.behavior); return send(msg, { text: value.behavior === 'allow' ? '已允许本次工具调用。' : '已拒绝本次工具调用。' }); }
       if (value.action === 'stop') { await panel.stop(item.id); return send(msg, { text: '已发送停止请求。' }); }
       if (value.action === 'user_messages') {
-        const data = panel.sessionUserPage ? await panel.sessionUserPage(item, value.page) : require('./core/session-previews').userMessagePage({ messages: await panel.history(item.id) }, value.page, item);
+        const data = panel.sessionUserPage ? await panel.sessionUserPage(item, value.page) : require('./core/session-previews').userMessagePage({ messages: await panel.history(item.id, item.machineId) }, value.page, item);
         const listing = state.cards[msg.messageId]?.listing || { page: value.listPage || 0, query: value.query || '' };
         const result = await send(msg, { card: cards.sessionUserMessages({ engines: catalog(), owner: msg.senderId, key, item, data, listPage: listing.page, query: listing.query }) });
         rememberCard(result, msg);

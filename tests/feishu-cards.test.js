@@ -127,3 +127,21 @@ test('task action rows have at most two full-width buttons so labels remain read
   assert.ok(rows.every(row => row.columns.length <= 2));
   assert.ok(rows.flatMap(row => row.columns).every(column => column.elements[0].width === 'fill'));
 });
+
+test('historical task actions carry stable ownership without relying on the gateway cache', () => {
+  const binding = { id: 'old-session', machineId: 'mac', engine: 'claude', cwd: '/original/project', workspaceId: 'project-a' };
+  const current = cards.currentSession({ ...context, binding, exists: true, running: false });
+  const history = actions(current).find(value => value.action === 'history');
+  assert.deepEqual(history.session, binding);
+  const list = cards.sessionList({ ...context, rows: [{ ...binding, project: binding.cwd, title: 'Old session' }], total: 1, page: 0 });
+  assert.equal(actions(list).find(value => value.action === 'switch').session.machineId, 'mac');
+});
+
+
+test('session ownership and message expansion both fit the worst-case CJK card budget', () => {
+  const rows = Array.from({ length: 15 }, (_, i) => ({ id: '11111111-2222-4333-8444-' + String(i).padStart(12, '0'), machineId: 'panel-machine-alpha', engine: 'codex', title: '任务'.repeat(60), project: '/workspace/' + '项目'.repeat(35), turns: 200, first: Date.now(), last: Date.now(), userMessages: [199, 200].map(round => ({ round, text: '中'.repeat(100), timestamp: new Date().toISOString() })) }));
+  const card = cards.sessionList({ owner: 'ou_' + 'a'.repeat(32), key: JSON.stringify(['ou_' + 'a'.repeat(32), 'oc_' + 'b'.repeat(32), 'om_' + 'c'.repeat(32)]), rows, total: 100, page: 0, query: '中'.repeat(80) });
+  assert.equal(actions(card).filter(value => value.action === 'switch' && value.session.machineId === 'panel-machine-alpha').length, 15);
+  assert.equal(actions(card).filter(value => value.action === 'user_messages').length, 15);
+  assert.ok(Buffer.byteLength(JSON.stringify({ msg_type: 'interactive', content: JSON.stringify(card) })) < 30000);
+});
