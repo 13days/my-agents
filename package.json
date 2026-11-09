@@ -45,6 +45,7 @@
     "feishu-gateway.js",
     "feishu-simple-reply.js",
     "feishu-ui.js",
+    "user-guide.js",
     "mermaid-ui.js",
     "vendor/mermaid/",
     "mac-runtime.js",

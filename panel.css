@@ -960,3 +960,33 @@ body[data-nav-collapsed="true"] .resource-engine-switch button { padding: 5px 1p
 .chat-workspace-badge { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; font-size: 11px; }
 .chat-workspace-badge svg { width: 14px; height: 14px; color: var(--accent2); }
 @media (max-width: 760px) { .chat-project-group { flex-basis: 100%; gap: 8px; } }
+
+/* The guide stays above the footer while the resource navigation scrolls. */
+#logo, #navUtilities, #navFooter { flex-shrink: 0; }
+#tabs { flex: 1; min-height: 0; }
+#navUtilities { padding: 10px 12px; border-top: 1px solid var(--border); }
+#navFooter { margin-top: 0; }
+.user-guide { max-width: 1060px; }
+.guide-search { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 26px 0 18px; }
+.guide-search label { font-size: 13px; color: var(--muted); }
+#guide-search { flex: 1; min-width: 220px; padding: 11px 14px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg2, #1b1e22); color: var(--text); font: inherit; }
+#guide-result { color: var(--muted); font-size: 12px; }
+.guide-contents { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
+.guide-contents button { padding: 7px 11px; border: 1px solid var(--border); border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.guide-contents button:hover { color: var(--accent); border-color: var(--accent); }
+.guide-section { margin: 12px 0; border: 1px solid var(--border); border-radius: 12px; background: #ffffff03; scroll-margin-top: 18px; }
+.guide-section summary { display: flex; align-items: center; gap: 13px; padding: 19px 22px; font-size: 15px; font-weight: 600; cursor: pointer; list-style: none; }
+.guide-section summary::-webkit-details-marker { display: none; }
+.guide-section summary::after { content: '+'; margin-left: auto; color: var(--muted); font-size: 20px; font-weight: 400; }
+.guide-section[open] summary::after { content: '−'; }
+.guide-number { color: var(--accent); font-size: 11px; font-variant-numeric: tabular-nums; letter-spacing: 1px; }
+.guide-section-body { padding: 0 22px 22px 50px; font-size: 14px; line-height: 1.85; color: #bbc0c9; }
+#render .guide-section-body p { margin: 0 0 16px; }
+.guide-section-body ol { padding-left: 21px; }
+.guide-section-body li { padding-left: 6px; margin: 10px 0; }
+.guide-section-body dl > div { padding: 13px 0; border-top: 1px solid var(--border); }
+.guide-section-body dt { font-weight: 600; color: var(--text); }
+.guide-section-body dd { margin: 4px 0 0; }
+#render .guide-section-body .guide-note { padding: 12px 15px; margin-top: 16px; border-left: 2px solid var(--accent); background: #dca17d08; border-radius: 0 7px 7px 0; }
+@media (max-width: 1000px) { #navUtilities { padding: 10px 8px; } }
+@media (max-width: 600px) { .guide-section summary { padding: 16px; font-size: 14px; } .guide-section-body { padding: 0 16px 18px; } #guide-search { width: 100%; min-width: 0; } }
