@@ -29,7 +29,7 @@ function createClaudeEngine({ accounts = null, transcripts, timeoutMs = Number(p
     // `routeEnv` comes from a hub when this adapter runs inside a remote node.
     async open({ host, sessionId, resume, cwd, model, accountId, routeEnv, emit, onIdle, onClosed }) {
       // Enabled proxy accounts route through the panel (per-account usage); otherwise the CLI's own login is used.
-      const clientEnv = accounts ? await accountRouteEnv(accounts, { sessionId, accountId }) : { ...(routeEnv || {}) };
+      const clientEnv = routeEnv?.ANTHROPIC_BASE_URL ? { ...routeEnv } : accounts ? await accountRouteEnv(accounts, { sessionId, accountId }) : {};
       const info = resolveClaude({ env });
       const base = { ...env };
       // A routed session must reach the panel proxy, not a cloud provider configured in the shell.

@@ -119,3 +119,11 @@ test('15 expanded-capable session entries with CJK previews still fit Feishu lim
   assert.ok(Buffer.byteLength(JSON.stringify({ msg_type: 'interactive', content: JSON.stringify(card) })) < 30000);
   assert.ok(nodes(card).filter(node => node.tag).length < 200);
 });
+
+test('task action rows have at most two full-width buttons so labels remain readable', () => {
+  const card = cards.task({ ...context, binding: { id: 'session', cwd: '/project' }, view: { done: false, phase: '正在思考', text: '', tools: new Map(), permissions: new Map() }, title: 'Task', elapsed: 1000 });
+  const rows = nodes(card).filter(node => node.tag === 'column_set' && node.columns?.some(column => column.elements?.some(item => item.tag === 'button')));
+  assert.ok(rows.length >= 3);
+  assert.ok(rows.every(row => row.columns.length <= 2));
+  assert.ok(rows.flatMap(row => row.columns).every(column => column.elements[0].width === 'fill'));
+});

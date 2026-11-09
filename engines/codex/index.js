@@ -44,7 +44,7 @@ function createCodexEngine({ sessions, capture = () => null, env = process.env }
       };
       const runner = createCodexRunner({
         cli: info.path, cwd, threadId: sessionId, model, config: proxy?.config || [],
-        env: codexEnvironment({ ...env, ...(relayed ? { [RELAY_TOKEN_ENV]: relayed[RELAY_TOKEN_ENV], NO_PROXY: relayed.NO_PROXY, no_proxy: relayed.no_proxy } : {}), PWD: cwd }, info), spawnImpl: host.spawn, tmpDir: host.join(host.tmpDir(), 'my-agents-codex'),
+        env: codexEnvironment({ ...env, ...(proxy?.env || {}), ...(relayed ? { [RELAY_TOKEN_ENV]: relayed[RELAY_TOKEN_ENV], NO_PROXY: relayed.NO_PROXY, no_proxy: relayed.no_proxy } : {}), PWD: cwd }, info), spawnImpl: host.spawn, tmpDir: host.join(host.tmpDir(), 'my-agents-codex'),
         emit: (event, data) => {
           emit(event, data);
           if (event === 'done' && stopping) close();

@@ -112,15 +112,21 @@ function extractResponses(reqText, resText, isStream) {
 // `relay`: { token, credentials(mode) → headers | null } for remote-node Codex (see above).
 function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), request = { http, https }, relay = null } = {}) {
   const live = new Map();
-  function handle(req, res) {
+  async function handle(req, res) {
     const route = routeFor(req.url);
     if (!route || req.headers.origin) {
       res.writeHead(route ? 403 : 404, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ error: route ? '模型代理不接受浏览器跨域请求' : 'not found' }));
     }
-    let swap = null;
+    let swap = null, delegatedURL = null, selectedAccount = null;
+    const pooled = relay?.token && sameSecret(req.headers.authorization || '', `Bearer ${relay.token}`) && !req.headers['x-my-agents-local-account'];
     if (relay?.token && sameSecret(req.headers.authorization || '', `Bearer ${relay.token}`)) {
-      swap = relay.credentials(route.mode);
+      if (!req.headers['x-my-agents-local-account'] && relay.resolve) {
+        const selected = await relay.resolve(route.mode, String(req.headers['session-id'] || req.headers['thread-id'] || '')).catch(() => null);
+        selectedAccount = selected;
+        if (selected?.url) { delegatedURL = selected.url; swap = { authorization: `Bearer ${selected.token}`, 'x-my-agents-local-account': '1' }; }
+      }
+      if (!delegatedURL) swap = relay.credentials(route.mode);
       if (!swap) {
         res.writeHead(401, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: { message: '面板所在机器上的 Codex 未登录，无法代远端节点请求', type: 'invalid_request_error' } }));
@@ -140,16 +146,35 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
       if (turn && sessionId) { const e = live.get(sessionId) || { inflight: 0 }; e.inflight++; e.lastAt = Date.now(); live.set(sessionId, e); res.on('close', () => { e.inflight = Math.max(0, e.inflight - 1); e.lastAt = Date.now(); }); }
       const headers = {};
       for (const [k, v] of Object.entries(req.headers)) if (!HOP.has(k.toLowerCase())) headers[k] = v;
+      delete headers['x-my-agents-local-account'];
       if (swap) Object.assign(headers, swap);
       headers['accept-encoding'] = 'identity';
       if (body.length) headers['content-length'] = body.length;
-      const target = new URL(route.origin + req.url.slice(route.strip.length));
+      const excluded = [];
+      const send = () => {
+      const target = new URL(delegatedURL ? delegatedURL + req.url : route.origin + req.url.slice(route.strip.length));
       let saved = false;
       const save = (code, responseBody, stream, encoding, incomplete) => {
         if (saved) return; saved = true;
         try { record(req.url, code, Date.now() - started, body, responseBody, stream, req.headers, encoding || '', route.mode === 'chatgpt' ? 'codex-chatgpt' : 'codex-api', route.mode === 'chatgpt' ? 'Codex 订阅' : 'Codex API Key', { ...info, incomplete: !!incomplete }); } catch {}
       };
       upstream = (target.protocol === 'https:' ? request.https : request.http).request({ ...upstreamNetwork, timeout: 10 * 60 * 1000, protocol: target.protocol, hostname: target.hostname, port: target.port || undefined, path: target.pathname + target.search, method: req.method, headers }, response => {
+        if (pooled && selectedAccount && [401, 403].includes(response.statusCode) && relay.resolve) {
+          excluded.push(selectedAccount.id);
+          const rejected = []; response.on('data', chunk => rejected.push(chunk));
+          response.on('end', async () => {
+            save(response.statusCode, Buffer.concat(rejected), false, response.headers['content-encoding'], false);
+            if (res.destroyed) return;
+            const next = await relay.resolve(route.mode, sessionId, excluded).catch(() => null);
+            if (res.destroyed) return;
+            if (!next) { res.writeHead(response.statusCode, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { message: '共享账号认证失败：所有可用来源均返回 401/403，请在账号来源机器重新登录或更新 Token' } })); }
+            selectedAccount = next; delegatedURL = next.url || null;
+            delete headers['x-my-agents-local-account'];
+            Object.assign(headers, next.url ? { authorization: `Bearer ${next.token}`, 'x-my-agents-local-account': '1' } : relay.credentials(route.mode));
+            saved = false; send();
+          });
+          return;
+        }
         const captured = [];
         const out = {};
         for (const [k, v] of Object.entries(response.headers)) if (!HOP.has(k.toLowerCase()) || k.toLowerCase() === 'content-length') out[k] = v;
@@ -166,6 +191,8 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
         if (!res.headersSent) { res.writeHead(502, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: '上游连接失败或超时' })); } else res.destroy();
       });
       upstream.end(body);
+      };
+      send();
     });
     res.on('close', () => { if (!res.writableFinished) upstream?.destroy(); });
   }

@@ -52,6 +52,8 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
   let config = { mode: 'manual', selected: '', accounts: [], localToken: crypto.randomBytes(32).toString('hex') };
   if (fs.existsSync(file)) config = { ...config, ...JSON.parse(fs.readFileSync(file, 'utf8')) };
   if (!config.sessionRoutes || typeof config.sessionRoutes !== 'object' || Array.isArray(config.sessionRoutes)) config.sessionRoutes = {};
+  let shared = [];
+  const accountsOf = () => [...config.accounts, ...shared];
   const health = new Map();
   const live = new Map(); // sessionId -> { accountId, accountName, inflight, lastAt, lastStatus, model, pinned }
   const modelCache = new Map();
@@ -68,12 +70,12 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
   }
   function status() {
     return { mode: config.mode, selected: config.selected, lastUsed, proxyURL: localURL, connection: connectionStatus(),
-      accounts: config.accounts.map(({ token, env, ...a }) => ({ ...a, envKeys: Object.keys(env || {}), clientEnvKeys: Object.keys(env || {}).filter(k => !ROUTED_ENV.has(k)), hasToken: !!token, ...(health.get(a.id) || {}) })) };
+      accounts: accountsOf().map(({ token, env, delegateAccount, ...a }) => ({ ...a, envKeys: Object.keys(env || {}), clientEnvKeys: Object.keys(env || {}).filter(k => !ROUTED_ENV.has(k)), hasToken: !!token, ...(health.get(a.id) || {}) })) };
   }
   function save(input) {
     if (!['manual', 'failover', 'round-robin'].includes(input.mode) || !Array.isArray(input.accounts)) throw new Error('请选择有效路由模式和账号列表');
     const ids = new Set();
-    const accounts = input.accounts.map(source => {
+    const accounts = input.accounts.filter(source => !shared.some(a => a.id === source.id)).map(source => {
       const parsed = source.env === undefined ? null : parseEnvInput(source.env);
       const a = parsed ? { ...parsed, ...source, env: parsed.env } : source;
       const id = a.id || crypto.randomUUID();
@@ -104,7 +106,7 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
       return { id, name: a.name.trim(), url: url.href.replace(/\/$/, ''), token, authType, enabled: a.enabled !== false, modelMap, env };
     });
     const selected = input.selected || '';
-    if (selected && !accounts.some(a => a.id === selected && a.enabled)) throw new Error('选中账号不存在或已禁用');
+    if (selected && ![...accounts, ...shared].some(a => a.id === selected && a.enabled)) throw new Error('选中账号不存在或已禁用');
     if (input.mode === 'manual' && accounts.some(a => a.enabled) && !selected) throw new Error('手动模式请选择一个启用账号');
     const next = { ...config, mode: input.mode, selected, accounts };
     const settingsChange = connectionStatus().connected ? prepareClientEnv(next) : null;
@@ -163,7 +165,7 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
     const settings = fs.existsSync(settingsFile) ? JSON.parse(fs.readFileSync(settingsFile, 'utf8')) : {};
     // Preserve the old upstream before replacing credentials.
     if (connectionStatus().canImport) importSettings();
-    if (!config.accounts.some(a => a.enabled && a.authType !== 'passthrough')) throw new Error('未检测到可用的 API 账号，请先添加服务地址和 Token，再一键配置');
+    if (!accountsOf().some(a => a.enabled && a.authType !== 'passthrough')) throw new Error('未检测到可用的 API 账号，请先添加服务地址和 Token，再一键配置');
     if (connectionStatus().connected) return { ok: true, backup: null, proxyURL: localURL, alreadyConfigured: true };
     const applied = prepareClientEnv(config, settings);
     const env = applied.settings.env;
@@ -199,17 +201,20 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
     req.on('end', () => {
       if (res.destroyed) return;
       const body = Buffer.concat(chunks), started = Date.now();
-      const snapshot = config;
+      const snapshot = { ...config, mode: config.mode === 'manual' && !config.selected && shared.length ? 'failover' : config.mode, accounts: accountsOf() };
       const isOAuth = /^\/(?:v1|api)\/oauth\//.test(req.url);
       const enabled = snapshot.accounts.filter(a => a.enabled);
       let sessionId = '', model = '';
       try { const parsed = JSON.parse(body.toString()); sessionId = sessionIdOf(parsed); model = typeof parsed.model === 'string' ? parsed.model : ''; } catch {}
       requestInfo.sessionId = sessionId;
       requestInfo.method = req.method;
-      const pinned = sessionId && !isOAuth ? enabled.find(a => a.id === snapshot.sessionRoutes?.[sessionId]) : null;
+      const delegated = req.headers['x-my-agents-account'];
+      const trusted = req.headers.authorization === 'Bearer ' + config.localToken || req.headers['x-api-key'] === config.localToken;
+      if (delegated && (!trusted || !config.accounts.some(a => a.id === delegated && a.enabled))) { res.writeHead(403); return res.end(JSON.stringify({ error: '共享账号不可用或转发凭证无效' })); }
+      const pinned = !isOAuth ? (delegated ? config.accounts.find(a => a.id === delegated) : sessionId && enabled.find(a => a.id === snapshot.sessionRoutes?.[sessionId])) : null;
       // With no configured accounts, retain the original Inspector passthrough.
       let candidates = pinned ? [pinned] : !snapshot.accounts.length || isOAuth ? [{ id: '', name: 'Anthropic', url: isOAuth && req.url.startsWith('/v1/oauth/') ? 'https://platform.claude.com' : 'https://api.anthropic.com', authType: 'passthrough', modelMap: {} }]
-        : snapshot.mode === 'manual' ? enabled.filter(a => a.id === snapshot.selected)
+        : snapshot.mode === 'manual' ? (snapshot.selected ? enabled.filter(a => a.id === snapshot.selected) : enabled)
         : enabled.filter(a => (health.get(a.id)?.cooldownUntil || 0) <= Date.now());
       if (snapshot.mode === 'round-robin' && candidates.length && !isOAuth && !pinned) {
         const offset = cursor++ % candidates.length;
@@ -260,6 +265,8 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
           }
         } catch {}
         const headers = cleanHeaders(req.headers);
+        delete headers['x-my-agents-account'];
+        if (account.delegateAccount) headers['x-my-agents-account'] = account.delegateAccount;
         delete headers['accept-encoding'];
         headers['accept-encoding'] = 'identity';
         headers['content-length'] = data.length;
@@ -325,12 +332,12 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
     });
   }
   function clientEnv() {
-    if (!config.accounts.some(a => a.enabled && a.authType !== 'passthrough')) return null;
+    if (!accountsOf().some(a => a.enabled && a.authType !== 'passthrough')) return null;
     return { ANTHROPIC_BASE_URL: localURL, ANTHROPIC_AUTH_TOKEN: config.localToken, ANTHROPIC_API_KEY: '' };
   }
   async function modelEnvForSession(sessionId) {
     const pinned = config.sessionRoutes[sessionId];
-    const account = config.accounts.find(a => a.enabled && a.id === (pinned || config.selected)) || config.accounts.find(a => a.enabled);
+    const account = accountsOf().find(a => a.enabled && a.id === (pinned || config.selected)) || accountsOf().find(a => a.enabled);
     if (!account || account.authType === 'passthrough' || account.modelMap['*']) return {};
     const explicit = { ...(process.env || {}), ...(account.env || {}) };
     for (const family of ['OPUS', 'SONNET', 'HAIKU']) if (account.modelMap[family.toLowerCase()]) explicit[`ANTHROPIC_DEFAULT_${family}_MODEL`] = account.modelMap[family.toLowerCase()];
@@ -343,7 +350,7 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
       const request = (async () => {
         try {
           const url = account.url.replace(/\/$/, '') + (new URL(account.url).pathname.endsWith('/v1') ? '/models' : '/v1/models');
-          const headers = { 'anthropic-version': '2023-06-01' };
+          const headers = { 'anthropic-version': '2023-06-01', ...(account.delegateAccount ? { 'x-my-agents-account': account.delegateAccount } : {}) };
           if (account.authType === 'api-key') headers['x-api-key'] = account.token; else headers.authorization = `Bearer ${account.token}`;
           const startedAt = Date.now(), info = { ...reserveCapture(), sessionId, method: 'GET', routing: { mode: config.mode, reason: pinned ? 'session_pin' : 'model_discovery', attempt: 1, requestedModel: '', actualModel: '' } };
           let response, text;
@@ -360,7 +367,7 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
   }
   async function models({ accountId = '', sessionId = '', refresh = false } = {}) {
     const pinned = config.sessionRoutes[String(sessionId).toLowerCase()];
-    const account = accountId ? config.accounts.find(a => a.enabled && a.id === accountId) : config.accounts.find(a => a.enabled && a.id === (pinned || config.selected)) || config.accounts.find(a => a.enabled);
+    const account = accountId ? accountsOf().find(a => a.enabled && a.id === accountId) : accountsOf().find(a => a.enabled && a.id === (pinned || config.selected)) || accountsOf().find(a => a.enabled);
     if (accountId && !account) throw new Error('账号不存在或已禁用');
     if (!account || account.authType === 'passthrough') return { models: [], accountName: account?.name || '', forcedModel: '' };
     if (refresh) modelCache.delete(account.id + account.url + account.token);
@@ -372,7 +379,7 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
     const now = Date.now();
     for (const [id, e] of live) if (!e.inflight && now - e.lastAt > LIVE_TTL) live.delete(id);
     const items = [...live].map(([id, e]) => ({ id, ...e, running: e.inflight > 0, routeAccountId: config.sessionRoutes[id] || '' }));
-    return { items, routes: { ...config.sessionRoutes }, accounts: config.accounts.map(a => ({ id: a.id, name: a.name, enabled: a.enabled })), mode: config.mode, selected: config.selected };
+    return { items, routes: { ...config.sessionRoutes }, accounts: accountsOf().map(a => ({ id: a.id, name: a.name, enabled: a.enabled })), mode: config.mode, selected: config.selected };
   }
   function setSessionRoute(sessionId, accountId) {
     if (typeof sessionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) throw new Error('会话 ID 无效');
@@ -380,7 +387,7 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
     const routes = { ...config.sessionRoutes };
     if (!accountId) delete routes[id];
     else {
-      if (!config.accounts.some(a => a.id === accountId && a.enabled)) throw new Error('账号不存在或已禁用');
+      if (!accountsOf().some(a => a.id === accountId && a.enabled)) throw new Error('账号不存在或已禁用');
       delete routes[id]; routes[id] = accountId;
       const keys = Object.keys(routes);
       for (const k of keys.slice(0, Math.max(0, keys.length - SESSION_ROUTES_MAX))) delete routes[k];
@@ -392,9 +399,9 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
   }
   // Switch mode / selected account without touching stored credentials (used by Feishu /route).
   function route({ mode = config.mode, selected = config.selected } = {}) {
-    if (!config.accounts.some(a => a.id === selected && a.enabled)) selected = '';
-    return save({ mode, selected, accounts: config.accounts.map(({ token, env, ...a }) => a) });
+    if (!accountsOf().some(a => a.id === selected && a.enabled)) selected = '';
+    return save({ mode, selected, accounts: accountsOf().map(({ token, env, delegateAccount, ...a }) => a) });
   }
-  return { status, save, route, importSettings, setup, handle, clientEnv, modelEnvForSession, models, sessions, setSessionRoute, reset: () => { health.clear(); return status(); } };
+  return { sharedCatalog: () => ({ token: config.localToken, accounts: config.accounts.filter(a => a.enabled && a.authType !== 'passthrough').map(({ id, name, modelMap }) => ({ id, name, modelMap })) }), setShared: accounts => { shared = accounts; }, status, save, route, importSettings, setup, handle, clientEnv, modelEnvForSession, models, sessions, setSessionRoute, reset: () => { health.clear(); return status(); } };
 }
 module.exports = { createRouter, parseEnvInput };

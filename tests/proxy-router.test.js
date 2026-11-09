@@ -303,3 +303,31 @@ test('a client disconnect before response headers is preserved as an interrupted
   assert.equal(f.captures[0][1], 499);
   assert.equal(f.captures[0][10].incomplete, true);
 });
+
+test('a panel without local accounts routes via the owner pool and cannot forge owner selection', async t => {
+  const owner = await fixture(t, [(req, res) => {
+    assert.equal(req.headers.authorization, 'Bearer secret-0');
+    assert.equal(req.headers['x-my-agents-account'], undefined, 'internal selector must never reach a provider');
+    res.setHeader('content-type', 'application/json'); res.end('{"ok":true}');
+  }]);
+  owner.router.save({ mode: 'manual', selected: 'a0', accounts: owner.accounts });
+  const user = await fixture(t, []);
+  const catalog = owner.router.sharedCatalog();
+  user.router.setShared([{ id: 'cluster:owner:a0', name: 'Owner account', url: owner.url, token: catalog.token, authType: 'bearer', modelMap: {}, enabled: true, shared: true, delegateAccount: 'a0' }]);
+  assert.ok(user.router.clientEnv().ANTHROPIC_BASE_URL);
+  assert.equal((await user.send()).status, 200);
+  const forged = await fetch(owner.url + '/v1/messages', { method: 'POST', headers: { authorization: 'Bearer wrong', 'x-my-agents-account': 'a0' }, body: '{}' });
+  assert.equal(forged.status, 403);
+  user.router.route({ selected: 'cluster:owner:a0' });
+  assert.equal(user.router.status().selected, 'cluster:owner:a0');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(user.dir, 'panel-proxy.json'))).accounts.length, 0, 'remote proxy tokens never enter local account storage');
+  assert.equal((await user.send()).status, 200);
+  assert.ok(!JSON.stringify(user.router.status()).includes(catalog.token));
+});
+
+test('an unconfigured panel fails over rejected shared accounts instead of requiring its own login', async t => {
+  const f = await fixture(t, [(_req, res) => { res.writeHead(401); res.end('{"error":"expired"}'); }, (_req, res) => { res.end('{"ok":true}'); }]);
+  f.router.setShared(f.accounts.map(a => ({ ...a, shared: true })));
+  assert.equal((await f.send()).status, 200);
+  assert.deepEqual(f.captures.map(row => row[1]), [401, 200]);
+});

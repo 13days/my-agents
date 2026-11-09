@@ -996,3 +996,32 @@ body[data-nav-collapsed="true"] .resource-engine-switch button { padding: 5px 1p
 
 .workspace-section textarea { font-family:var(--mono); line-height:1.6; resize:vertical; overflow-wrap:anywhere; }
 .workspace-section textarea:focus { outline:2px solid var(--accent); outline-offset:2px; }
+
+/* Machine admission and connection management use the same panel vocabulary. */
+.machine-section-heading,.runtime-summary { display:flex; justify-content:space-between; align-items:center; gap:20px; margin:24px 0 14px; }
+.machine-section-heading h3,.machine-section-heading p,.runtime-summary p { margin:0 0 5px; }
+.runtime-access { margin-top:20px; }
+.runtime-summary { padding:18px 22px; background:var(--panel); border:1px solid var(--border); border-radius:12px; }
+.node-access-dialog { margin:auto; overflow-y:auto; box-shadow:0 28px 100px #0007; width:min(820px,calc(100vw - 32px)); max-height:88vh; box-sizing:border-box; padding:26px; color:var(--text); background:var(--panel); border:1px solid var(--border); border-radius:16px; }
+.node-access-dialog::backdrop { background:rgba(0,0,0,.65); }
+.node-access-dialog > header { display:flex; align-items:center; justify-content:space-between; gap:18px; }
+.node-access-dialog h2 { margin:6px 0 20px; }
+.node-access-options { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:8px 0 22px; }
+.node-access-options button { display:flex; flex-direction:column; gap:8px; text-align:left; padding:16px; background:var(--bg); border:1px solid var(--border); border-radius:10px; color:var(--text); font:inherit; cursor:pointer; }
+.node-access-options button span { color:var(--muted); font-size:12px; }
+.node-access-options button.is-active { border-color:var(--accent2); background:var(--selected); }
+.node-access-dialog .nodes-panel { margin:0; padding:0; border:0; background:none; }
+.node-access-dialog .node-form label { display:flex; flex-direction:column; gap:8px; color:var(--muted); font-size:12px; }
+.node-access-dialog .node-form input { width:100%; box-sizing:border-box; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:11px 12px; color:var(--text); font:inherit; font-size:14px; }
+.node-access-dialog .gateway-form-row { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.node-access-dialog .node-guide { padding:16px; border:1px solid var(--border); border-radius:10px; background:var(--bg); }
+.node-access-dialog .node-cmd { margin:12px 0; line-height:1.7; font-size:12px; white-space:pre-wrap; }
+.node-access-dialog .node-row { padding:14px 0; }
+.node-access-dialog .tag.node-state { width:fit-content; }
+.node-access-dialog li { margin:16px 0; line-height:1.7; }
+.shared-account-pool { margin:16px 0; padding:18px; border:1px solid var(--border); border-radius:10px; }
+.shared-account-pool > span { display:inline-block; padding:5px 9px; margin:5px 8px 0 0; border-radius:6px; background:var(--bg); font-size:12px; }
+@media(max-width:600px) { .node-access-options,.node-access-dialog .gateway-form-row { grid-template-columns:1fr; } .node-access-dialog { padding:18px; } .node-row { align-items:flex-start; flex-direction:column; } .machine-section-heading,.runtime-summary { flex-wrap:wrap; } }
+
+.node-existing { margin:16px 0; padding:14px; border:1px solid var(--border); border-radius:10px; }
+.node-existing summary { color:var(--muted); cursor:pointer; font-size:12px; }

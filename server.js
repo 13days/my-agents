@@ -1752,9 +1752,10 @@ const accountRouter = require('./proxy-router').createRouter({
 // Codex on remote nodes authenticates with this per-process token; the proxy swaps it for this machine's login.
 const codexRelayToken = crypto.randomBytes(24).toString('hex');
 const readCodexAuth = () => { try { return JSON.parse(fs.readFileSync(path.join(CODEX_HOME, 'auth.json'), 'utf8')); } catch { return null; } };
+let accountPool;
 const codexProxy = createCodexProxy({
   record: recordExchange, reserveCapture: () => ({ id: captureStore.nextId(), startedAt: new Date().toISOString() }),
-  relay: { token: codexRelayToken, credentials: mode => codexCredentials(readCodexAuth(), mode) },
+  relay: { token: codexRelayToken, credentials: mode => codexCredentials(readCodexAuth(), mode), resolve: async (mode, sessionId, excluded) => { await accountPool?.refresh(); return accountPool?.codexRoute(mode, sessionId, excluded); } },
 });
 const upstreams = createUpstreams();
 upstreams.add({ id: 'anthropic', engine: 'claude', handle: accountRouter.handle }, { isDefault: true });
@@ -1792,7 +1793,7 @@ registry.register(createClaudeEngine({
 registry.register(createCodexEngine({
   sessions: codexSessions,
   // Panel-started Codex runs go through the capture proxy unless disabled; resumed threads keep their provider.
-  capture: ({ provider }) => (provider ? provider === 'panel' : codexCaptureEnabled()) ? { config: codexProviderConfig(PROXY_PORT, { apiKey: codexAuthMode() === 'apikey' }) } : null,
+  capture: ({ provider }) => (provider ? provider === 'panel' : codexCaptureEnabled()) ? { config: require('./engines/codex/proxy').codexRelayConfig(`http://127.0.0.1:${PROXY_PORT}${codexAuthMode() === 'apikey' ? '/codex-openai/v1' : '/backend-api/codex'}`), env: { [RELAY_TOKEN_ENV]: codexRelayToken } } : null,
 }));
 let cluster;
 const machineId = () => clusterConfig?.nodeId || 'local';
@@ -2106,7 +2107,7 @@ const server = http.createServer(async (req, res) => {
     // Account credentials are only available through same-origin JSON management requests.
     if (type === 'proxy') {
       res.setHeader('Cache-Control', 'no-store');
-      if (req.method === 'GET' && parts.length === 2) return sendJSON(res, 200, accountRouter.status());
+      if (req.method === 'GET' && parts.length === 2) { await accountPool?.refresh(); return sendJSON(res, 200, { ...accountRouter.status(), pool: accountPool?.status() || [] }); }
       if (req.method === 'GET' && parts[2] === 'sessions') return sendJSON(res, 200, accountRouter.sessions());
       if (req.method === 'GET' && parts[2] === 'models' && parts.length === 3) {
         try { return sendJSON(res, 200, await accountRouter.models({ accountId: url.searchParams.get('accountId') || '', sessionId: url.searchParams.get('sessionId') || '', refresh: url.searchParams.get('refresh') === '1' })); }
@@ -2508,6 +2509,7 @@ const runtimeRouting = {
   target: `http://127.0.0.1:${PROXY_PORT}`,
   engines: {
     async claude(options) {
+      await accountPool?.refresh();
       const env = await accountRouteEnv(accountRouter, options);
       if (!env.ANTHROPIC_BASE_URL) return null;
       // Unless the run picks a model, use this panel's default rather than one pinned in the node's settings.
@@ -2515,9 +2517,10 @@ const runtimeRouting = {
       return env;
     },
     // Codex uses this machine's Codex login, which never leaves it (see engines/codex/proxy.js).
-    codex: Object.assign(() => {
+    codex: Object.assign(async () => {
+      await accountPool?.refresh();
       const mode = codexAuthMode() === 'apikey' ? 'api-key' : 'chatgpt';
-      if (!codexCredentials(readCodexAuth(), mode)) return null;
+      if (!accountPool?.codexRoute(mode)) return null;
       return { MY_AGENTS_CODEX_BASE: mode === 'api-key' ? '/codex-openai/v1' : '/backend-api/codex', [RELAY_TOKEN_ENV]: codexRelayToken };
     }, { accounts: false }),
   },
@@ -2535,6 +2538,12 @@ async function attachClusterRuntime(id, peer) {
   try { return await pending; } finally { clusterRuntimePending.delete(id); }
 }
 let clusterNetwork = null;
+accountPool = require('./core/account-pool').createAccountPool({ accounts: accountRouter,
+  identity: () => ({ id: machineId(), label: clusterConfig?.members?.find(item => item.id === machineId())?.label || '本机' }),
+  codex: { catalog: () => ({ token: codexRelayToken, modes: ['chatgpt', 'api-key'].filter(mode => codexCredentials(readCodexAuth(), mode)) }) },
+  peers: () => (clusterNetwork?.connected() || []).map(id => ({ id, label: clusterConfig.members.find(item => item.id === id)?.label || id, peer: clusterNetwork.peer(id) })),
+});
+const poolTimer = setInterval(() => accountPool.refresh().catch(error => console.warn('账号池刷新失败：', error.message)), 5000); poolTimer.unref();
 let clusterConfig = null;
 try { clusterConfig = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'panel-cluster.json'), 'utf8')); } catch {}
 if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token && Array.isArray(clusterConfig.members)) {
@@ -2546,6 +2555,7 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
     setImmediate(() => attachClusterRuntime(id, peer).catch(error => console.warn('集群执行连接：' + error.message)));
   } });
   cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: feishuGateway, canTransfer: () => manager.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });
+  clusterNetwork.handle('accounts.catalog', () => accountPool.catalog());
   clusterNetwork.handle('workspaces.save', async (_, input) => { if (!cluster.canStart()) throw new Error('当前节点没有主节点租约，请刷新后重试'); return workspaceStore.save(input); });
   clusterNetwork.handle('conversations.put', (_, record) => { if (!cluster.canStart()) throw new Error('当前节点没有共享状态写入租约'); conversations.merge(record); return { ok: true }; });
   clusterNetwork.handle('gateway.invoke', async (_, { method, input }) => {

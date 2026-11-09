@@ -14,13 +14,13 @@ const { attachRemoteNode } = require('../node/remote');
 const AUTH = { tokens: { access_token: 'mac-access', account_id: 'acct-1', refresh_token: 'never-sent' }, OPENAI_API_KEY: 'sk-mac' };
 
 // A proxy whose upstream records the headers it was sent and answers 200.
-async function proxyWith(relay) {
+async function proxyWith(relay, status = 200) {
   const sent = [];
   const https = { request(options, onResponse) {
     sent.push(options);
     const req = new PassThrough();
     req.setTimeout = () => {};
-    req.on('finish', () => { const res = new PassThrough(); Object.assign(res, { statusCode: 200, headers: { 'content-type': 'application/json' }, complete: true }); onResponse(res); res.end('{}'); });
+    req.on('finish', () => { const res = new PassThrough(); Object.assign(res, { statusCode: status, headers: { 'content-type': 'application/json' }, complete: true }); onResponse(res); res.end('{}'); });
     return req;
   } };
   const proxy = createCodexProxy({ request: { http, https }, relay });
@@ -88,4 +88,22 @@ test('a routed Codex session on a node uses the relay provider and token, not it
   assert.ok(!args.includes('model_provider="local-capture"'), 'the node\'s own capture setting does not apply');
   assert.equal(env[RELAY_TOKEN_ENV], 'relay-secret');
   assert.ok(env.NO_PROXY.split(',').includes('127.0.0.1'));
+});
+
+test('Codex can use another panel login and fail over authentication rejections before streaming', async t => {
+  const rejected = await proxyWith({ token: 'owner-a', credentials: mode => codexCredentials(AUTH, mode) }, 401);
+  const accepted = await proxyWith({ token: 'owner-b', credentials: mode => codexCredentials(AUTH, mode) });
+  const selected = [];
+  const coordinator = await proxyWith({ token: 'coordinator', credentials: () => null, resolve: async (_mode, _session, excluded = []) => {
+    selected.push(excluded);
+    return excluded.includes('a') ? { id: 'b', url: accepted.url, token: 'owner-b' } : { id: 'a', url: rejected.url, token: 'owner-a' };
+  } });
+  t.after(() => { rejected.close(); accepted.close(); coordinator.close(); });
+  const response = await fetch(coordinator.url + '/backend-api/codex/responses', { method: 'POST', headers: { authorization: 'Bearer coordinator', 'session-id': 'remote-thread' }, body: '{"model":"gpt"}' });
+  assert.equal(response.status, 200); await response.text();
+  assert.equal(coordinator.sent.length, 0, 'coordinator never needs an upstream login');
+  assert.equal(rejected.sent.length, 1); assert.equal(accepted.sent.length, 1);
+  assert.equal(accepted.sent[0].headers.authorization, 'Bearer mac-access');
+  assert.equal(accepted.sent[0].headers['x-my-agents-local-account'], undefined);
+  assert.deepEqual(selected, [[], ['a']]);
 });
