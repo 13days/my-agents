@@ -11,6 +11,7 @@ const clusterSource = html.slice(html.indexOf('async function renderClusterPanel
 test('the connections page loads cluster state as an optional capability', () => {
   assert.match(clusterSource, /api\('GET', 'cluster'\)/);
   assert.match(clusterSource, /error\.status === 404/);
+  assert.match(clusterSource, /data\.enabled === false/);
   assert.match(clusterSource, /section\.remove\(\)/);
   assert.ok(html.indexOf('id="cluster-panel"') < html.indexOf('class="engine-tabs connection-tabs"'));
 });
@@ -56,9 +57,9 @@ test('cluster response renders health, membership, gateways, and transfer candid
     state: { type: 'proxy' },
     $: selector => controls[selector] || null,
     api: async () => ({
-      health: { status: 'healthy' }, leader: { id: 'mac', label: 'Mac' },
-      quorum: { online: 2, required: 2, total: 3, met: true }, term: 8,
-      lease: { remainingMs: 12000 }, automaticFailover: { enabled: true, ready: true },
+      enabled: true, clusterId: 'office', nodeId: 'mac', role: 'leader', leader: { id: 'mac', label: 'Mac' },
+      quorum: 2, voters: 3, online: 2, hasQuorum: true, term: 8,
+      leaseUntil: Date.now() + 12000, automaticFailover: true,
       joinCommand: 'my-agents cluster join --token secret',
       members: [
         { id: 'mac', label: 'Mac', platform: 'darwin', version: '0.17.0', voter: true, online: true, role: 'leader', gatewayStatus: 'connected', engines: [{ id: 'claude', cli: { version: '2.0' } }] },
