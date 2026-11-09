@@ -28,6 +28,23 @@ button, a, input, select, textarea, summary { outline-offset: 3px; }
 .mermaid-source pre { margin: 0; text-align: left; }
 .mermaid-source { overflow: auto; }
 
+.im-channels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 24px 0; }
+.im-channel { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 18px; text-align: left; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 12px; }
+.im-channel:hover { background: var(--hover); }
+.im-channel[aria-pressed="true"] { border-color: var(--accent); background: var(--selected); }
+.im-channel-icon { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: 10px; color: var(--accent2); background: #dca17d12; }
+.im-channel-copy { display: grid; gap: 4px; min-width: 0; flex: 1; }
+.im-channel-copy strong { font-size: 14px; font-weight: 600; }
+.im-channel-copy small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.im-channel-state { flex: none; color: var(--muted); font-size: 11px; white-space: nowrap; padding: 3px 8px; border: 1px solid var(--border); border-radius: 20px; }
+.im-channel-state.available { color: var(--green); }
+.im-channel-placeholder { display: grid; justify-items: start; gap: 16px; padding: 28px; }
+.chart.im-channel-placeholder > * { margin: 0; }
+.im-channel-placeholder h2 { margin: 0; font-size: 22px; }
+.im-channel-placeholder p { max-width: 640px; }
+.im-loading { padding: 20px 0; }
+@media (max-width: 760px) { .im-channels { grid-template-columns: 1fr; gap: 10px; } .im-channel { padding: 14px; } .im-channel-placeholder { padding: 20px; } }
+
 /* Persistent navigation is separate from the resource library. */
 #navrail { display: flex; flex-direction: column; width: 212px; min-width: 212px; background: #16181b; border-right: 1px solid var(--border); }
 #logo { display: flex; align-items: center; gap: 10px; height: 82px; padding: 0 22px; font-size: 15px; font-weight: 650; letter-spacing: -.35px; white-space: nowrap; }

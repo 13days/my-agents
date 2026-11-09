@@ -1,6 +1,6 @@
 # ⌘ my-agents
 
-**Claude Code 与 Codex 的本地工作空间：统一管理会话、抓包、引擎接入和飞书网关。**
+**Claude Code 与 Codex 的本地工作空间：统一管理会话、抓包、引擎接入和 IM 渠道。**
 
 Claude Code 的本地可视化面板，核心零依赖：浏览/编辑斜杠命令、技能、智能体、插件、工作流，搜索并回放历史会话，统计 token 花费；独一份地**抓出每次对话背后真实的系统提示词、工具定义和每一轮 LLM 调用**。还能多账号路由自动切换，并通过**飞书机器人**在手机上继续本机的 Claude Code 会话。**OpenAI Codex CLI** 也接进来了：同一个面板里查看、回放、继续 Codex 会话，订阅账号的请求同样能抓包。
 
@@ -11,7 +11,7 @@ npm install
 npm start
 ```
 
-[English](README.en.md) · [快速开始](#快速开始) · [功能](#功能) · [飞书网关](#飞书网关) · [Codex](#codex) · [多账号路由](#多账号动态路由) · [截图](#截图) · [更新日志](#更新日志)
+[English](README.en.md) · [快速开始](#快速开始) · [功能](#功能) · [IM 接入](#im-接入) · [Codex](#codex) · [多账号路由](#多账号动态路由) · [截图](#截图) · [更新日志](#更新日志)
 
 ![core zero dependencies](https://img.shields.io/badge/核心依赖-0-brightgreen) ![node >= 18](https://img.shields.io/badge/node-%3E%3D18-blue) ![license MIT](https://img.shields.io/badge/license-MIT-orange) ![i18n](https://img.shields.io/badge/多语言-中文%20%7C%20EN%20%7C%20日本語-purple)
 
@@ -54,7 +54,7 @@ Claude Code 的会话记录里没有系统提示词，也没有原始请求/响�
 | **🕵️ 抓包 Inspector** | 本地代理实时抓取：系统提示词、工具定义、完整上下文、含思考的流式响应、CC 版本；持久化到本地，折叠进回放 |
 | **统计** | 与 `ccusage` 对齐的用量：每日消息、模型 token、24h 热区、`ccusage daily` 同款费用表，以及实时条（今日花费 / 燃速 / 预算告警） |
 | **多账号路由** | 一键接入当前 Claude 配置；粘贴 env 自动识别；手动切换、自动故障转移、轮询、模型映射和额外环境变量 |
-| **💬 飞书网关** | 飞书机器人长连接到本机：查看 / 切换 / 新建 / 接续会话，图片消息，排队与中途引导，私聊、群、话题各自绑定；访问控制与消息留档；Mac 保活和登录自启 |
+| **💬 IM 接入 · 飞书 / Lark** | 飞书机器人长连接到本机：查看 / 切换 / 新建 / 接续会话，图片消息，排队与中途引导，私聊、群、话题各自绑定；访问控制与消息留档；Mac 保活和登录自启 |
 | **⌁ Codex** | Codex 会话与 Claude 会话同列（带 Codex 标记）；网页 / 飞书新建或接续 Codex 会话；订阅与 API Key 请求透传抓包；自动发现本机 `codex` |
 | **🚢 航程 Voyage** | 把散乱的会话重织成一条时间线，按项目着色，切分成以意图命名的「航段」 |
 | **🎁 Wrapped** | 一键生成可分享 PNG 成绩单：花费、token、最爱命令、本命模型、专属称号 |
@@ -111,7 +111,11 @@ python3 scripts/gen-demo-data.py
 CLAUDE_DIR="$PWD/demo-data/claude" PORT=4999 node server.js
 ```
 
-## 飞书网关
+## IM 接入
+
+侧栏「IM 接入」统一管理聊天渠道。目前支持飞书 / Lark；企业微信入口已预留，适配器尚未实现。渠道扩展设计见 [IM 渠道说明](docs/im-channels.md)。
+
+### 飞书 / Lark
 
 在飞书里私聊机器人，就能操作 Mac 上的 Claude Code。
 
@@ -128,7 +132,7 @@ CLAUDE_DIR="$PWD/demo-data/claude" PORT=4999 node server.js
 
 ### 配置步骤
 
-1. **创建机器人**：打开侧栏「飞书网关」。
+1. **创建机器人**：打开侧栏「IM 接入」，选择「飞书 / Lark」。
    - 装了 `lark-cli` 时，点「扫码创建机器人」，扫码后应用自动创建、凭证自动保存并连接。Panel 使用独立的 CLI 配置目录，不会覆盖你已有的 CLI 账号。
    - 没有 CLI 时，展开「手动配置应用（备用）」：在 [飞书开放平台](https://open.feishu.cn/app) 创建**企业自建应用**、开启机器人能力，把 App ID 和 App Secret 填进面板。群里的「自定义 Webhook 机器人」不能用。
 2. **开权限和事件**：在开放平台的应用后台确认以下配置（扫码创建会自动配好卡片回调，其余需手动检查）：

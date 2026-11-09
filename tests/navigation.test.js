@@ -10,7 +10,8 @@ function fixture() {
   const location = { pathname: '/stats', search: '' };
   const changes = [];
   const context = vm.createContext({ URLSearchParams, location, state: { type: 'stats', current: null, scope: '' },
-    CAPS: { stats: {}, inspector: {}, commands: {}, sessions: {} }, SCOPED: ['commands'], ui: (_zh, en) => en,
+    CAPS: { stats: {}, inspector: {}, commands: {}, sessions: {}, im: {} }, SCOPED: ['commands'], ui: (_zh, en) => en,
+    IM_CHANNELS: [{ id: 'feishu' }, { id: 'wecom' }], imSelectedChannel: 'feishu',
     history: Object.fromEntries(['pushState', 'replaceState'].map(method => [method, (_state, _title, url) => {
       changes.push({ method, url });
       const parsed = new URL(url, 'http://localhost'); location.pathname = parsed.pathname; location.search = parsed.search;
@@ -46,6 +47,19 @@ test('restoring the same URL does not create duplicate history entries', () => {
   context.state.type = 'inspector'; context.state.current = '42';
   vm.runInContext('writeRoute(); writeRoute()', context);
   assert.deepEqual(changes, [{ method: 'pushState', url: '/inspector/42' }]);
+});
+
+test('IM routes identify channels and keep existing Feishu bookmarks working', () => {
+  const { context, location } = fixture();
+  location.pathname = '/feishu';
+  const legacy = JSON.parse(JSON.stringify(vm.runInContext('readRoute()', context)));
+  assert.equal(legacy.type, 'im'); assert.equal(legacy.channel, 'feishu');
+  context.state.type = 'im'; context.imSelectedChannel = 'wecom';
+  assert.equal(vm.runInContext('routePath()', context), '/im?channel=wecom');
+  location.pathname = '/im'; location.search = '?channel=wecom';
+  assert.equal(vm.runInContext('readRoute().channel', context), 'wecom');
+  location.search = '?channel=unknown';
+  assert.throws(() => vm.runInContext('readRoute()', context), /Channel not found/);
 });
 
 test('unknown sections and malformed resource paths are rejected', () => {

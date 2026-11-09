@@ -1,6 +1,6 @@
 # ⌘ my-agents
 
-**A local workspace for Claude Code and Codex: sessions, request capture, engine connections and a Feishu gateway.**
+**A local workspace for Claude Code and Codex: sessions, request capture, engine connections and IM channels.**
 
 A local dashboard for Claude Code with a zero-dependency core: browse and edit slash commands, skills, agents, plugins and workflows; search and replay past sessions; track token spend; and, uniquely, **capture the real system prompt, tool definitions and every LLM round-trip** behind each conversation. It also routes across multiple accounts with automatic failover, and lets you continue local Claude Code sessions from your phone through a **Feishu (Lark) bot**. **OpenAI Codex CLI** is supported too: view, replay and continue Codex sessions in the same panel, with capture for subscription requests as well.
 
@@ -11,7 +11,7 @@ npm install
 npm start
 ```
 
-[中文文档](README.md) · [Quick Start](#quick-start) · [Features](#features) · [Feishu gateway](#feishu-gateway) · [Codex](#codex) · [Account routing](#account-routing) · [Screenshots](#screenshots) · [Changelog](#changelog)
+[中文文档](README.md) · [Quick Start](#quick-start) · [Features](#features) · [IM connections](#im-connections) · [Codex](#codex) · [Account routing](#account-routing) · [Screenshots](#screenshots) · [Changelog](#changelog)
 
 ![core zero dependencies](https://img.shields.io/badge/core%20dependencies-0-brightgreen) ![node >= 18](https://img.shields.io/badge/node-%3E%3D18-blue) ![license MIT](https://img.shields.io/badge/license-MIT-orange) ![i18n](https://img.shields.io/badge/i18n-中文%20%7C%20EN%20%7C%20日本語-purple)
 
@@ -111,7 +111,11 @@ python3 scripts/gen-demo-data.py
 CLAUDE_DIR="$PWD/demo-data/claude" PORT=4999 node server.js
 ```
 
-## Feishu gateway
+## IM connections
+
+The **IM connections** page groups messaging channels. Feishu / Lark is supported; WeCom is a planned entry with no adapter or messaging support yet. See [IM channel design](docs/im-channels.md).
+
+### Feishu / Lark
 
 Message a Feishu bot privately to drive Claude Code on your Mac.
 
@@ -128,7 +132,7 @@ Feishu app ──official long connection──▶ my-agents on your Mac ──�
 
 ### Setup
 
-1. **Create the bot**: open **Feishu gateway** in the sidebar.
+1. **Create the bot**: open **IM connections → Feishu / Lark** in the sidebar.
    - With `lark-cli` installed, click **Create bot with QR code**. After scanning, the app is created, its credentials are saved and it connects. The panel uses its own CLI config directory and leaves your existing CLI accounts alone.
    - Without the CLI, expand **Manual app setup (fallback)**: create a **custom enterprise app** on the [Feishu open platform](https://open.feishu.cn/app), enable the bot capability, and enter the App ID and App Secret in the panel. Group "custom webhook bots" won't work.
 2. **Permissions and events**: confirm the following in the app console (QR creation configures the card callback automatically; check the rest manually):

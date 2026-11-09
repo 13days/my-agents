@@ -1,7 +1,7 @@
 {
   "name": "my-agents",
   "version": "0.17.0",
-  "description": "Local workspace for Claude Code and Codex: sessions, request capture, multi-account routing, resources and Feishu gateway",
+  "description": "Local workspace for Claude Code and Codex: sessions, request capture, multi-account routing, resources and IM connections (Feishu/Lark)",
   "main": "server.js",
   "bin": {
     "my-agents": "./server.js"
@@ -45,6 +45,7 @@
     "feishu-gateway.js",
     "feishu-simple-reply.js",
     "feishu-ui.js",
+    "im-ui.js",
     "mermaid-ui.js",
     "vendor/mermaid/",
     "mac-runtime.js",
@@ -57,6 +58,7 @@
     "feishu-commands.js",
     "feishu-markdown.js",
     "docs/migration.md",
+    "docs/im-channels.md",
     "upstream-network.js",
     "history-worker.js",
     "message-timing.js",
