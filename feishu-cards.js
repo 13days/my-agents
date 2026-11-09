@@ -123,18 +123,37 @@ function permissions(context, binding, requests) {
   if (requests.length > 3) elements.push(muted(`另有 ${requests.length - 3} 项等待授权，处理后会依次显示。`));
   return elements;
 }
-function currentSession({ binding, item, running, requests = [], nodeLabel = '本机', ...context }) {
+function modelPicker({ engine, sessionId, model = '', models = [], accountName = '', forcedModel = '', notice = '', ...context }) {
+  const options = new Map(models.filter(item => typeof item.id === 'string' && item.id.length <= 100).slice(0, 50).map(item => [item.id, item.name || item.id]));
+  if (model) options.set(model, options.get(model) || model);
+  const elements = [markdown(`**${context.location || '当前位置'} · ${catalogOf(context).label(engine)}**`), markdown(`模型：**${escape(model || '默认（CLI 配置）')}**`)];
+  if (notice) elements.push(markdown(escape(notice)));
+  if (accountName) elements.push(muted(`代理账号：${escape(accountName)}`));
+  if (forcedModel) elements.push(muted(`账号固定映射到 ${escape(forcedModel)}，会覆盖这里的模型选择。`));
+  elements.push({ tag: 'select_static', placeholder: plain('选择模型'), width: 'fill', initial_option: model || '__default__', options: [
+    { text: plain('默认（跟随网关 / CLI 配置）'), value: '__default__' },
+    ...Array.from(options, ([id, name]) => ({ text: plain(clip(name, 48)), value: id })),
+  ], behaviors: [{ type: 'callback', value: action(context, { action: 'set_model', id: sessionId, engine }) }] });
+  elements.push(muted('下一轮生效，当前任务不受影响。/model 模型ID 可手动指定；/model default 恢复默认。模型选择按会话保存。'));
+  if (!models.length) elements.push(muted('该引擎暂未返回模型列表，可使用命令输入模型 ID。'));
+  if (models.length > 50) elements.push(muted('下拉框展示前 50 个模型，其余可用 /model 模型ID 指定。'));
+  elements.push(buttons([button('刷新模型', action(context, { action: 'models', refresh: true })), button('查看会话', action(context, { action: 'switch', id: sessionId }))]));
+  return card('查看 / 切换模型', elements);
+}
+function currentSession({ binding, item, running, model = '默认（CLI 配置）', requests = [], nodeLabel = '本机', ...context }) {
   const pending = !item, title = item?.title || '新会话', engines = catalogOf(context), engineId = item?.engine || binding.engine || 'claude', engine = engines.label(engineId);
   const projectName = path.posix.basename(binding.worktree?.repository || binding.cwd) || binding.cwd, project = escape(projectName), where = escape(nodeLabel);
   const elements = pending ? [markdown(`**当前项目：${project}**`), muted(`${context.location || '当前位置'} · ${engine} · ${where} · 项目确认后，直接发送问题开始对话`)] : [markdown(`**${escape(clip(title, 100))}**`), muted(`${context.location ? context.location + ' · ' : ''}${engine} · ${where} · ${project} · ${running ? '● 正在运行' : '已就绪，直接发消息继续'}`)];
+  elements.push(muted(`模型：${escape(model)}`));
   if (binding.worktree) elements.push(muted(`独立工作区 · ${escape(binding.worktree.branch)}`));
   elements.push(...permissions(context, binding, requests), collapse(pending ? '项目位置' : '会话信息', [markdown(pending ? escape(binding.cwd) : `${escape(binding.cwd)}\n\`${binding.id}\``, true)]));
   const actions = pending ? [button('切换项目', action(context, { action: 'projects', engine: engineId }), 'primary'), button('切换引擎', action(context, { action: 'engine' })), button('切换运行位置', action(context, { action: 'nodes' }))] : [button('最近对话', action(context, { action: 'history', id: binding.id })), button('切换会话', action(context, { action: 'sessions' })), button('换项目新建', action(context, { action: 'projects', engine: engineId })), button('切换引擎', action(context, { action: 'engine' })), button('切换运行位置', action(context, { action: 'nodes' }))];
+  actions.push(button('查看 / 切换模型', action(context, { action: 'models' })));
   if (running) actions.push(button('停止任务', action(context, { action: 'stop', id: binding.id }), 'danger'));
   elements.push(buttons(actions), muted(`此绑定仅用于当前位置；群和话题内已授权用户共用。${engines.switchHint(engineId)} 切换引擎，各自接续上下文。`));
   return card(pending ? '新会话已就绪' : '当前会话', elements, { subtitle: `${engine} · ${nodeLabel} · ${projectName}`, template: requests.length ? 'orange' : 'grey' });
 }
-function task({ binding, title, view, elapsed, ...context }) {
+function task({ binding, title, view, elapsed, model = '默认（CLI 配置）', ...context }) {
   const tools = [...view.tools.values()], requests = view.done ? [] : [...view.permissions.values()];
   const done = tools.filter(item => item.state === '已完成').length;
   const failed = view.phase === '失败' || view.phase === '连接已结束';
@@ -147,6 +166,7 @@ function task({ binding, title, view, elapsed, ...context }) {
     return card(view.phase, elements, { subtitle: '工具执行状态与最终回复', template, summary: `${view.phase}${view.done ? ' · ' + clip(view.text, 90) : ''}` });
   }
   const elements = [muted(`${context.location ? context.location + ' · ' : ''}${catalogOf(context).label(binding.engine || 'claude')} · ${escape(path.basename(binding.cwd) || '项目')} · ${Math.max(0, Math.floor(elapsed / 1000))} 秒${tools.length ? ` · 工具 ${done}/${tools.length}` : ''}`)];
+  elements.push(muted(`模型：${escape(model)}`));
   if (view.warning && !view.done) elements.push(muted(clip(view.warning, 500)));
   if (view.text) elements.push(markdown(clip(view.text, REPLY_PREVIEW)));
   else elements.push(markdown(requests.length ? '请确认下方工具调用，授权后继续。' : view.done ? '本轮已结束。' : '正在处理你的请求，进展会更新在这张卡片中。'));
@@ -166,6 +186,7 @@ function task({ binding, title, view, elapsed, ...context }) {
   elements.push(collapse('会话信息', [markdown(`**${escape(clip(title, 80))}**\n${escape(binding.cwd)}\n\`${binding.id}\``, true)]));
   if (binding.worktree) elements.push(muted(`独立工作区 · ${escape(binding.worktree.branch)}`));
   const actions = [button('查看会话', action(context, { action: 'switch', id: binding.id })), button('会话列表', action(context, { action: 'sessions' })), button('查看 / 切换引擎', action(context, { action: 'engine' }))];
+  actions.push(button('查看 / 切换模型', action(context, { action: 'models' })));
   if (!view.done) actions.push(button('停止任务', action(context, { action: 'stop', id: binding.id }), 'danger'));
   elements.push(buttons(actions));
   return card(view.phase, elements, { subtitle: clip(title, 90), template, summary: `${view.phase} · ${clip(view.text || title, 90)}` });
@@ -195,4 +216,4 @@ function routes({ status, codex, pinned, notice = '', now = Date.now(), ...conte
   elements.push(buttons(controls), muted('/route 序号或名称 切换账号；/route auto 故障转移；/route rr 轮询；/route reset 清除冷却；/route pin 序号|off 固定当前会话；/route codex direct|proxy'));
   return card('代理路由', elements, { subtitle: '切换立即生效，无需经过模型', template: accounts.some(a => a.enabled && (a.cooldownUntil || 0) > now) ? 'orange' : 'grey', summary: `路由：${MODE_NAMES[mode] || mode}` });
 }
-module.exports = { PAGE_SIZE, SESSION_PAGE_SIZE, REPLY_PREVIEW, card, markdown, button, buttons, collapse, sessionList, sessionUserMessages, projectList, nodePicker, enginePicker, currentSession, task, routes, MODE_NAMES };
+module.exports = { PAGE_SIZE, SESSION_PAGE_SIZE, REPLY_PREVIEW, card, markdown, button, buttons, collapse, sessionList, sessionUserMessages, projectList, nodePicker, enginePicker, modelPicker, currentSession, task, routes, MODE_NAMES };

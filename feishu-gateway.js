@@ -17,7 +17,7 @@ function helpText(engines) {
     `/new [${ids.join('|')}] [项目序号或路径] 选择引擎新建，省略时使用默认引擎；路径支持本机已有目录及 ~/`,
     ...engines.list.map(engine => `/${engine.id} [问题] 切到 ${engine.label}，可直接带问题`),
     '/node [节点名] [路径] 查看或切换运行位置（本机 / 远程开发机），例如 /node devbox ~/repos/项目',
-    '/use 引擎 切换引擎（支持别名）', '/engine 查看当前引擎和切换选项', '/current 查看当前位置的绑定会话', '/history 查看最近对话',
+    '/model [模型 ID|default] 查看或切换当前会话模型，default 恢复默认', '/use 引擎 切换引擎（支持别名）', '/engine 查看当前引擎和切换选项', '/current 查看当前位置的绑定会话', '/history 查看最近对话',
     '/rename 新名称 固定会话名称', '/queue 内容 排队处理', '/steer 内容 立即引导', '/stop 停止当前任务',
     '/route 代理路由：/route 序号切账号、auto 故障转移、rr 轮询、reset 清除冷却、pin 序号|off 固定当前会话、codex direct|proxy',
     '/status 网关状态', '/ask 内容 将内容作为正文发给当前引擎',
@@ -49,10 +49,11 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   const configFile = path.join(dir, 'panel-feishu.json'), stateFile = path.join(dir, 'panel-feishu-state.json');
   const inbox = createFeishuInbox(dir);
   const defaults = { allowAllUsers: false, allowAllGroups: false, enabled: false, appId: '', appSecret: '', domain: 'feishu', allowedUserIds: [], disabledUserIds: [], allowedChatIds: [], defaultProject: '', defaultEngine: 'claude', worktree: true, model: '', keepAwake: false };
-  let config = defaults, state = { bindings: {}, engineBindings: {}, cards: {}, taskCards: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} }, phase = 'disabled', lastError = '', channel = null, connecting = null, pairing = null;
+  let config = defaults, state = { bindings: {}, engineBindings: {}, cards: {}, taskCards: {}, sessionModels: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} }, phase = 'disabled', lastError = '', channel = null, connecting = null, pairing = null;
   try { config = { ...defaults, ...load(configFile, {}) }; state = { ...state, ...load(stateFile, {}) }; }
   catch (e) { lastError = e.message; phase = 'error'; }
   state.taskCards ||= {};
+  state.sessionModels ||= {};
   // Engines come from the panel registry; unknown defaults fall back at use time.
   const catalog = () => engineCatalog(panel.engines?.());
   const defaultEngine = () => catalog().fallback(config.defaultEngine, 'claude');
@@ -215,8 +216,8 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   }
   async function currentCard(msg, binding) {
     const node = nodeOf(binding), where = node === 'local' ? '' : ` · ${nodeLabel(node)}`;
-    if (!detailed(msg)) return send(msg, { text: `${contextLabel(msg)} · ${catalog().label(engineOf(binding))}${where} 已就绪。直接发送消息继续。\n${catalog().switchHint(engineOf(binding))} 切换；各自保留上下文。/node 切换运行位置。` });
-    const result = await send(msg, { card: cards.currentSession({ engines: catalog(), owner: msg.senderId, key: contextKey(msg), location: contextLabel(msg), nodeLabel: nodeLabel(node), binding, item: session(binding.id), running: panel.running(binding.id), requests: panel.pendingPermissions?.(binding.id) || [] }) });
+    if (!detailed(msg)) return send(msg, { text: `${contextLabel(msg)} · ${catalog().label(engineOf(binding))}${where} · 模型：${modelLabel(binding)} 已就绪。直接发送消息继续。\n${catalog().switchHint(engineOf(binding))} 切换；各自保留上下文。/node 切换运行位置。/model 查看或切换模型。` });
+    const result = await send(msg, { card: cards.currentSession({ engines: catalog(), owner: msg.senderId, key: contextKey(msg), location: contextLabel(msg), nodeLabel: nodeLabel(node), model: modelLabel(binding), binding, item: session(binding.id), running: panel.running(binding.id), requests: panel.pendingPermissions?.(binding.id) || [] }) });
     rememberCard(result, msg, binding);
   }
   async function historyReply(msg, binding) {
@@ -251,6 +252,33 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     const cwd = binding?.cwd || config.defaultProject;
     const result = await send(msg, { card: cards.enginePicker({ owner: msg.senderId, key: contextKey(msg), location: contextLabel(msg), engine, defaultEngine: defaultEngine(), cwd, engines: catalog() }) });
     rememberCard(result, msg, binding);
+  }
+  const selectedModel = binding => state.sessionModels[binding.id] ?? modelFor(engineOf(binding)) ?? '';
+  const modelLabel = binding => {
+    const next = selectedModel(binding) || '默认（CLI 配置）', active = panel.currentModel?.(binding.id);
+    return panel.running(binding.id) && active && active !== selectedModel(binding) ? `${active}（下一轮：${next}）` : next;
+  };
+  async function modelsCard(msg, notice = '', refresh = false) {
+    const binding = state.bindings[scope(msg)] || defaultBinding(msg);
+    if (!binding) return send(msg, { text: '请先用 /new 选择项目，再用 /model 查看和切换模型。' });
+    const engine = engineOf(binding);
+    let data = { models: [] };
+    try { data = await panel.models?.({ engine, sessionId: binding.id, node: nodeOf(binding), refresh }) || data; } catch {}
+    if (!detailed(msg)) return send(msg, { text: `${notice ? notice + '\n' : ''}${contextLabel(msg)} · ${catalog().label(engine)}\n模型：${modelLabel(binding)}\n/model 模型ID 切换；/model default 恢复默认。${data.models.length ? '\n可用模型：\n' + data.models.map(item => item.id).join('\n') : ''}` });
+    const result = await send(msg, { card: cards.modelPicker({ owner: msg.senderId, key: contextKey(msg), location: contextLabel(msg), engines: catalog(), engine, sessionId: binding.id, model: selectedModel(binding), models: data.models, accountName: data.accountName, forcedModel: data.forcedModel, notice }) });
+    rememberCard(result, msg, binding);
+  }
+  async function setModel(msg, input, expected = {}) {
+    const binding = state.bindings[scope(msg)] || defaultBinding(msg);
+    if (!binding) throw new Error('请先用 /new 选择项目');
+    const engine = engineOf(binding);
+    if (expected.id && expected.id !== binding.id || expected.engine && expected.engine !== engine) throw new Error('会话已切换，请发送 /model 重新选择');
+    if (typeof input !== 'string') throw new Error('请选择模型，或发送 /model 模型ID');
+    const model = input.trim(), reset = model === 'default' || model === '__default__';
+    if (!reset && (!/^[\w.\/:\[\]-]{1,100}$/.test(model) || panel.validModel && !panel.validModel(engine, model, nodeOf(binding)))) throw new Error('该引擎的模型 ID 无效');
+    if (reset) delete state.sessionModels[binding.id]; else state.sessionModels[binding.id] = model;
+    persist();
+    return modelsCard(msg, `已${reset ? '恢复默认模型' : '选择模型：' + model}。下一轮生效，当前任务不受影响；完成后发送消息继续。`);
   }
   // 路由切换完全在网关内完成，不经过模型：账号挂了也能救回来
   async function routesCard(msg, notice = '') {
@@ -317,9 +345,10 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (binding.engine !== engine) { binding.engine = engine; persist(); }
     const previousId = binding.id;
     const node = nodeOf(binding);
-    const result = await panel.submit({ sessionId: binding.id, cwd: binding.cwd, worktree: config.worktree && !session(binding.id), model: modelFor(engine), engine, ...(node !== 'local' ? { node } : {}), ...input });
+    const result = await panel.submit({ sessionId: binding.id, cwd: binding.cwd, worktree: config.worktree && !session(binding.id), model: selectedModel(binding), engine, ...(node !== 'local' ? { node } : {}), ...input });
     if (result?.sessionId && result.sessionId !== binding.id) {
       binding.id = result.sessionId;
+      if (Object.hasOwn(state.sessionModels, previousId)) { state.sessionModels[binding.id] = state.sessionModels[previousId]; delete state.sessionModels[previousId]; }
       for (const card of Object.values(state.cards)) if (card.sessionId === previousId) { card.originalSessionId ||= previousId; card.sessionId = binding.id; }
     }
     if (result?.cwd) {
@@ -356,7 +385,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (!prompt && !images.length) throw new Error('请发送文字或图片');
     const id = messageUUID(msg.messageId), view = { text: '', tools: new Map(), reasoning: new Map(), permissions: new Map(), phase: mode === 'queue' ? '已排队' : '正在处理', done: false };
     if (!detailed(msg)) {
-      const reply = createSimpleReply({ channel, msg: { ...msg, threadId: threadOf(msg) }, messageId: id, footer: `${catalog().label(engineOf(binding))} · ${catalog().switchHint(engineOf(binding))} 切换引擎`, onError: rememberError, onClose: () => monitors.delete(reply.close) });
+      const reply = createSimpleReply({ channel, msg: { ...msg, threadId: threadOf(msg) }, messageId: id, footer: `${catalog().label(engineOf(binding))} · ${catalog().switchHint(engineOf(binding))} 切换引擎 · 模型：${modelLabel(binding)} · /model 切换模型`, onError: rememberError, onClose: () => monitors.delete(reply.close) });
       monitors.add(reply.close);
       try {
         await reply.start();
@@ -366,8 +395,8 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       } catch (e) { await reply.close(); throw e; }
       return;
     }
-    const startedAt = now();
-    const progress = () => cards.task({ engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), detailed: detailed(msg), binding, title: session(binding.id)?.title || clip(prompt, 80) || '图片对话', view, elapsed: now() - startedAt });
+    const startedAt = now(), taskModel = selectedModel(binding) || '默认（CLI 配置）';
+    const progress = () => cards.task({ model: taskModel, engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), detailed: detailed(msg), binding, title: session(binding.id)?.title || clip(prompt, 80) || '图片对话', view, elapsed: now() - startedAt });
     const sent = await send(msg, { card: progress() }); rememberCard(sent, msg, binding);
     const transport = channel;
     const saveTask = card => {
@@ -458,7 +487,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     const newEngine = explicitEngine || defaultEngine();
     const newTarget = explicitEngine ? arg.slice(firstWord.length).trim() : arg;
     if (!detailed(msg) && (['sessions', 'projects', 'switch', 'history', 'rename', 'route'].includes(command) || command === 'new' && newTarget)) return managementNotice(msg);
-    if (!detailed(msg) && command === 'help') return send(msg, { text: `直接发送消息，或 @机器人，在当前位置独立会话中处理。\n/new [${engines.ids().join('|')}] 默认项目新建\n${engines.ids().map(id => '/' + id).join(' 或 ')} 切换引擎\n/current 查看当前引擎与绑定\n/node [节点名] [路径] 切换运行位置（本机 / 开发机）\n/queue 内容 排队\n/steer 内容 引导任务\n/stop 停止任务\n此群使用普通文字回复和临时思考表情，会话管理请先在面板逐项授权此群。` });
+    if (!detailed(msg) && command === 'help') return send(msg, { text: `直接发送消息，或 @机器人，在当前位置独立会话中处理。\n/new [${engines.ids().join('|')}] 默认项目新建\n${engines.ids().map(id => '/' + id).join(' 或 ')} 切换引擎\n/model [模型ID|default] 查看或切换模型\n/current 查看当前引擎与绑定\n/node [节点名] [路径] 切换运行位置（本机 / 开发机）\n/queue 内容 排队\n/steer 内容 引导任务\n/stop 停止任务\n此群使用普通文字回复和临时思考表情，会话管理请先在面板逐项授权此群。` });
     if (!detailed(msg) && command === 'status') return send(msg, { text: `my-agents 在线 · ${contextLabel(msg)}独立会话\n当前引擎：${catalog().label(binding ? engineOf(binding) : defaultEngine())}\n${engines.switchHint(binding ? engineOf(binding) : defaultEngine())} 切换引擎\n此群使用简洁显示：普通文字回复，处理时显示思考表情。` });
     // /<引擎 id 或别名> [问题] 直接切换；/use 与 /engine 带参数时同样切换
     if (command && engines.find(command) && !['new', 'use', 'engine'].includes(command)) return useEngine(msg, engines.find(command), arg);
@@ -468,6 +497,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (!target) throw new Error(`使用 ${engines.ids().map(id => '/' + id).join(' 或 ')} 切换引擎，/engine 查看当前引擎`);
       return useEngine(msg, target);
     }
+    if (command === 'model') return arg ? setModel(msg, arg) : modelsCard(msg);
     if (command === 'help') return send(msg, { text: helpText(engines) });
     if (command === 'node' || command === 'nodes') {
       if (!arg) return nodesCard(msg);
@@ -553,7 +583,8 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     try { return await work; } finally { if (locks.get(key) === work) locks.delete(key); }
   }
   async function action(evt) {
-    const value = evt.action?.value;
+    const rawValue = evt.action?.value;
+    const value = rawValue?.action === 'set_model' ? { ...rawValue, model: evt.action.option } : rawValue;
     const msg = { messageId: evt.messageId, senderId: evt.operator?.openId, chatId: evt.chatId, chatType: evt.chatType || inbox.chatType(config.appId, evt.chatId) || state.cards[evt.messageId]?.chatType || 'group', content: '' };
     if (!value || typeof value !== 'object' || value.owner !== msg.senderId || !allowed(msg) || !detailed(msg)) return;
     if (value.key) { try { const [owner, chat, thread] = JSON.parse(value.key); if ((owner !== msg.senderId && !(owner === '*' && msg.chatType !== 'p2p')) || chat !== msg.chatId || typeof thread !== 'string') return; const saved = state.cards[evt.messageId]; if (saved?.key && saved.key !== value.key) return; if (thread !== 'main') msg.threadId = thread; } catch { return; } }
@@ -562,6 +593,8 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   }
   async function cardAction(msg, key, value) {
     try {
+      if (value.action === 'models') return await modelsCard(msg, '', value.refresh === true);
+      if (value.action === 'set_model') return await setModel(msg, value.model, value);
       if (value.action === 'engine') return engineCard(msg);
       if (value.action === 'use_engine') { if (!catalog().has(value.engine)) throw new Error('引擎无效'); return useEngine(msg, value.engine); }
       if (value.action === 'sessions') return sessionsCard(msg, String(value.query || ''), value.page);
@@ -658,7 +691,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (next.enabled && (!/^[a-zA-Z0-9_-]{8,100}$/.test(next.appId) || !next.appSecret || next.appSecret.length > 1000)) throw new Error('请填写有效的 App ID 和 App Secret');
     if (next.defaultProject) { next.defaultProject = fs.realpathSync(next.defaultProject); if (!fs.statSync(next.defaultProject).isDirectory()) throw new Error('默认项目必须是文件夹'); }
     if (next.model && !/^[\w.\/:\[\]-]{1,100}$/.test(next.model)) throw new Error('模型名称无效');
-    if (next.appId !== config.appId || next.domain !== config.domain) { next.cardCallbacksReady = input.cardCallbacksReady || false; next.allowAllUsers = input.allowAllUsers || false; next.allowAllGroups = input.allowAllGroups || false; next.allowedUserIds = input.allowedUserIds || []; next.disabledUserIds = input.disabledUserIds || []; pairing = null; state = { bindings: {}, engineBindings: {}, cards: {}, taskCards: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} }; persist(); }
+    if (next.appId !== config.appId || next.domain !== config.domain) { next.cardCallbacksReady = input.cardCallbacksReady || false; next.allowAllUsers = input.allowAllUsers || false; next.allowAllGroups = input.allowAllGroups || false; next.allowedUserIds = input.allowedUserIds || []; next.disabledUserIds = input.disabledUserIds || []; pairing = null; state = { bindings: {}, engineBindings: {}, cards: {}, taskCards: {}, sessionModels: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} }; persist(); }
     const reconnect = next.enabled !== config.enabled || next.appId !== config.appId || next.appSecret !== config.appSecret || next.domain !== config.domain;
     if (reconnect) await stop();
     config = next; atomic(configFile, config); runtime.keepAwake(config.keepAwake);

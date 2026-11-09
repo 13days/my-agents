@@ -5,6 +5,18 @@ const context = { owner: 'ou_owner', key: '["ou_owner","oc_chat","main"]' };
 const nodes = value => value && typeof value === 'object' ? [value, ...Object.values(value).flatMap(nodes)] : [];
 const actions = card => nodes(card).filter(node => node.type === 'callback').map(node => node.value);
 
+test('model pickers expose callback options with the target session and stay within the card budget', () => {
+  const card = cards.modelPicker({ ...context, engine: 'claude', sessionId: 'session-a', model: 'custom-model', models: Array.from({ length: 100 }, (_, index) => ({ id: 'model-' + index, name: '中文模型'.repeat(40) })) });
+  const select = nodes(card).find(node => node.tag === 'select_static');
+  assert.equal(select.initial_option, 'custom-model');
+  assert.equal(select.behaviors[0].value.id, 'session-a');
+  assert.equal(select.behaviors[0].value.action, 'set_model');
+  assert.equal(select.behaviors[0].value.owner, context.owner);
+  assert.equal(select.options.length, 52);
+  assert.ok(Buffer.byteLength(JSON.stringify(card)) < 28000);
+  assert.match(JSON.stringify(card), /前 50 个模型/);
+});
+
 test('session pages retain global command numbers and callback routing while hiding technical paths', () => {
   const rows = Array.from({ length: cards.SESSION_PAGE_SIZE }, (_, i) => ({ id: 'session-' + (i + 5), title: '*title* ' + i, project: '/workspace/project', running: i === 0 }));
   const card = cards.sessionList({ ...context, rows, total: 47, page: 1, query: 'project', selected: rows[1].id });

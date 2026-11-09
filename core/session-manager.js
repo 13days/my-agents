@@ -100,7 +100,7 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
     if (requested && realId !== requested) aliases.set(requested, realId);
     history.touch(realId, { engine: engineId, node: host.id, cwd, worktree, prompt: turn.prompt, created: !known });
 
-    const job = createChatJob({ routed: !!session.routed, engine: engineId, node: host.id, cwd, worktree, sessionId: realId, jobId: crypto.randomUUID() });
+    const job = createChatJob({ routed: !!session.routed, engine: engineId, node: host.id, cwd, worktree, model, sessionId: realId, jobId: crypto.randomUUID() });
     run = { id: realId, engine: engineId, node: host.id, job, session, baseHistory, baseMessages: baseHistory?.messages || [], stopped: false, requestedId: requested };
     runs.set(realId, run);
     for (const [event, data] of buffered.splice(0)) job.publish(event, data);

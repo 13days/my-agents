@@ -1827,13 +1827,16 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
     submit: async ({ gatewayContext, ...input }) => {
       const run = manager.get(input.sessionId), live = run && !run.job.closed;
       if (!live && accountRouter.sessions().items.some(item => item.id === input.sessionId && item.running)) throw new Error('此会话正在外部 CLI 中运行，请等本轮结束后续接；可先用 /history 查看记录');
-      if (live) { manager.send(input.sessionId, { ...input, context: gatewayContext }); return { sessionId: run.id }; }
+      if (live && (run.job.meta.model || '') === (input.model || '')) { manager.send(input.sessionId, { ...input, context: gatewayContext }); return { sessionId: run.id }; }
       const { sessionId, run: started } = await manager.start({ ...input, context: gatewayContext });
       return { sessionId, cwd: started.job.meta.cwd, worktree: started.job.meta.worktree };
     },
     engine: id => sessionEngine(id),
     engines: () => registry.list().map(engine => ({ id: engine.id, ...engine.meta, capabilities: engine.capabilities })),
     engineInfo: (engine, node = 'local') => registry.adapter(engine, node)?.detect?.() || {},
+    models: ({ engine, sessionId, refresh }) => registry.get(engine)?.capabilities?.accounts ? accountRouter.models({ sessionId, refresh }) : Promise.resolve({ models: [] }),
+    validModel: (engine, model, node = 'local') => !!(registry.adapter(engine, node) || registry.get(engine))?.validModel(model),
+    currentModel: id => { const run = manager.get(id); return run && !run.job.closed ? run.job.meta.model || '' : ''; },
     nodes: () => nodeHub.list().filter(node => node.id !== 'local').map(node => ({ id: node.id, label: node.label, connected: node.connected, platform: node.platform, home: node.home })),
     routes: () => ({ ...accountRouter.status(), pins: accountRouter.sessions().routes }),
     route: input => accountRouter.route(input),

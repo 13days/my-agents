@@ -45,6 +45,19 @@ function setup() {
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
+test('idle engine runs restart with a new model while keeping the same resumable conversation', async () => {
+  const { manager, opened } = setup();
+  const first = await manager.start({ sessionId: 'existing-thread', prompt: 'one', cwd: os.tmpdir(), model: 'model-one' });
+  await settle();
+  const second = await manager.start({ sessionId: first.sessionId, prompt: 'two', cwd: os.tmpdir(), model: 'model-two' });
+  assert.equal(first.run.job.closed, true);
+  assert.equal(second.sessionId, first.sessionId);
+  assert.equal(second.run.job.meta.model, 'model-two');
+  assert.equal(opened[1].model, 'model-two');
+  assert.equal(opened[1].resume, true);
+  await settle(); manager.stop(second.sessionId);
+});
+
 test('assigned engines keep the requested id; events reach the job in order', async () => {
   const { manager, opened, touched } = setup();
   const { sessionId, run } = await manager.start({ prompt: 'hi', sessionId: 'aaaaaaaa-1111', cwd: os.tmpdir() });

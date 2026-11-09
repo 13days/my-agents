@@ -39,6 +39,52 @@ async function fixture(t) {
   return { gateway, panel, calls, sent, updated, rows, dir, msg, pair, options, channel, handlers, policies, reactions, advance: value => { clock += value; } };
 }
 
+test('Feishu model dropdown persists its option, submits that model and rejects stale session cards', async t => {
+  const f = await fixture(t); await f.pair();
+  f.panel.models = async () => ({ accountName: 'Proxy', models: [{ id: 'model-a', name: 'Model A' }, { id: 'model-b', name: 'Model B' }] });
+  await f.gateway.receive(f.msg('/new'));
+  await f.gateway.receive(f.msg('/model'));
+  const picker = f.sent.at(-1), binding = JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json'))).bindings[contextKey(f.msg(''))];
+  const select = picker.content.card.body.elements.find(item => item.tag === 'select_static');
+  assert.ok(select.options.some(item => item.value === 'model-b'));
+  const evt = { messageId: picker.messageId, chatId: 'oc_private', operator: { openId: 'ou_owner' }, action: { tag: 'select_static', value: select.behaviors[0].value, option: 'model-b' } };
+  await f.gateway.action(evt);
+  assert.match(JSON.stringify(f.sent.at(-1).content), /已选择模型：model-b/);
+  await f.gateway.receive(f.msg('Use the selected model'));
+  assert.equal(f.calls.at(-1).model, 'model-b');
+  await f.gateway.stop(); const restored = createFeishuGateway(f.options); await restored.start();
+  t.after(() => restored.stop());
+  await restored.receive(f.msg('/model'));
+  assert.match(JSON.stringify(f.sent.at(-1).content), /model-b/);
+  await restored.receive(f.msg('/new'));
+  await restored.action(evt);
+  assert.match(JSON.stringify(f.sent.at(-1).content), /会话已切换/);
+  const state = JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json')));
+  assert.equal(state.sessionModels[binding.id], 'model-b');
+  assert.equal(state.sessionModels[state.bindings[contextKey(f.msg(''))].id], undefined);
+});
+
+test('simple Feishu topics can view, select and reset models independently', async t => {
+  const f = await fixture(t);
+  await f.gateway.configure({ allowAllGroups: true });
+  const inTopic = (text, threadId) => f.msg(text, { chatId: 'oc_group', chatType: 'group', threadId, mentionedBot: true });
+  await f.gateway.receive(inTopic('/model model-a', 'topic-a'));
+  await f.gateway.receive(inTopic('/model model-b', 'topic-b'));
+  assert.equal(f.calls.length, 0);
+  await f.gateway.receive(inTopic('/model', 'topic-a'));
+  assert.match(JSON.stringify(f.sent.at(-1).content), /模型：model-a/);
+  assert.doesNotMatch(JSON.stringify(f.sent.at(-1).content), /model-b/);
+  await f.gateway.receive(inTopic('Run A', 'topic-a'));
+  assert.equal(f.calls.at(-1).model, 'model-a');
+  await f.gateway.receive(inTopic('Run B', 'topic-b'));
+  assert.equal(f.calls.at(-1).model, 'model-b');
+  await f.gateway.receive(inTopic('/model default', 'topic-a'));
+  await f.gateway.receive(inTopic('Default model', 'topic-a'));
+  assert.equal(f.calls.at(-1).model, '');
+  await f.gateway.receive(inTopic('/model bad model', 'topic-b'));
+  assert.match(JSON.stringify(f.sent.at(-1).content), /模型 ID 无效/);
+});
+
 test('only a paired owner can access sessions or invoke Claude; pairing is single use and secrets stay redacted', async t => {
   const f = await fixture(t);
   await f.gateway.receive(f.msg('/sessions')); assert.equal(f.calls.length, 0); assert.match(f.sent.at(-1).content.post.zh_cn.content[0][0].text, /尚未配对/);
@@ -295,7 +341,7 @@ test('open groups hide session controls and tool details while explicitly select
   await f.gateway.receive(f.msg('公开群任务', group));
   await new Promise(resolve => setTimeout(resolve, 30));
   let rendered = JSON.stringify(f.sent.at(-1).content);
-  assert.equal(f.sent.at(-1).content.post.zh_cn.content[0][0].text, 'A complete response.\n\nClaude Code · /codex 或 /claude 切换引擎');
+  assert.equal(f.sent.at(-1).content.post.zh_cn.content[0][0].text, 'A complete response.\n\nClaude Code · /codex 或 /claude 切换引擎 · 模型：默认（CLI 配置） · /model 切换模型');
   assert.equal(f.updated.length, 0);
   assert.deepEqual(f.reactions.map(x => x.action), ['add', 'remove']);
   assert.match(rendered, /A complete response/);
