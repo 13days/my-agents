@@ -37,6 +37,9 @@ function codexCredentials(auth, mode) {
   if (mode === 'api-key') return auth?.OPENAI_API_KEY ? { authorization: `Bearer ${auth.OPENAI_API_KEY}` } : null;
   const tokens = auth?.tokens;
   if (!tokens?.access_token) return null;
+  // A login file can outlive its access token. Do not advertise known-expired
+  // JWTs as usable pool entries; opaque tokens are validated by the provider.
+  try { const claims = JSON.parse(Buffer.from(tokens.access_token.split('.')[1], 'base64url').toString()); if (typeof claims.exp === 'number' && claims.exp * 1000 <= Date.now()) return null; } catch {}
   return { authorization: `Bearer ${tokens.access_token}`, ...(tokens.account_id ? { 'chatgpt-account-id': tokens.account_id } : {}) };
 }
 const sameSecret = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };

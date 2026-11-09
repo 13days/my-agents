@@ -107,3 +107,12 @@ test('Codex can use another panel login and fail over authentication rejections 
   assert.equal(accepted.sent[0].headers['x-my-agents-local-account'], undefined);
   assert.deepEqual(selected, [[], ['a']]);
 });
+
+test('expired CLI access tokens are excluded from account sharing without changing login files', () => {
+  const jwt = exp => ['header', Buffer.from(JSON.stringify({ exp })).toString('base64url'), 'signature'].join('.');
+  const auth = { tokens: { access_token: jwt(Math.floor(Date.now() / 1000) - 60), refresh_token: 'owner-only' } };
+  assert.equal(codexCredentials(auth, 'chatgpt'), null);
+  auth.tokens.access_token = jwt(Math.floor(Date.now() / 1000) + 3600);
+  assert.ok(codexCredentials(auth, 'chatgpt').authorization);
+  assert.equal(auth.tokens.refresh_token, 'owner-only');
+});
