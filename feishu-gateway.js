@@ -420,7 +420,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (panel.validateExecution) await panel.validateExecution({ machineId: draft.machineId, engine: draft.engine, cwd });
       const proposed = { draftId: draft.id, id: draft.sessionId, machineId: draft.machineId, cwd, engine: draft.engine, workspaceId: workspace?.id, worktreeEnabled: draft.worktree };
       if (model) state.sessionModels[proposed.id] = model; else delete state.sessionModels[proposed.id];
-      await run({ ...msg, messageId: 'form_' + draft.id }, draft.prompt, 'steer', proposed);
+      await run({ ...msg, turnId: messageUUID('form_' + draft.id + ':' + draft.revision) }, draft.prompt, 'steer', proposed);
       bind(key, proposed); draft.status = 'submitted'; draft.binding = { ...proposed }; persist();
     } catch (error) {
       draft.status = 'editing'; draft.revision++; persist();
@@ -459,7 +459,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       images.push({ mimeType, data: buffer.toString('base64') });
     }
     if (!prompt && !images.length) throw new Error('请发送文字或图片');
-    const id = messageUUID(msg.messageId), view = { text: '', tools: new Map(), reasoning: new Map(), permissions: new Map(), phase: mode === 'queue' ? '已排队' : '正在处理', done: false };
+    const id = msg.turnId || messageUUID(msg.messageId), view = { text: '', tools: new Map(), reasoning: new Map(), permissions: new Map(), phase: mode === 'queue' ? '已排队' : '正在处理', done: false };
     if (!detailed(msg)) {
       const reply = createSimpleReply({ channel, msg: { ...msg, threadId: threadOf(msg) }, messageId: id, footer: () => `${nodeLabel(nodeOf(binding))} · ${catalog().label(engineOf(binding))} · ${catalog().switchHint(engineOf(binding))} 切换引擎 · 模型：${modelLabel(binding)} · /model 切换模型`, onError: rememberError, onFinish: result => result.failed && proposed ? retrySubmittedDraft(msg, proposed, result.text) : undefined, onClose: () => monitors.delete(reply.close) });
       monitors.add(reply.close);

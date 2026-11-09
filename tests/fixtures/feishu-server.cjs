@@ -1,7 +1,7 @@
 // Real Panel HTTP/CLI lifecycle, with only the Feishu transport and Claude process replaced.
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict'), Module = require('node:module');
 const dir = process.env.CLAUDE_DIR, sent = [], updates = [], handlers = {};
-const transport = { on(event, fn) { handlers[event] = fn; }, connect: async () => {}, disconnect: async () => {}, send: async (chatId, content, options) => { const messageId = 'out_' + (sent.length + 1); sent.push({ chatId, content, messageId, options }); return { messageId }; }, updateCard: async (id, card) => { updates.push({ id, card }); } };
+const transport = { on(event, fn) { handlers[event] = fn; }, connect: async () => {}, disconnect: async () => {}, send: async (chatId, content, options) => { assert.ok(!options?.replyTo?.startsWith('form_'), 'Internal turn IDs must never be used as Feishu reply targets'); const messageId = 'out_' + (sent.length + 1); sent.push({ chatId, content, messageId, options }); return { messageId }; }, updateCard: async (id, card) => { updates.push({ id, card }); } };
 const originalLoad = Module._load;
 Module._load = function (id, ...rest) { return id === '@larksuiteoapi/node-sdk' ? { createLarkChannel: () => transport, Domain: { Feishu: 0, Lark: 1 }, LoggerLevel: { error: 1 } } : originalLoad.call(this, id, ...rest); };
 const cli = path.join(dir, 'mock-cli.cjs');

@@ -998,3 +998,21 @@ test('a first engine shortcut keeps its query and uses the configured remote def
  await f.gateway.receive(f.msg('/claude Keep the first query'));
  assert.equal(f.calls.length,1);assert.equal(f.calls[0].node,'mac');assert.equal(f.calls[0].machineId,'mac');assert.equal(f.calls[0].prompt,'Keep the first query');
 });
+
+for (const simple of [false, true]) test(`form turns keep real Feishu reply targets in ${simple ? 'simple' : 'detailed'} mode`,async t=>{
+ const f=await fixture(t);await f.pair();enableFormFixture(f);
+ const group=simple?{chatType:'group',chatId:'oc_form_ids',threadId:'omt_form_ids',mentionedBot:true}:{};
+ if(simple)await f.gateway.configure({allowAllGroups:true});
+ const send=f.channel.send;
+ f.channel.send=async(chat,content,options)=>{assert.ok(!options?.replyTo?.startsWith('form_'),'internal form IDs cannot be reply targets');return send(chat,content,options)};
+ const react=f.channel.addReaction;
+ f.channel.addReaction=async(id,...args)=>{assert.ok(!id.startsWith('form_'),'reactions need a real Feishu message ID');return react(id,...args)};
+ await f.gateway.receive(f.msg('/new Check IDs',group));
+ const sent=f.sent.at(-1),value=formSubmitValue(sent),before=f.sent.length;
+ await f.gateway.action({messageId:sent.messageId,chatId:group.chatId||'oc_private',chatType:group.chatType||'p2p',operator:{openId:'ou_owner'},action:{value,form_value:formFields('Check IDs')}});
+ for(let i=0;i<30&&f.sent.length===before;i++)await new Promise(resolve=>setTimeout(resolve,10));
+ assert.equal(f.calls.length,1);
+ assert.equal(f.calls[0].messageId,messageUUID('form_'+value.draftId+':'+value.revision));
+ assert.ok(f.calls[0].gatewayContext.includes('"messageId":"'+sent.messageId+'"'));
+ assert.ok(f.sent.slice(before).some(message=>message.options.replyTo===sent.messageId));
+});
