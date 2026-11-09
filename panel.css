@@ -20,6 +20,14 @@ button, a, input, select, textarea, summary { outline-offset: 3px; }
 [hidden] { display: none !important; }
 .svg-icon { width: 19px; height: 19px; flex-shrink: 0; display: inline-block; vertical-align: middle; }
 
+.mermaid-block { margin: 16px 0; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); overflow: hidden; }
+.mermaid-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.mermaid-toggle { padding: 4px 8px; background: transparent; color: var(--accent2); border: 1px solid var(--border); border-radius: 6px; white-space: nowrap; }
+.mermaid-canvas { min-height: 80px; padding: 24px 16px; overflow: auto; text-align: center; }
+.mermaid-canvas svg { display: block; max-width: 100%; height: auto; margin: auto; }
+.mermaid-source pre { margin: 0; text-align: left; }
+.mermaid-source { overflow: auto; }
+
 /* Persistent navigation is separate from the resource library. */
 #navrail { display: flex; flex-direction: column; width: 212px; min-width: 212px; background: #16181b; border-right: 1px solid var(--border); }
 #logo { display: flex; align-items: center; gap: 10px; height: 82px; padding: 0 22px; font-size: 15px; font-weight: 650; letter-spacing: -.35px; white-space: nowrap; }

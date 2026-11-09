@@ -79,6 +79,7 @@
 </div>
 
 <script src="/feishu-ui.js"></script>
+<script src="/mermaid-ui.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 
@@ -1723,10 +1724,15 @@ function md(src) {
     const l = lines[i];
     // 代码块
     if (/^```/.test(l)) {
+      const language = l.slice(3).trim().toLowerCase();
       let buf = []; i++;
       while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
+      const complete = i < lines.length;
       i++;
-      html += `<pre><code>${esc(buf.join('\n'))}</code></pre>`;
+      const code = `<pre><code>${esc(buf.join('\n'))}</code></pre>`;
+      html += language === 'mermaid' && complete
+        ? `<section class="mermaid-block" data-mermaid-pending><div class="mermaid-toolbar"><span class="mermaid-status">图表</span><button type="button" class="mermaid-toggle" aria-expanded="false">查看源码</button></div><div class="mermaid-canvas" aria-label="Mermaid 图表"></div><div class="mermaid-source">${code}</div></section>`
+        : code;
       continue;
     }
     // 表格
@@ -3250,7 +3256,7 @@ function addInlineExpansion(parent, content) {
   parent.append(button); update();
 }
 function installWindowControls() {
-  document.querySelectorAll('#render pre, #render .chart, #render .bubble, #render .chat-message, #render .capture-context, #render .chat-messages, #render .route-account, #render .card, #render .leg-sessions, #render .chat-tool, #render .route-empty, #render .account-usage-row, #render #river, #editor').forEach(node => {
+  document.querySelectorAll('#render .mermaid-canvas, #render pre, #render .chart, #render .bubble, #render .chat-message, #render .capture-context, #render .chat-messages, #render .route-account, #render .card, #render .leg-sessions, #render .chat-tool, #render .route-empty, #render .account-usage-row, #render #river, #editor').forEach(node => {
     if (node.classList.contains('is-expanded-window') || node.windowExpandButton?.isConnected) return;
     node.dataset.expandable = 'true';
     let host = node;
