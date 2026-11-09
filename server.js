@@ -1921,9 +1921,9 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' });
       return fs.createReadStream(path.join(__dirname, url.pathname.slice(1))).pipe(res);
     }
-    if (['/feishu-ui.js', '/user-guide.js'].includes(url.pathname) && req.method === 'GET') {
+    if (url.pathname === '/feishu-ui.js' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' });
-      return res.end(fs.readFileSync(path.join(__dirname, url.pathname.slice(1))));
+      return res.end(fs.readFileSync(path.join(__dirname, 'feishu-ui.js')));
     }
     if (url.pathname === '/panel.css' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': 'no-cache' });

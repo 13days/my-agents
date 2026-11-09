@@ -78,7 +78,80 @@
   </div>
 </div>
 
-<script src="/user-guide.js"></script>
+<script>
+// Product guidance is kept with the shipped UI so it is available offline.
+function userGuideSections() {
+  const copy = (zh, en) => rt(zh, en);
+  return [
+    { id: 'start', title: copy('第一次使用', 'Get started'), lead: copy('my-agents 管理外部 Agent 的使用入口。实际任务由执行机器上已安装的 Claude Code / Codex 完成。', 'my-agents manages access to external agents. Installed Claude Code / Codex CLIs run tasks on the execution machine.'), steps: [
+      copy('先在执行机器安装并登录需要的 CLI，确认终端里可以正常使用。面板不会替你创建模型服务账号。', 'Install and sign in to the CLIs on the execution machine. Confirm they work in a terminal; the panel does not create model-service accounts.'),
+      copy('打开「机器与引擎」，检查执行通道；在「项目与目录」设置这台机器的默认目录和项目路径。', 'Open Machines & engines and check the execution channel. Set machine defaults and project paths under Projects & directories.'),
+      copy('进入「会话 → 新对话」，确认执行机器、项目和引擎，再发送任务。并发修改同一仓库时，使用独立工作区。', 'Open Sessions → New chat. Check the execution machine, project and engine before sending. Use isolated workspaces for concurrent changes to one repository.'),
+      copy('需要从聊天工具使用时，再去「IM 接入」连接机器人、配置权限和默认执行机器。', 'To work from messaging tools, connect a bot under IM connections and configure access and the default execution machine.'),
+    ], target: 'sessions', action: copy('打开会话', 'Open sessions') },
+    { id: 'roles', title: copy('面板、主节点、执行机器分别是什么', 'Panels, IM leaders and execution machines'), lead: copy('看页面的机器、接收机器人消息的机器、实际运行代码的机器，可以各不相同。', 'The machine serving the page, the one receiving bot messages, and the one running your code can be different.'), rows: [
+      [copy('当前面板', 'This panel'), copy('浏览器正在访问的 my-agents 服务。打开另一台面板，不等于把任务搬到另一台机器。', 'The my-agents service open in your browser. Opening another panel does not move tasks to it.')],
+      [copy('IM 主节点', 'IM leader'), copy('集群中取得多数派租约、负责机器人连接与共享配置的面板。只有有效主节点接收机器人消息。', 'The panel holding a majority lease for the bot connection and shared configuration. Only a valid leader receives bot messages.')],
+      [copy('执行机器', 'Execution machine'), copy('保存项目、worktree 和原生 CLI 历史，实际运行任务的机器。已有会话记录自己的机器归属。', 'The machine storing the project, worktree and native CLI history and running the task. Existing sessions retain their machine ownership.')],
+    ], note: copy('主节点切换不会复制项目或迁移正在运行的 CLI 进程。原执行机器离线时，原会话需要等待它恢复，或显式在另一台机器新建任务。', 'A leader change does not copy projects or migrate running CLI processes. If the original execution machine is offline, wait for it or explicitly start a new task elsewhere.'), target: 'proxy', infra: 'machines', action: copy('查看机器状态', 'View machine status') },
+    { id: 'machines', title: copy('添加开发机：执行节点与集群面板', 'Add machines: execution nodes versus cluster panels'), lead: copy('两种接入解决的问题不同，请先确定你要增加执行能力，还是让另一台机器接管机器人。', 'Choose whether you need more execution capacity or another panel capable of taking over the bot.'), rows: [
+      [copy('添加执行节点', 'Add an execution node'), copy('在「机器与引擎 → 集群与机器 → 高级执行节点」复制 WebSocket 命令，到开发机终端运行。也可使用 SSH 启动节点。连接后才能调度它。', 'Copy the WebSocket command from Machines & engines → Cluster & machines → Advanced execution nodes and run it on the machine, or launch a node through SSH. It becomes schedulable while connected.')],
+      [copy('添加集群面板', 'Add a cluster panel'), copy('需要在另一台机器部署常驻面板服务，配置相同集群身份、成员和认证，并保证成员互通。普通 node 命令只连接执行通道，不参加主节点选举。', 'Deploy a persistent panel with matching cluster identity, membership and authentication and reachable peers. The normal node command only connects execution; it does not join leader elections.')],
+      [copy('不会自动准备的内容', 'What is not prepared automatically'), copy('CLI 的安装和登录、项目代码、项目路径及节点自启仍需准备。连接令牌不等于 Agent 的登录凭证，目录映射也不会拉取仓库。', 'Prepare CLI installations and sign-ins, project code, project paths and node startup. A connection token is not an agent login, and mapping a directory does not clone a repository.')],
+    ], note: copy('WebSocket 接入要求面板监听可访问地址，网络能到达面板端口。页面若提示「仅监听本机」，远程机器不能直接连接。复制命令包含访问令牌，请只在自己的机器使用。', 'WebSocket connections require a reachable panel listener and port. A loopback-only listener cannot accept remote connections. Copied commands contain an access token; use them only on your own machines.'), target: 'proxy', infra: 'machines', action: copy('打开机器接入', 'Open machine connections') },
+    { id: 'directories', title: copy('项目目录和独立工作区', 'Project directories and isolated workspaces'), lead: copy('一个项目在 Mac 和 Linux 上可以有完全不同的路径。请为每台机器分别设置。', 'The same project may live at completely different paths on Mac and Linux. Configure each machine separately.'), steps: [
+      copy('在「项目与目录」设置每台机器的默认目录；添加一个项目名称，并填写它在各机器上的实际路径。保存时会到对应机器校验目录。', 'Set each machine’s default directory under Projects & directories. Add a project and its actual path on each machine. Saving validates paths on their respective machines.'),
+      copy('新对话中选择执行机器和项目。某机器未配置这个项目的路径时，先补配置，不要直接沿用另一台机器的路径。', 'Choose a machine and project for new chats. Configure missing project paths before use; do not reuse another machine’s path.'),
+      copy('独立工作区使用 Git worktree，从当前提交创建任务分支。未提交改动、未跟踪文件和依赖不会自动复制；普通文件夹继续使用原目录。', 'Isolated workspaces use Git worktrees and task branches from the current commit. Uncommitted changes, untracked files and dependencies are not copied. Plain folders use their original directory.'),
+      copy('任务完成后审阅改动，再提交、合并和清理 worktree。面板不会自动合并，也不会在任务结束时删除工作成果。', 'Review changes, then commit, merge and clean up the worktree. The panel does not automatically merge or delete task work.'),
+    ], target: 'proxy', infra: 'workspaces', action: copy('配置项目与目录', 'Configure project directories') },
+    { id: 'sessions', title: copy('会话、引擎、模型和代理账号', 'Sessions, engines, models and proxy accounts'), lead: copy('先选执行位置，再选运行工具和模型。它们是不同的设置。', 'Choose where the task runs, then the agent and model. These are different settings.'), rows: [
+      [copy('会话', 'Session'), copy('接续已有上下文时，从会话列表打开。已有会话固定在原机器和引擎；更换执行机器应显式新建或选择目标机器上的会话。', 'Open an existing session to continue its context. It retains its machine and engine. To change machines, explicitly start a new session or select one on the destination.')],
+      [copy('引擎', 'Engine'), copy('Claude Code / Codex 是执行任务的外部 CLI。切换引擎时不会把两者的原生上下文合成一份。', 'Claude Code / Codex are external CLIs. Switching engines does not merge their native contexts.')],
+      [copy('模型', 'Model'), copy('在对话设置中选择可用模型。可用选项取决于引擎、当前代理账号及服务支持；默认项沿用 CLI 或现有配置。', 'Choose available models in chat settings. Options depend on the engine, proxy account and provider. The default follows CLI or existing settings.')],
+      [copy('代理账号', 'Proxy account'), copy('在「引擎与账号」管理请求使用的接入账号与路由。它与执行机器不是同一个概念，也不能代替目标机器上的 CLI 环境。', 'Manage provider accounts and request routing under Engines & accounts. This is distinct from execution machines and does not replace their CLI environment.')],
+    ], target: 'sessions', action: copy('查看会话', 'View sessions') },
+    { id: 'im', title: copy('在飞书中使用和切换任务', 'Use and switch tasks in Feishu'), lead: copy('「IM 接入」统一管理聊天入口，目前可用渠道为飞书 / Lark。企业微信等其他渠道尚未接入。', 'IM connections manages messaging entry points. Feishu / Lark is currently available; channels such as WeCom are not yet connected.'), rows: [
+      ['/help', copy('查看当前版本支持的命令；以机器人返回的帮助为准。', 'See the commands supported by the running version; the bot’s help is authoritative.')],
+      ['/projects · /new', copy('查看项目、选择目录并新建会话；/new claude 或 /new codex 可指定引擎。', 'View projects, choose directories and create sessions. /new claude or /new codex specifies the engine.')],
+      ['/node · /engine', copy('查看或选择执行节点和引擎；先确认项目确实存在于目标机器。', 'View or choose the execution node and engine. Confirm the project exists on the destination.')],
+      ['/claude · /codex', copy('切换引擎，也可直接带问题。各引擎接续自己的会话上下文。', 'Switch engines, optionally with a prompt. Each engine continues its own session context.')],
+      ['/model', copy('查看当前模型，或用卡片选择模型；也可发送 /model 模型ID，/model default 恢复默认。', 'View the current model or select one from the card. /model MODEL_ID selects it; /model default restores the default.')],
+      ['/current · /sessions · /switch', copy('查看当前绑定、列出会话和切换会话。绑定只影响当前聊天位置，群话题之间相互独立。', 'View the current binding, list sessions and switch sessions. Bindings apply to the current chat location; group topics are independent.')],
+      ['/history · /stop', copy('查看最近对话、停止当前任务。任务卡片会显示执行进展；简洁模式减少展示，仍可使用命令。', 'View recent conversation or stop the task. Task cards show progress; simple mode reduces presentation while retaining commands.')],
+    ], note: copy('机器人是否回应同时受连接状态、用户/群权限、禁用规则和群内 @要求影响。默认设置用于未绑定的新位置，已有话题继续原绑定。', 'Replies depend on connectivity, user/group access, disabled-user rules and mention requirements. Defaults apply to unbound locations; existing topics retain their bindings.'), target: 'im', action: copy('打开 IM 接入', 'Open IM connections') },
+    { id: 'diagnostics', title: copy('没有回应、目录报错和节点离线', 'Troubleshoot missing replies, paths and offline nodes'), lead: copy('先分清失败发生在哪一层，再决定是否需要切换。', 'Identify the failing layer before deciding what to switch.'), rows: [
+      [copy('页面打不开', 'The page will not open'), copy('检查当前访问的那台面板服务和端口。localhost 只表示你当前这台电脑；它关闭后，需要访问另一台在线面板的地址。', 'Check the service and port of the panel you are visiting. localhost refers to your current computer; use another online panel’s address if it is off.')],
+      [copy('机器人没回', 'The bot does not reply'), copy('在「集群与机器」查看是否有有效 IM 主节点，再检查「IM 接入」实际连接状态、权限和消息记录。成员可达不代表已经取得主节点租约。', 'Check for a valid IM leader under Cluster & machines, then inspect the actual IM connection, access rules and message records. Reachable peers do not by themselves imply a valid leader lease.')],
+      [copy('工作目录不存在', 'Working directory does not exist'), copy('核对卡片上的执行机器，以及「项目与目录」中这台机器的真实路径。不要在 Linux 上创建一个同名 Mac 路径来绕过检查。', 'Check the execution machine and its real path under Projects & directories. Do not create a Mac-shaped path on Linux just to bypass validation.')],
+      [copy('执行机器离线', 'Execution machine offline'), copy('恢复那台机器的节点或面板服务、网络与 CLI。其他机器可以接新任务，但不会自动拥有离线机器的文件和原生会话。', 'Restore the machine’s node or panel service, network and CLI. Other machines can run new tasks but do not automatically acquire its files or native sessions.')],
+      [copy('502 / 上游超时', '502 / upstream timeout'), copy('检查代理账号、网络和上游服务，再到「抓包」查看请求状态与耗时。抓包需要请求经过代理；未接入的历史调用无法补抓。', 'Check the provider account, network and upstream service, then inspect request status and timing in Inspector. Only requests routed through the proxy can be captured; past uncaptured calls cannot be recovered.')],
+    ], target: 'proxy', infra: 'machines', action: copy('查看集群与机器', 'Inspect cluster & machines') },
+    { id: 'data', title: copy('数据保存、更新和能力边界', 'Data, updates and boundaries'), lead: copy('项目源码和用户数据分开保存。改仓库目录或更新代码，不需要清空用户数据。', 'Source code and user data are stored separately. Renaming a checkout or updating code does not require clearing user data.'), steps: [
+      copy('应用数据目录可由 MY_AGENTS_HOME 指定；旧安装继续兼容原数据目录。原生 CLI 历史、项目和 worktree 仍属于各自机器。迁移前先备份配置、会话与抓包数据。', 'MY_AGENTS_HOME can set the app data directory; legacy installations retain compatible data locations. Native histories, projects and worktrees remain on their machines. Back up configuration, sessions and captures before migration.'),
+      copy('当前集群共享机器人配置、绑定状态和项目目录映射，不等于完整文件同步。多台面板版本应保持一致，更新时等待运行任务空闲。', 'The cluster shares bot configuration, bindings and directory mappings; it is not full file synchronization. Keep panel versions aligned and update services when tasks are idle.'),
+      copy('自动接管需要多数派可用。两台完整节点之外可增加独立 witness；witness 只投票，不运行机器人或 Agent。集群不能让所有机器离线时仍继续服务。', 'Automatic takeover requires a majority. An independent witness can supplement two full members; it votes without running the bot or agents. A cluster cannot serve when all machines are offline.'),
+      copy('my-agents 依赖外部 Agent，CLI 支持、模型可用性和登录状态以对应机器的实际环境为准。', 'my-agents depends on external agents. CLI features, model availability and sign-in state depend on the execution machine’s environment.'),
+    ] },
+  ];
+}
+function renderUserGuide() {
+  $('#empty').style.display = 'none'; $('#metabar').style.display = 'none';
+  $('#render').style.display = 'block'; $('#render').classList.add('wide');
+  $('#title').firstChild.textContent = rt('使用指南', 'User guide'); $('#fpath').textContent = '';
+  const sections = userGuideSections();
+  $('#render').innerHTML = `${viewHeading('guide')}<div class="user-guide"><div class="guide-search"><label for="guide-search">${esc(rt('查找使用方法', 'Find instructions'))}</label><input id="guide-search" type="search" placeholder="${esc(rt('搜索：开发机、目录、模型、飞书、离线…', 'Search: machines, directories, models, IM, offline…'))}"><span id="guide-result" role="status" aria-live="polite"></span></div><nav class="guide-contents" aria-label="${esc(rt('指南目录', 'Guide contents'))}">${sections.map(section => `<button type="button" data-guide-jump="${section.id}">${esc(section.title)}</button>`).join('')}</nav><div class="guide-sections">${sections.map((section, index) => `<details class="guide-section" id="guide-${section.id}" ${index === 0 ? 'open' : ''}><summary><span class="guide-number">${String(index + 1).padStart(2, '0')}</span>${esc(section.title)}</summary><div class="guide-section-body"><p>${esc(section.lead)}</p>${section.steps ? `<ol>${section.steps.map(step => `<li>${esc(step)}</li>`).join('')}</ol>` : ''}${section.rows ? `<dl>${section.rows.map(([title, body]) => `<div><dt>${esc(title)}</dt><dd>${esc(body)}</dd></div>`).join('')}</dl>` : ''}${section.note ? `<p class="guide-note">${esc(section.note)}</p>` : ''}${section.target ? `<button type="button" class="btn" data-guide-target="${section.target}" data-guide-infra="${section.infra || ''}">${esc(section.action)} →</button>` : ''}</div></details>`).join('')}</div><p id="guide-no-results" class="route-muted" hidden>${esc(rt('没有匹配内容，请换一个关键词。', 'No matches. Try another keyword.'))}</p></div>`;
+  const host = $('#render'), filter = $('#guide-search');
+  filter.oninput = () => {
+    const query = filter.value.trim().toLocaleLowerCase(); let count = 0;
+    host.querySelectorAll('.guide-section').forEach(section => { const visible = !query || section.textContent.toLocaleLowerCase().includes(query); section.hidden = !visible; if (query && visible) section.open = true; if (visible) count++; });
+    host.querySelectorAll('[data-guide-jump]').forEach(button => { button.hidden = $('#guide-' + button.dataset.guideJump).hidden; });
+    $('#guide-no-results').hidden = !!count; $('#guide-result').textContent = query ? rt(`找到 ${count} 个主题`, `${count} topics found`) : '';
+  };
+  host.querySelectorAll('[data-guide-jump]').forEach(button => button.onclick = () => { const section = $('#guide-' + button.dataset.guideJump); section.open = true; section.scrollIntoView({ behavior: 'smooth', block: 'start' }); section.querySelector('summary').focus({ preventScroll: true }); });
+  host.querySelectorAll('[data-guide-target]').forEach(button => button.onclick = () => { if (button.dataset.guideInfra) localStorage.setItem('panel-infra-tab', button.dataset.guideInfra); switchType(button.dataset.guideTarget); });
+}
+</script>
 <script src="/feishu-ui.js"></script>
 <script src="/mermaid-ui.js"></script>
 <script>
