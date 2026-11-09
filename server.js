@@ -1791,6 +1791,7 @@ registry.register(createCodexEngine({
 }));
 const manager = createSessionManager({
   registry,
+  ensureNode: id => nodeHub.ensure(id),
   history: {
     async ownerOf(id) {
       const meta = sessionStore.read()[id] || {};

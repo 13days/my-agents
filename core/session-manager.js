@@ -11,7 +11,7 @@ const httpError = (status, message) => Object.assign(new Error(message), { statu
 //
 // Every run publishes the same event vocabulary (see core/events.js) into a
 // replayable job so a reconnecting client resumes where it left off.
-function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, retentionMs = 5 * 60 * 1000, readyTimeoutMs = 90000, log = console }) {
+function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, retentionMs = 5 * 60 * 1000, readyTimeoutMs = 90000, ensureNode = async () => {}, log = console }) {
   const runs = new Map();
   const aliases = new Map();
   const resolveId = id => aliases.get(id) || id;
@@ -40,6 +40,7 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
     const owner = requested ? await history.ownerOf(requested) : null;
     const engineId = owner?.engine || input.engine || registry.defaultId();
     const nodeId = input.node || owner?.node || 'local';
+    await ensureNode(nodeId);
     const engine = registry.adapter(engineId, nodeId);
     if (!engine) throw httpError(400, `节点 ${nodeId} 上没有引擎：${engineId}`);
     const host = registry.node(nodeId).host;

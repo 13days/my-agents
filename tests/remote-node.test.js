@@ -143,6 +143,32 @@ test('SSH nodes are validated, saved, launched with the stdio command and retrie
   hub.stop();
 });
 
+test('a message for a node between reconnects waits for it instead of failing', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-ensure-'));
+  const registry = createRegistry(); registry.addNode({ id: 'local', host: createLocalHost() });
+  const spawned = [];
+  const { EventEmitter } = require('node:events'), { PassThrough } = require('node:stream');
+  const { streamTransport } = require('../node/transports');
+  const spawnImpl = () => {
+    const child = new EventEmitter();
+    Object.assign(child, { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), kill() { child.stdout.end(); child.emit('exit', 255); } });
+    spawned.push(child);
+    serveNode({ peer: createPeer(streamTransport(child.stdin, child.stdout)), host: createLocalHost(), engines: [echoEngine()], id: 'x' });
+    return child;
+  };
+  // The backoff is far longer than the test: only ensure() can bring the node back.
+  const hub = createNodeHub({ registry, token: 't', dir, spawnImpl, retryMs: 60000, log: { log() {}, warn() {} } });
+  hub.add({ id: 'devbox', ssh: 'me@devbox' });
+  await until(() => registry.node('devbox'));
+  spawned[0].kill();
+  await until(() => !registry.node('devbox'));
+  await hub.ensure('devbox', 3000);
+  assert.ok(registry.node('devbox'), 'reconnected on demand');
+  assert.equal(spawned.length, 2);
+  await hub.ensure('unknown', 50);
+  hub.stop();
+});
+
 test('the SSH command runs in the login shell and survives quoting', () => {
   const { execFileSync } = require('node:child_process');
   const command = `printf '%s|%s' "it's" '$HOME'`;

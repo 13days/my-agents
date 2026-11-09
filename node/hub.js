@@ -21,7 +21,7 @@ const DEFAULT_COMMAND = 'my-agents node --stdio';
 // closes inherited descriptors as an interactive login shell; set a custom command there.)
 const remoteCommand = command => `exec "\${SHELL:-/bin/sh}" -ilc '${`exec 0<&3 3<&-; ${command}`.replace(/'/g, `'\\''`)}' 3<&0 </dev/null`;
 
-function createNodeHub({ registry, token, dir, routing = null, log = console, spawnImpl = spawn, retryMs = 30000 }) {
+function createNodeHub({ registry, token, dir, routing = null, log = console, spawnImpl = spawn, retryMs = 30000, wakeCheckMs = 5000 }) {
   const file = path.join(dir, 'panel-nodes.json');
   let saved = [];
   try { saved = JSON.parse(fs.readFileSync(file, 'utf8')).nodes || []; } catch {}
@@ -65,15 +65,16 @@ function createNodeHub({ registry, token, dir, routing = null, log = console, sp
     let stderr = '';
     child.stderr?.on('data', chunk => { stderr = (stderr + chunk).slice(-2000); });
     const peer = createPeer(streamTransport(child.stdout, child.stdin, { onEnd: () => child.kill() }));
+    link.peer = peer;
     attachRemoteNode({ peer, registry, transport: 'ssh', pin: { id: config.id, label: config.label }, routing, log })
       .then(() => { link.state = 'connected'; log.log?.(`节点已连接：${config.id}（SSH ${config.ssh}）`); })
       .catch(e => { link.error = e.message; child.kill(); });
     child.on('exit', code => {
-      link.child = null;
+      link.child = null; link.peer = null;
       // Once connected, the last stderr line is just the node's ready banner; say what happened instead.
       if (!link.error) link.error = link.state === 'connected' ? `连接已断开（ssh 退出 ${code}），将自动重连` : (stderr.trim().split('\n').pop() || `ssh 退出（${code}）`).slice(0, 300);
       link.state = 'disconnected';
-      if (saved.some(item => item.id === config.id && item.enabled !== false)) { link.timer = setTimeout(() => connectSSH(config), retryMs); link.timer.unref?.(); }
+      if (saved.some(item => item.id === config.id && item.enabled !== false)) { link.timer = setTimeout(() => connectSSH(config), link.retryNow ? 0 : retryMs); link.retryNow = false; link.timer.unref?.(); }
     });
     child.on('error', e => { link.error = e.message; });
   }
@@ -116,10 +117,39 @@ function createNodeHub({ registry, token, dir, routing = null, log = console, sp
     connectSSH(config);
   }
 
+  // Waits briefly for a saved SSH node that is between reconnects, so a message
+  // that arrives just after the Mac wakes runs instead of failing.
+  async function ensure(id, timeoutMs = 25000) {
+    if (!id || id === 'local' || registry.node(id)) return;
+    const config = saved.find(item => item.id === id && item.enabled !== false);
+    if (!config) return;
+    connectSSH(config);
+    const end = Date.now() + timeoutMs;
+    while (!registry.node(id) && Date.now() < end) await new Promise(r => setTimeout(r, 200));
+  }
+
+  // After sleep the SSH links may be dead while their backoff timers are still
+  // pending. Probe live links and redial the rest at once.
+  function onWake() {
+    for (const config of saved) {
+      if (config.enabled === false) continue;
+      const link = links.get(config.id);
+      if (!link?.peer) { connectSSH(config); continue; }
+      link.peer.call('host.resolveDir', { dir: '~' }, { timeout: 8000 })
+        .catch(() => { if (link.child) { link.retryNow = true; link.child.kill(); } });
+    }
+  }
+  let wakeTimer = null;
+
   return {
-    upgrade, list, add, remove, reconnect,
-    start() { for (const config of saved) if (config.enabled !== false) connectSSH(config); },
-    stop() { for (const link of links.values()) { clearTimeout(link.timer); link.child?.kill(); } wss?.clients.forEach(ws => ws.close()); },
+    upgrade, list, add, remove, reconnect, ensure, onWake,
+    start() {
+      for (const config of saved) if (config.enabled !== false) connectSSH(config);
+      let last = Date.now();
+      wakeTimer = setInterval(() => { const now = Date.now(); if (now - last > wakeCheckMs * 3) onWake(); last = now; }, wakeCheckMs);
+      wakeTimer.unref?.();
+    },
+    stop() { clearInterval(wakeTimer); for (const link of links.values()) { clearTimeout(link.timer); link.child?.kill(); } wss?.clients.forEach(ws => ws.close()); },
   };
 }
 module.exports = { createNodeHub, DEFAULT_COMMAND, remoteCommand };
