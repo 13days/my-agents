@@ -150,7 +150,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       const node = current ? nodeOf(current) : config.defaultMachine && config.defaultMachine !== panel.machineId?.() ? config.defaultMachine : 'local';
       const cached = state.engineBindings[key]?.[cacheKey(engine, node)];
       const saved = cached && (session(cached.id) || await panel.sessionExists?.(cached)) ? cached : null;
-      const cwd = saved?.cwd || current?.cwd || (node === 'local' ? config.defaultProject : '');
+      const cwd = saved?.cwd || current?.cwd || config.defaultProject;
       const at = { node };
       if (!cwd || !usable({ ...at, cwd })) return projectsCard(msg, 0, engine, node);
       bind(key, saved && usable(saved) ? { ...saved } : { id: crypto.randomUUID(), cwd, engine, ...(panel.workspaces && current ? { sourceSessionId: current.id } : {}), ...(node !== 'local' ? at : {}) });
@@ -377,7 +377,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   }
   async function showNewForm(msg, draft, error = '') {
     const spaces = formSpaces(); let models = [];
-    try { models = (await panel.models?.({ engine: draft.engine, node: draft.machineId === panel.machineId?.() ? 'local' : draft.machineId, refresh: false }))?.models || []; } catch {}
+    try { models = (await Promise.race([Promise.resolve(panel.models?.({ engine: draft.engine, node: draft.machineId === panel.machineId?.() ? 'local' : draft.machineId, refresh: false })), new Promise(resolve => { const timer = setTimeout(() => resolve({ models: [] }), 1500); timer.unref?.(); })]))?.models || []; } catch {}
     if (draft.model && !models.some(item => item.id === draft.model)) models.push({ id: draft.model, name: draft.model });
     const card = require('./feishu-new-session').newSessionForm({ draft, machines: spaces.machines, projects: spaces.config.projects, engines: catalog().list, models, error, owner: msg.senderId, key: scope(msg) });
     const sent = await send(msg, { card }); rememberCard(sent, msg); return sent;

@@ -991,3 +991,10 @@ test('a first-turn provider failure offers the saved form again without automati
   assert.match(JSON.stringify(f.sent.at(-1).content),/provider rejected the model/);
   assert.equal(read().bindings[key].id,old);assert.equal(f.calls.length,1);assert.match(JSON.stringify(f.sent.at(-1).content),/Keep this query/);
 });
+
+test('a first engine shortcut keeps its query and uses the configured remote default machine',async t=>{
+ const f=await fixture(t);await f.pair();f.panel.machineId=()=> 'linux';f.panel.nodes=()=>[{id:'mac',label:'Mac',connected:true}];
+ await f.gateway.configure({defaultMachine:'mac'});
+ await f.gateway.receive(f.msg('/claude Keep the first query'));
+ assert.equal(f.calls.length,1);assert.equal(f.calls[0].node,'mac');assert.equal(f.calls[0].machineId,'mac');assert.equal(f.calls[0].prompt,'Keep the first query');
+});
