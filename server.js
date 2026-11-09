@@ -195,6 +195,7 @@ const CLI_CMD = process.argv[2];
 // `my-agents node …` runs only the remote node daemon, never the panel.
 if (CLI_CMD === 'node') { require('./node/daemon').run(process.argv.slice(3)); return; }
 if (CLI_CMD === 'cluster') { require('./node/cluster-cli').run(process.argv.slice(3)); return; }
+if (CLI_CMD === 'service') { require('./node/service-cli').run(process.argv.slice(3)); return; }
 if (CLI_CMD === 'witness') { require('./node/witness').run(process.argv.slice(3)); return; }
 if (CLI_CMD === 'install-proxy') { installProxy(); process.exit(0); }
 if (CLI_CMD === 'uninstall-proxy') { uninstallProxy(); process.exit(0); }
