@@ -36,9 +36,9 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
   async function start(input) {
     const turn = validateInput(input);
     const requested = typeof input.sessionId === 'string' && SESSION_ID.test(input.sessionId) ? resolveId(input.sessionId) : '';
-    // An existing session always stays on the engine and node that own it.
+    // Keep ownership unless an explicit switch or an offline handoff selects a new execution.
     const owner = requested ? await history.ownerOf(requested) : null;
-    const engineId = owner?.engine || input.engine || registry.defaultId();
+    const engineId = input.switchMachine === true ? input.engine || owner?.engine || registry.defaultId() : owner?.engine || input.engine || registry.defaultId();
     const location = resolveLocation ? await resolveLocation(input, owner) : null;
     const nodeId = location?.node || owner?.node || input.node || 'local';
     await ensureNode(nodeId);
@@ -50,22 +50,27 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
     catch (error) { throw httpError(error.status || 400, `执行机器「${registry.node(nodeId).label || nodeId}」无法使用目录 ${location?.cwd || owner?.project || input.cwd || '(默认)'}：${error.message}。请在「机器与引擎 → 项目与目录」检查映射`); }
 
     const previous = requested && runs.get(requested);
-    if (live(previous)) {
+    if (live(previous) && !location?.handoff) {
       if (previous.session.currentId || previous.session.pendingCount || previous.session.busy) throw httpError(409, '此会话正在运行，请重新打开会话接续');
       previous.session.close(); // idle connection: replace it with a fresh one
     }
     // Engines that discover their own ids treat unknown ids as new sessions.
-    const known = !!requested && await engine.owns(requested);
+    const known = !location?.handoff && !!requested && await engine.owns(requested);
     // A resumed session keeps its original directory; only fresh tasks isolate.
-    let worktree = owner?.worktree || null;
-    if (!known && !owner && input.worktree === true) {
+    let worktree = location?.handoff && (location.handoff.from !== location.handoff.to || location.cwd !== owner?.project) ? null : owner?.worktree || null;
+    if (!known && (!owner || location?.handoff) && !worktree && input.worktree === true) {
       if (!host.createWorktree) throw httpError(400, '此节点不支持独立工作区，请更新节点 my-agents');
       worktree = await host.createWorktree(cwd);
       if (worktree) cwd = worktree.cwd;
     }
-    const sessionId = engine.capabilities.sessionId === 'discovered' ? (known ? requested : '') : (requested || crypto.randomUUID());
+    const sessionId = engine.capabilities.sessionId === 'discovered' ? (known ? requested : '') : (location?.handoff ? crypto.randomUUID() : requested || crypto.randomUUID());
     const model = typeof input.model === 'string' && input.model.trim() && engine.validModel(input.model.trim()) ? input.model.trim() : '';
-    const baseHistory = known ? await history.messages(requested) : null;
+    const baseHistory = known || location?.handoff ? await history.messages(requested) : null;
+    if (location?.handoff) {
+      const checkpoint = (baseHistory?.messages || []).slice(-12).map(item => `${item.role}: ${String(item.text || '').slice(0,1500)}`).join('\n').slice(-7500);
+      location.handoff.context = checkpoint ? 'checkpoint' : 'unavailable';
+      turn.context = (`执行位置已从 ${location.handoff.from} 切换到 ${location.handoff.to}。这是新的原生 Agent 会话。以下仅为可获取的对话检查点，不代表文件或工具状态已同步。上一任务的执行结果可能未知，先检查项目现状，不要直接重放之前的命令。\n${checkpoint || '没有可恢复的历史摘要，请明确说明缺少上下文。'}\n\n` + turn.context).slice(0,12000);
+    }
 
     const buffered = [];
     let run = null, idleTimer;
@@ -74,6 +79,7 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
       if (!run) return void buffered.push([event, payload]);
       if (run.job.closed) return;
       run.job.publish(event, payload);
+      try { history.record?.(run.id, event, payload); } catch (error) { log.warn?.(error.message); }
     };
     const armIdle = () => {
       clearTimeout(idleTimer);
@@ -83,7 +89,7 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
     };
     const onClosed = () => {
       clearTimeout(idleTimer);
-      if (run && !run.job.closed) run.job.close();
+      if (run && !run.job.closed) { history.record?.(run.id,'end',{}); run.job.close(); }
       const current = run;
       const retention = setTimeout(() => { if (current && runs.get(current.id) === current) runs.delete(current.id); }, retentionMs);
       retention.unref?.();
@@ -101,12 +107,12 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
       throw e.status ? e : httpError(503, e.message);
     }
     if (requested && realId !== requested) aliases.set(requested, realId);
-    history.touch(realId, { engine: engineId, node: host.id, ...(location?.machineId ? { machineId: location.machineId } : {}), cwd, worktree, prompt: turn.prompt, created: !known });
+    history.touch(realId, { engine: engineId, node: host.id, ...(location?.machineId ? { machineId: location.machineId } : {}), cwd, worktree, workspaceId: location?.workspaceId, handoff: location?.handoff, prompt: turn.prompt, created: !known });
 
-    const job = createChatJob({ routed: !!session.routed, engine: engineId, node: host.id, machineId: location?.machineId, cwd, worktree, model, sessionId: realId, jobId: crypto.randomUUID() });
+    const job = createChatJob({ routed: !!session.routed, engine: engineId, node: host.id, machineId: location?.machineId, workspaceId: location?.workspaceId, handoff: location?.handoff, cwd, worktree, model, sessionId: realId, jobId: crypto.randomUUID() });
     run = { id: realId, engine: engineId, node: host.id, job, session, baseHistory, baseMessages: baseHistory?.messages || [], stopped: false, requestedId: requested };
     runs.set(realId, run);
-    for (const [event, data] of buffered.splice(0)) job.publish(event, data);
+    for (const [event, data] of buffered.splice(0)) { job.publish(event, data); history.record?.(realId,event,data); }
     return { sessionId: realId, run };
   }
 
@@ -115,7 +121,7 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
     const run = get(id);
     if (!live(run)) throw httpError(409, '会话连接已结束，请重新发送');
     const turn = validateInput(input);
-    run.session.submit(turn.messageId, turn, input.mode !== 'queue', () => run.job.publish('input', { id: turn.messageId, prompt: turn.prompt, images: turn.images, mode: input.mode }));
+    run.session.submit(turn.messageId, turn, input.mode !== 'queue', () => { const data = { id: turn.messageId, prompt: turn.prompt, images: turn.images, mode: input.mode, timestamp: new Date().toISOString() }; run.job.publish('input', data); history.record?.(run.id, 'input', data); });
     history.touch(run.id, { prompt: turn.prompt });
     return { messageId: turn.messageId };
   }
@@ -125,6 +131,7 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
     if (!live(run)) return false;
     run.stopped = true;
     run.job.publish('stopped', {});
+    history.record?.(run.id, 'stopped', {});
     run.session.stop();
     return true;
   }

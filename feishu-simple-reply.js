@@ -1,8 +1,8 @@
 const { sendMarkdown } = require('./feishu-markdown');
 // Simple chats use ordinary rich-text replies and a temporary reaction on the user's
 // message. Capture the transport so cleanup also works while the gateway stops.
-function createSimpleReply({ channel, msg, messageId, footer = '', onError = () => {}, onClose = () => {} }) {
-  let reactionId, unsubscribe, timer, closed = false, closing, text = '', done = false, fallback = '已完成。', permissionPending = false;
+function createSimpleReply({ channel, msg, messageId, footer = '', onError = () => {}, onFinish = () => {}, onClose = () => {} }) {
+  let reactionId, unsubscribe, timer, closed = false, closing, text = '', done = false, fallback = '已完成。', permissionPending = false, failed = false;
   async function clearReaction() {
     if (!reactionId) return;
     const id = reactionId; reactionId = null;
@@ -23,9 +23,9 @@ function createSimpleReply({ channel, msg, messageId, footer = '', onError = () 
     if (closed) return;
     // Stop listening before awaiting the send, so error/done/end cannot send twice.
     closed = true; clearTimeout(timer); unsubscribe?.();
-    try { if (text || fallback) await sendText((text || fallback) + (footer ? '\n\n' + footer : '')); }
+    try { const note = typeof footer === 'function' ? footer() : footer; if (text || fallback) await sendText((text || fallback) + (note ? '\n\n' + note : '')); }
     catch (e) { onError(e); }
-    finally { await close(); }
+    finally { try { await onFinish({ failed, text: text || fallback }); } catch (e) { onError(e); } await close(); }
   }
   return {
     async start() {
@@ -39,11 +39,11 @@ function createSimpleReply({ channel, msg, messageId, footer = '', onError = () 
         if (event === 'text') text += data.text || '';
         if (event === 'permission' && !permissionPending) {
           permissionPending = true;
-          sendText('任务需要工具授权，请在 Mac 的 Panel 中确认后继续。').catch(onError);
+          sendText('任务需要工具授权，请在当前任务所在面板中确认后继续。').catch(onError);
         }
         if (event === 'permission_resolved') permissionPending = false;
-        if (event === 'error') { text += (text ? '\n' : '') + '未能完成：' + (data.error || '执行失败'); done = true; }
-        if (event === 'done') { done = true; if (data.interrupted) fallback = ''; else if (data.isError) fallback = '执行失败，请查看 Panel 中的任务记录。'; }
+        if (event === 'error') { failed = true; text += (text ? '\n' : '') + '未能完成：' + (data.error || '执行失败'); done = true; }
+        if (event === 'done') { if (data.isError) failed = true; done = true; if (data.interrupted) fallback = ''; else if (data.isError) fallback = data.error || '执行失败，请查看 Panel 中的任务记录。'; }
         if (event === 'stopped') { done = true; fallback = '已停止。'; }
         if (event === 'end' && !done) { done = true; fallback = '任务连接已结束，请重新发送消息继续。'; }
         if (done) { clearTimeout(timer); timer = setTimeout(finish, 0); }

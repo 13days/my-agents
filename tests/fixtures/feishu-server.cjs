@@ -33,8 +33,12 @@ async function receive(content, extra = {}) { const before = sent.length; handle
 (async () => {
  await wait(async () => { try { return (await fetch(base + 'feishu')).ok; } catch { return false; } });
  await api('feishu', 'PUT', { enabled: true, appId: 'cli_mock_test', appSecret: 'test-secret', defaultProject: dir });
- await receive((await api('feishu/pairing', 'POST', {})).command); await receive('/new 1');
- await receive('请授权后检查项目');
+ await receive((await api('feishu/pairing', 'POST', {})).command); await receive('/new 请授权后检查项目');
+ const formMessage = sent.at(-1), form = formMessage.content.card.body.elements.find(item=>item.tag==='form');
+ assert.equal(form.elements.find(item=>item.name==='prompt').default_value,'请授权后检查项目');
+ const submit = form.elements.find(item=>item.tag==='button').behaviors[0].value;
+ const checkpoint = (await api('workspaces')).selfId;
+ await handlers.cardAction({messageId:formMessage.messageId,chatId:'oc_private',operator:{openId:'ou_owner'},action:{tag:'button',value:submit},raw:{action:{form_value:{machineId:checkpoint,workspaceId:'__directory__',cwd:dir,engine:'claude',prompt:'请授权后检查项目',model:'__default__',worktree:'original'}}}});
  await wait(() => updates.some(x => JSON.stringify(x.card).includes('已完成') && JSON.stringify(x.card).includes('完成：请授权后检查项目')));
  assert.match(JSON.stringify(updates.at(-1)), /project directory/);
  const sessions = await api('sessions'); assert.equal(sessions.items.length, 1); const id = sessions.items[0].key;

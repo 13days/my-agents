@@ -773,7 +773,7 @@ function readSessionUserPage({ item, page }) {
   return require('./core/session-previews').userMessagePage(sessionMessages(item.id, { limit: 0 }), page, { ...item, historyAvailable: !!fp });
 }
 function listSessions() {
-  const sessionMetadata = sessionStore.read();
+  const sessionMetadata = { ...(typeof conversations !== 'undefined' ? conversations.read() : {}), ...sessionStore.read() };
   // 只列磁盘上仍有 transcript 的会话——这些才能查看详情/回放/关联抓包。
   // Claude Code 约 30 天清理 transcript，但 history.jsonl 会长期保留，
   // 若按 history 列会出现大量点开就 404 的“幽灵会话”。
@@ -813,7 +813,7 @@ function listSessions() {
   // A panel session exists as soon as its first input is accepted, even while
   // the CLI is still starting and has not created its transcript yet.
   for (const [id, meta] of Object.entries(sessionMetadata)) {
-    if (!map.has(id) && meta.project && meta.createdAt) map.set(id, { id, engine: meta.engine || 'claude', title: meta.title || '新对话', project: meta.project, count: 0, first: meta.createdAt, last: meta.lastAt || meta.createdAt });
+    if (!map.has(id) && meta.project && (meta.createdAt || meta.machineId)) map.set(id, { id, engine: meta.engine || 'claude', title: meta.title || '新对话', project: meta.project, count: 0, first: meta.createdAt || 0, last: meta.lastAt || meta.updatedAt || meta.createdAt || 0 });
   }
   return [...map.values()].filter(s => !sessionMetadata[s.id]?.deleted).map(s => {
     const meta = sessionMetadata[s.id] || {}, manual = isManualTitle(meta, s.firstTitle);
@@ -1803,25 +1803,40 @@ const executionMachines = () => {
   for (const node of registry.nodes()) if (node.id !== 'local') result.set(node.id, { ...result.get(node.id), id: node.id, label: node.label, online: true });
   return [...result.values()];
 };
-const workspaceStore = require('./core/workspaces').createWorkspaces({ dir: DATA_DIR, selfId: machineId, machines: executionMachines, hostFor: id => registry.node(id === machineId() ? 'local' : id)?.host });
+const workspaceStore = require('./core/workspaces').createWorkspaces({ dir: DATA_DIR, selfId: machineId, machines: executionMachines, hostFor: id => registry.node(id === machineId() ? 'local' : id)?.host, leaderId: () => cluster?.status().leader || '' });
+const conversations = require('./core/conversations').createConversations({ dir: DATA_DIR, publish: record => { const leader = cluster?.status().leader; if (leader && leader !== machineId()) return clusterNetwork?.call(leader, 'conversations.put', record, { timeout: 5000 }); } });
+async function conversationHistory(id, sourceMachine) {
+  const saved = conversations.get(id), meta = sessionStore.read()[id] || saved || {};
+  const source = sourceMachine || meta.machineId || meta.node || machineId();
+  let result;
+  if (source === machineId() || source === 'local') result = sessionMessages(id);
+  else {
+    const peer = clusterNetwork?.peer(source) || registry.node(source)?.peer;
+    if (peer) { try { result = await peer.call('history.messages', { id }, { timeout: 5000 }); } catch {} }
+  }
+  return result || (saved ? { id, project: saved.project, engine: saved.engine, machineId: saved.machineId, messages: saved.messages || [], checkpoint: true } : null);
+}
+
 const manager = createSessionManager({
   registry,
   ensureNode: async id => { if (registry.node(id)) return; const peer = clusterNetwork?.peer(id); if (peer) await attachClusterRuntime(id, peer); if (!registry.node(id)) await nodeHub.ensure(id); },
   resolveLocation: (input, owner) => workspaceStore.resolve(input, owner),
   history: {
     async ownerOf(id) {
-      const meta = sessionStore.read()[id] || {};
-      if (meta.engine && registry.has(meta.engine)) return { engine: meta.engine, machineId: meta.machineId, node: meta.node || 'local', project: meta.project, worktree: meta.worktree };
+      const meta = sessionStore.read()[id] || conversations.get(id) || {};
+      if (meta.engine && registry.has(meta.engine)) return { engine: meta.engine, machineId: meta.machineId, node: meta.node || 'local', project: meta.project, worktree: meta.worktree, workspaceId: meta.workspaceId };
       // Unrecorded sessions (started in a terminal) can only be found on this machine.
       for (const engine of registry.node('local').engines.values()) if (await engine.owns(id)) return { engine: engine.id, node: 'local' };
       return null;
     },
-    messages: id => sessionMessages(id),
-    touch(id, { engine, node, machineId: executionMachine, cwd, worktree, prompt }) {
+    messages: id => conversationHistory(id),
+    record: (id,event,data) => conversations.record(id,event,data),
+    touch(id, { engine, node, machineId: executionMachine, cwd, worktree, workspaceId, handoff, prompt }) {
       const meta = sessionStore.read()[id] || {};
       const fp = transcriptPathFor(id);
-      const created = engine ? { engine, machineId: executionMachine || machineId(), ...(node && node !== 'local' ? { node } : {}), project: cwd, ...(worktree ? { worktree } : {}), initialPrompt: meta.initialPrompt || prompt, createdAt: meta.createdAt || Date.now() } : {};
+      const created = engine ? { engine, machineId: executionMachine || machineId(), ...(node && node !== 'local' ? { node } : {}), project: cwd, ...(worktree ? { worktree } : {}), workspaceId, handoff, initialPrompt: meta.initialPrompt || prompt, createdAt: meta.createdAt || Date.now() } : {};
       sessionStore.update(id, { ...autoTitlePatch(meta, prompt, fp ? transcriptHead(fp).title : ''), ...created, lastAt: Date.now() });
+      conversations.put(id, { ...created, ...(handoff ? { messages: conversations.get(handoff.previousSessionId)?.messages || [] } : {}), title: meta.title || String(prompt || '').slice(0,80), lastAt: Date.now() });
     },
   },
 });
@@ -1840,9 +1855,12 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
   dir: DATA_DIR, runtime: macRuntime, replyURL: `http://127.0.0.1:${PORT}/api/feishu/reply`, leadership: clusterLeadership,
   panel: {
     machineId,
+    workspaces: () => workspaceStore.view(),
     machines: executionMachines,
     defaultDirectory: id => workspaceStore.view().machines.find(item => item.id === (id === 'local' ? machineId() : id))?.defaultDirectory || '',
     resolveDirectory: (id, dir) => { const host = registry.node(!id || id === machineId() || id === 'local' ? 'local' : id)?.host; if (!host) throw new Error('执行机器未连接'); return host.resolveDir(dir); },
+    validateExecution: ({ machineId: id, engine }) => { const adapter = registry.adapter(engine, id === machineId() ? 'local' : id); if (!adapter || !adapter.detect?.()?.path) throw new Error('所选机器未安装或未检测到该引擎，请安装 CLI 后重试'); },
+    sessionExists: async binding => { const node = binding.machineId === machineId() ? 'local' : binding.machineId || binding.node || 'local'; try { return await registry.adapter(binding.engine, node)?.owns(binding.id); } catch { return false; } },
     sessions: listSessions,
     projects: knownProjects,
     nodeProjects: id => registry.node(id)?.info.projects || [],
@@ -1851,9 +1869,9 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
     submit: async ({ gatewayContext, ...input }) => {
       const run = manager.get(input.sessionId), live = run && !run.job.closed;
       if (!live && accountRouter.sessions().items.some(item => item.id === input.sessionId && item.running)) throw new Error('此会话正在外部 CLI 中运行，请等本轮结束后续接；可先用 /history 查看记录');
-      if (live && (run.job.meta.model || '') === (input.model || '')) { manager.send(input.sessionId, { ...input, context: gatewayContext }); return { sessionId: run.id }; }
+      if (live && executionMachines().find(item => item.id === run.job.meta.machineId)?.online !== false && (run.job.meta.model || '') === (input.model || '')) { manager.send(input.sessionId, { ...input, context: gatewayContext }); return { sessionId: run.id }; }
       const { sessionId, run: started } = await manager.start({ ...input, context: gatewayContext });
-      return { sessionId, cwd: started.job.meta.cwd, machineId: started.job.meta.machineId, worktree: started.job.meta.worktree };
+      return { sessionId, cwd: started.job.meta.cwd, machineId: started.job.meta.machineId, handoff: started.job.meta.handoff, workspaceId: started.job.meta.workspaceId, worktree: started.job.meta.worktree };
     },
     engine: id => sessionEngine(id),
     engines: () => registry.list().map(engine => ({ id: engine.id, ...engine.meta, capabilities: engine.capabilities })),
@@ -1870,10 +1888,11 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
     setCodexCapture: capture => writePanelConfig({ ...readPanelConfig(), codexCapture: capture }),
     watch: (id, listener) => manager.watch(id, listener),
     permission: async (id, requestId, behavior) => manager.respondPermission(id, requestId, behavior),
+    activeMessageId: id => manager.get(id)?.session.currentId || '',
     pendingPermissions: id => manager.pendingPermissions(id),
-    history: id => sessionMessages(id)?.messages || [],
-    sessionPreviews: items => historyWorker.read('sessionPreviews', items),
-    sessionUserPage: (item, page) => historyWorker.read('sessionUserPage', { item, page }),
+    history: async (id, machine) => (await conversationHistory(id, machine))?.messages || [],
+    sessionPreviews: items => Promise.all(items.map(async item => require('./core/session-previews').sessionPreview(await conversationHistory(item.id, item.machineId), item))),
+    sessionUserPage: async (item, page) => require('./core/session-previews').userMessagePage(await conversationHistory(item.id, item.machineId), page, item),
     rename: (id, title) => { if (!listSessions().some(item => item.id === id)) throw new Error('会话不存在'); if (!title.trim() || title.trim().length > 80) throw new Error('名称需为 1–80 个字符'); sessionStore.update(id, { title: title.trim(), titleSource: 'manual' }); },
     stop: async id => { if (!manager.stop(id)) throw new Error('当前没有可停止的 Panel 任务；外部 CLI 进程请在其原入口停止'); },
   },
@@ -2305,8 +2324,9 @@ const server = http.createServer(async (req, res) => {
         let revision = '';
         if (fp) { const st = fs.statSync(fp); revision = `${st.mtimeMs}:${st.size}`; }
         if (revision && url.searchParams.get('since') === revision) return sendJSON(res, 200, { unchanged: true, revision });
-        const r = sessionMessages(id, { before: url.searchParams.has('before') ? url.searchParams.get('before') : undefined, limit: Math.max(1, Number(url.searchParams.get('limit')) || 80) });
-        return r ? sendJSON(res, 200, { ...r, machineId: sessionStore.read()[id]?.machineId || sessionStore.read()[id]?.node || machineId(), worktree: sessionStore.read()[id]?.worktree || null, revision }) : sendJSON(res, 404, { error: T(lang, 'errNotFound') });
+        const remote = sessionStore.read()[id] || conversations.get(id);
+        const r = remote?.machineId && remote.machineId !== machineId() ? await conversationHistory(id, remote.machineId) : sessionMessages(id, { before: url.searchParams.has('before') ? url.searchParams.get('before') : undefined, limit: Math.max(1, Number(url.searchParams.get('limit')) || 80) });
+        return r ? sendJSON(res, 200, { ...r, machineId: remote?.machineId || remote?.node || machineId(), worktree: sessionStore.read()[id]?.worktree || null, revision }) : sendJSON(res, 404, { error: T(lang, 'errNotFound') });
       }
       if (req.method === 'GET' && parts.length === 4 && parts[3] === 'replay') {
         const r = sessionReplay(decodeURIComponent(parts[2]));
@@ -2522,11 +2542,12 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
     const self = clusterConfig.members.find(item => item.id === clusterConfig.nodeId);
     if (self?.witness) return;
     const oldRuntime = registry.node(id); if (oldRuntime?.info.transport === 'cluster' && oldRuntime.peer !== peer) { registry.removeNode(id); clusterRuntimePending.delete(id); }
-    require('./node/agent').serveNode({ peer, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, beforeOpen: id => { if (id && (manager.busy(id) || accountRouter.sessions().items.some(item => item.id === id && item.running))) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed) previous.session.close(); } });
+    require('./node/agent').serveNode({ peer, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listSessions, messages: id => sessionMessages(id) }, beforeOpen: id => { if (id && (manager.busy(id) || accountRouter.sessions().items.some(item => item.id === id && item.running))) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed) previous.session.close(); } });
     setImmediate(() => attachClusterRuntime(id, peer).catch(error => console.warn('集群执行连接：' + error.message)));
   } });
   cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: feishuGateway, canTransfer: () => manager.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });
   clusterNetwork.handle('workspaces.save', async (_, input) => { if (!cluster.canStart()) throw new Error('当前节点没有主节点租约，请刷新后重试'); return workspaceStore.save(input); });
+  clusterNetwork.handle('conversations.put', (_, record) => { if (!cluster.canStart()) throw new Error('当前节点没有共享状态写入租约'); conversations.merge(record); return { ok: true }; });
   clusterNetwork.handle('gateway.invoke', async (_, { method, input }) => {
     if (!cluster.canStart()) throw new Error('当前节点没有 IM 主节点租约');
     if (!['status', 'configure', 'messages', 'refreshContacts', 'labelContact', 'newPairing', 'start', 'revealSecret'].includes(method)) throw new Error('未知网关操作');
@@ -2543,6 +2564,14 @@ if (!HISTORY_WORKER) server.listen(PORT, BIND_HOST, () => {
   ensureProxyInstalled();
   feishuGateway.bootstrapRuntime();
   nodeHub.start();
+  setTimeout(() => { try {
+    const state = JSON.parse(fs.readFileSync(path.join(DATA_DIR,'panel-feishu-state.json'),'utf8'));
+    const bindings = [...Object.values(state.bindings || {}), ...Object.values(state.engineBindings || {}).flatMap(value=>Object.values(value))];
+    for (const binding of bindings) if (binding.machineId === machineId() && !conversations.get(binding.id)) {
+      const native = sessionMessages(binding.id);
+      conversations.put(binding.id,{machineId:binding.machineId,project:binding.cwd,engine:binding.engine||'claude',worktree:binding.worktree,title:native?.title||'历史会话',messages:(native?.messages||[]).slice(-12).map(m=>({role:m.role,text:String(m.text||'').slice(0,1500),timestamp:m.timestamp}))});
+    }
+  } catch {} },2000).unref();
   cluster.start().catch(e => console.warn('集群启动：' + e.message));
 });
 const stopPanel = async () => {
@@ -2551,6 +2580,7 @@ const stopPanel = async () => {
   macRuntime.close();
   codexStats.close();
   historyWorker?.close();
+  conversations.flush();
   await cluster.stop().catch(() => {});
   manager.shutdown();
   nodeHub.stop();

@@ -371,7 +371,7 @@ test('open groups hide session controls and tool details while explicitly select
   await f.gateway.receive(f.msg('公开群任务', group));
   await new Promise(resolve => setTimeout(resolve, 30));
   let rendered = JSON.stringify(f.sent.at(-1).content);
-  assert.equal(f.sent.at(-1).content.post.zh_cn.content[0][0].text, 'A complete response.\n\nClaude Code · /codex 或 /claude 切换引擎 · 模型：默认（CLI 配置） · /model 切换模型');
+  assert.equal(f.sent.at(-1).content.post.zh_cn.content[0][0].text, 'A complete response.\n\n本机 · Claude Code · /codex 或 /claude 切换引擎 · 模型：默认（CLI 配置） · /model 切换模型');
   assert.equal(f.updated.length, 0);
   assert.deepEqual(f.reactions.map(x => x.action), ['add', 'remove']);
   assert.match(rendered, /A complete response/);
@@ -932,4 +932,62 @@ test('cold startup and cluster reload restore the configured Mac keep-awake stat
   fs.writeFileSync(path.join(dir, 'panel-feishu.json'), JSON.stringify({ keepAwake: false }));
   await gateway.reload();
   assert.deepEqual(calls, [true, false]);
+});
+
+function enableFormFixture(f) {
+  f.panel.machineId=()=> 'mac';
+  f.panel.workspaces=()=>({selfId:'mac',machines:[{id:'mac',label:'Mac',online:true,home:f.dir},{id:'linux',label:'Linux',online:false}],config:{defaults:{mac:f.dir},projects:[{id:'app',name:'App',paths:{mac:f.dir}}]}});
+  f.panel.resolveDirectory=async (_id,dir)=>dir;
+}
+function formSubmitValue(sent) {
+  return sent.content.card.body.elements.find(e=>e.tag==='form').elements.find(e=>e.tag==='button').behaviors[0].value;
+}
+function formFields(prompt) {return {machineId:'mac',workspaceId:'app',engine:'claude',model:'__default__',worktree:'original',prompt};}
+
+test('/new query opens one prefilled form; an SDK raw form submission starts once',async t=>{
+  const f=await fixture(t);await f.pair();enableFormFixture(f);
+  await f.gateway.receive(f.msg('/new 今天天气怎样？'));
+  const sent=f.sent.at(-1),form=sent.content.card.body.elements.find(e=>e.tag==='form');
+  assert.equal(form.elements.find(e=>e.name==='prompt').default_value,'今天天气怎样？');assert.equal(f.calls.length,0);
+  const value=formSubmitValue(sent);
+  const raw={operator:{open_id:'ou_owner'},context:{open_message_id:sent.messageId,open_chat_id:'oc_private'},action:{tag:'button',value,form_value:formFields('改成明天天气怎样？')}};
+  const evt=require('@larksuiteoapi/node-sdk').normalizeCardAction(raw,{includeRaw:true});
+  await f.gateway.action(evt);await f.gateway.action(evt);
+  assert.equal(f.calls.length,1);assert.equal(f.calls[0].prompt,'改成明天天气怎样？');assert.equal(f.calls[0].machineId,'mac');
+});
+
+test('failed form submission preserves fields and the old binding, and a corrected retry starts once',async t=>{
+  const f=await fixture(t);await f.pair();await f.gateway.receive(f.msg('/new'));enableFormFixture(f);
+  const key=contextKey(f.msg('')),read=()=>JSON.parse(fs.readFileSync(path.join(f.dir,'panel-feishu-state.json')));
+  const old=read().bindings[key].id;
+  await f.gateway.receive(f.msg('/new 保留这条问题'));
+  let sent=f.sent.at(-1),value=formSubmitValue(sent);
+  const click=(card,v,fields)=>f.gateway.action({messageId:card.messageId,chatId:'oc_private',operator:{openId:'ou_owner'},action:{value:v,form_value:fields}});
+  await click(sent,value,{...formFields('保留这条问题'),machineId:'linux'});
+  assert.equal(f.calls.length,0);assert.equal(read().bindings[key].id,old);
+  sent=f.sent.at(-1);assert.match(JSON.stringify(sent.content),/所选执行机器未连接/);assert.match(JSON.stringify(sent.content),/保留这条问题/);
+  value=formSubmitValue(sent);await click(sent,value,formFields('修正后提交'));
+  assert.equal(f.calls.length,1);assert.notEqual(read().bindings[key].id,old);
+});
+
+test('an engine startup error returns an editable form instead of replacing the old binding',async t=>{
+  const f=await fixture(t);await f.pair();await f.gateway.receive(f.msg('/new'));enableFormFixture(f);
+  const read=()=>JSON.parse(fs.readFileSync(path.join(f.dir,'panel-feishu-state.json'))),key=contextKey(f.msg('')),old=read().bindings[key].id;
+  await f.gateway.receive(f.msg('/new Start'));const sent=f.sent.at(-1),value=formSubmitValue(sent),submit=f.panel.submit;
+  f.panel.submit=async()=>{throw Error('CLI is unavailable')};
+  await f.gateway.action({messageId:sent.messageId,chatId:'oc_private',operator:{openId:'ou_owner'},action:{value,form_value:formFields('Start')}});
+  assert.equal(read().bindings[key].id,old);assert.match(JSON.stringify(f.sent.at(-1).content),/CLI is unavailable/);
+  f.panel.submit=submit;
+});
+
+test('a first-turn provider failure offers the saved form again without automatically replaying the query',async t=>{
+  const f=await fixture(t);await f.pair();await f.gateway.receive(f.msg('/new'));enableFormFixture(f);
+  const read=()=>JSON.parse(fs.readFileSync(path.join(f.dir,'panel-feishu-state.json'))),key=contextKey(f.msg('')),old=read().bindings[key].id;
+  await f.gateway.receive(f.msg('/new Keep this query'));const sent=f.sent.at(-1),value=formSubmitValue(sent);let input;
+  f.panel.submit=async data=>{input=data;f.calls.push(data);return{sessionId:data.sessionId}};
+  f.panel.watch=(_id,listener)=>{listener('error',{messageId:input.messageId,error:'provider rejected the model'});return()=>{}};
+  await f.gateway.action({messageId:sent.messageId,chatId:'oc_private',operator:{openId:'ou_owner'},action:{value,form_value:formFields('Keep this query')}});
+  for(let i=0;i<30&&!JSON.stringify(f.sent.at(-1).content).includes('provider rejected the model');i++)await new Promise(r=>setTimeout(r,10));
+  assert.match(JSON.stringify(f.sent.at(-1).content),/provider rejected the model/);
+  assert.equal(read().bindings[key].id,old);assert.equal(f.calls.length,1);assert.match(JSON.stringify(f.sent.at(-1).content),/Keep this query/);
 });

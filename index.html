@@ -93,7 +93,7 @@ function userGuideSections() {
       [copy('当前面板', 'This panel'), copy('浏览器正在访问的 my-agents 服务。打开另一台面板，不等于把任务搬到另一台机器。', 'The my-agents service open in your browser. Opening another panel does not move tasks to it.')],
       [copy('IM 主节点', 'IM leader'), copy('集群中取得多数派租约、负责机器人连接与共享配置的面板。只有有效主节点接收机器人消息。', 'The panel holding a majority lease for the bot connection and shared configuration. Only a valid leader receives bot messages.')],
       [copy('执行机器', 'Execution machine'), copy('保存项目、worktree 和原生 CLI 历史，实际运行任务的机器。已有会话记录自己的机器归属。', 'The machine storing the project, worktree and native CLI history and running the task. Existing sessions retain their machine ownership.')],
-    ], note: copy('主节点切换不会复制项目或迁移正在运行的 CLI 进程。原执行机器离线时，原会话需要等待它恢复，或显式在另一台机器新建任务。', 'A leader change does not copy projects or migrate running CLI processes. If the original execution machine is offline, wait for it or explicitly start a new task elsewhere.'), target: 'proxy', infra: 'machines', action: copy('查看机器状态', 'View machine status') },
+    ], note: copy('主节点切换不会复制项目或迁移正在运行的 CLI 进程。执行机器离线后，下一轮会尝试转到有效 IM 主节点，并按项目映射接续；未同步的 worktree 需手动选择目标项目，不能重放未知结果的命令。', 'A leader change does not copy projects or migrate running CLI processes. If the original execution machine is offline, wait for it or explicitly start a new task elsewhere.'), target: 'proxy', infra: 'machines', action: copy('查看机器状态', 'View machine status') },
     { id: 'machines', title: copy('添加开发机：执行节点与集群面板', 'Add machines: execution nodes versus cluster panels'), lead: copy('两种接入解决的问题不同，请先确定你要增加执行能力，还是让另一台机器接管机器人。', 'Choose whether you need more execution capacity or another panel capable of taking over the bot.'), rows: [
       [copy('添加执行节点', 'Add an execution node'), copy('在「机器与引擎 → 集群与机器 → 高级执行节点」复制 WebSocket 命令，到开发机终端运行。也可使用 SSH 启动节点。连接后才能调度它。', 'Copy the WebSocket command from Machines & engines → Cluster & machines → Advanced execution nodes and run it on the machine, or launch a node through SSH. It becomes schedulable while connected.')],
       [copy('添加集群面板', 'Add a cluster panel'), copy('需要在另一台机器部署常驻面板服务，配置相同集群身份、成员和认证，并保证成员互通。普通 node 命令只连接执行通道，不参加主节点选举。', 'Deploy a persistent panel with matching cluster identity, membership and authentication and reachable peers. The normal node command only connects execution; it does not join leader elections.')],
@@ -106,14 +106,14 @@ function userGuideSections() {
       copy('任务完成后审阅改动，再提交、合并和清理 worktree。面板不会自动合并，也不会在任务结束时删除工作成果。', 'Review changes, then commit, merge and clean up the worktree. The panel does not automatically merge or delete task work.'),
     ], target: 'proxy', infra: 'workspaces', action: copy('配置项目与目录', 'Configure project directories') },
     { id: 'sessions', title: copy('会话、引擎、模型和代理账号', 'Sessions, engines, models and proxy accounts'), lead: copy('先选执行位置，再选运行工具和模型。它们是不同的设置。', 'Choose where the task runs, then the agent and model. These are different settings.'), rows: [
-      [copy('会话', 'Session'), copy('接续已有上下文时，从会话列表打开。已有会话固定在原机器和引擎；更换执行机器应显式新建或选择目标机器上的会话。', 'Open an existing session to continue its context. It retains its machine and engine. To change machines, explicitly start a new session or select one on the destination.')],
+      [copy('会话', 'Session'), copy('接续已有上下文时，从会话列表打开。已有会话正常时保留原执行位置；可在设置中手动选择机器、项目和引擎，下一次发送时创建接续会话并带上可获取的对话检查点。', 'Open an existing session to continue its context. It retains its machine and engine. To change machines, explicitly start a new session or select one on the destination.')],
       [copy('引擎', 'Engine'), copy('Claude Code / Codex 是执行任务的外部 CLI。切换引擎时不会把两者的原生上下文合成一份。', 'Claude Code / Codex are external CLIs. Switching engines does not merge their native contexts.')],
       [copy('模型', 'Model'), copy('在对话设置中选择可用模型。可用选项取决于引擎、当前代理账号及服务支持；默认项沿用 CLI 或现有配置。', 'Choose available models in chat settings. Options depend on the engine, proxy account and provider. The default follows CLI or existing settings.')],
       [copy('代理账号', 'Proxy account'), copy('在「引擎与账号」管理请求使用的接入账号与路由。它与执行机器不是同一个概念，也不能代替目标机器上的 CLI 环境。', 'Manage provider accounts and request routing under Engines & accounts. This is distinct from execution machines and does not replace their CLI environment.')],
     ], target: 'sessions', action: copy('查看会话', 'View sessions') },
     { id: 'im', title: copy('在飞书中使用和切换任务', 'Use and switch tasks in Feishu'), lead: copy('「IM 接入」统一管理聊天入口，目前可用渠道为飞书 / Lark。企业微信等其他渠道尚未接入。', 'IM connections manages messaging entry points. Feishu / Lark is currently available; channels such as WeCom are not yet connected.'), rows: [
       ['/help', copy('查看当前版本支持的命令；以机器人返回的帮助为准。', 'See the commands supported by the running version; the bot’s help is authoritative.')],
-      ['/projects · /new', copy('查看项目、选择目录并新建会话；/new claude 或 /new codex 可指定引擎。', 'View projects, choose directories and create sessions. /new claude or /new codex specifies the engine.')],
+      ['/projects · /new', copy('查看项目；/new 第一条问题 打开预填表单，一次选择机器、项目、引擎和模型后提交。失败保留内容，可修改重提。', 'View projects, choose directories and create sessions. /new claude or /new codex specifies the engine.')],
       ['/node · /engine', copy('查看或选择执行节点和引擎；先确认项目确实存在于目标机器。', 'View or choose the execution node and engine. Confirm the project exists on the destination.')],
       ['/claude · /codex', copy('切换引擎，也可直接带问题。各引擎接续自己的会话上下文。', 'Switch engines, optionally with a prompt. Each engine continues its own session context.')],
       ['/model', copy('查看当前模型，或用卡片选择模型；也可发送 /model 模型ID，/model default 恢复默认。', 'View the current model or select one from the card. /model MODEL_ID selects it; /model default restores the default.')],
@@ -124,7 +124,7 @@ function userGuideSections() {
       [copy('页面打不开', 'The page will not open'), copy('检查当前访问的那台面板服务和端口。localhost 只表示你当前这台电脑；它关闭后，需要访问另一台在线面板的地址。', 'Check the service and port of the panel you are visiting. localhost refers to your current computer; use another online panel’s address if it is off.')],
       [copy('机器人没回', 'The bot does not reply'), copy('在「集群与机器」查看是否有有效 IM 主节点，再检查「IM 接入」实际连接状态、权限和消息记录。成员可达不代表已经取得主节点租约。', 'Check for a valid IM leader under Cluster & machines, then inspect the actual IM connection, access rules and message records. Reachable peers do not by themselves imply a valid leader lease.')],
       [copy('工作目录不存在', 'Working directory does not exist'), copy('核对卡片上的执行机器，以及「项目与目录」中这台机器的真实路径。不要在 Linux 上创建一个同名 Mac 路径来绕过检查。', 'Check the execution machine and its real path under Projects & directories. Do not create a Mac-shaped path on Linux just to bypass validation.')],
-      [copy('执行机器离线', 'Execution machine offline'), copy('恢复那台机器的节点或面板服务、网络与 CLI。其他机器可以接新任务，但不会自动拥有离线机器的文件和原生会话。', 'Restore the machine’s node or panel service, network and CLI. Other machines can run new tasks but do not automatically acquire its files or native sessions.')],
+      [copy('执行机器离线', 'Execution machine offline'), copy('下一轮会尝试转到有效 IM 主节点。检查目标机器的项目映射和 CLI；对话检查点可接续，但文件、未提交改动和原生会话不会自动复制。', 'Restore the machine’s node or panel service, network and CLI. Other machines can run new tasks but do not automatically acquire its files or native sessions.')],
       [copy('502 / 上游超时', '502 / upstream timeout'), copy('检查代理账号、网络和上游服务，再到「抓包」查看请求状态与耗时。抓包需要请求经过代理；未接入的历史调用无法补抓。', 'Check the provider account, network and upstream service, then inspect request status and timing in Inspector. Only requests routed through the proxy can be captured; past uncaptured calls cannot be recovered.')],
     ], target: 'proxy', infra: 'machines', action: copy('查看集群与机器', 'Inspect cluster & machines') },
     { id: 'data', title: copy('数据保存、更新和能力边界', 'Data, updates and boundaries'), lead: copy('项目源码和用户数据分开保存。改仓库目录或更新代码，不需要清空用户数据。', 'Source code and user data are stored separately. Renaming a checkout or updating code does not require clearing user data.'), steps: [
@@ -2639,15 +2639,16 @@ async function loadChatExecution(v) {
   try {
     const data = await api('GET', 'workspaces'); if (chatView !== v || !machine.isConnected) return;
     const id = v.machineId || data.selfId; v.machineId = id;
+    v.workspaceId ||= data.config.projects.find(item => item.paths[id] === (v.worktree?.repository || v.cwd))?.id || '';
     machine.innerHTML = data.machines.map(item => `<option value="${esc(item.id)}"${item.id === id ? ' selected' : ''}${!item.online && item.id !== id ? ' disabled' : ''}>${esc(item.label)} (${esc(item.id)})${item.online ? '' : ' · ' + esc(rt('未连接', 'Disconnected'))}</option>`).join('');
     if (!Array.from(machine.options).some(option => option.value === id)) machine.add(new Option(id, id));
-    machine.value = id; machine.disabled = !!v.sessionId;
+    machine.value = id; machine.disabled = !!v.busy;
     const syncProjects = () => {
       project.innerHTML = `<option value="">${esc(rt('使用当前目录', 'Use current directory'))}</option>` + data.config.projects.map(item => `<option value="${esc(item.id)}"${item.id === v.workspaceId ? ' selected' : ''}${item.paths[machine.value] ? '' : ' disabled'}>${esc(item.name)}${item.paths[machine.value] ? '' : ' · ' + esc(rt('此机器未配置目录', 'No path on this machine'))}</option>`).join('');
-      project.disabled = !!v.sessionId; syncChatPicker(machine); syncChatPicker(project);
+      project.disabled = !!v.busy; syncChatPicker(machine); syncChatPicker(project);
     };
     const change = () => {
-      if (v.sessionId) return;
+      if (v.sessionId) v.switchMachine = true;
       v.machineId = machine.value; v.workspaceId = project.value;
       const mapped = data.config.projects.find(item => item.id === v.workspaceId);
       v.cwd = mapped ? mapped.paths[v.machineId] || '' : data.machines.find(item => item.id === v.machineId)?.defaultDirectory || '';
@@ -2656,14 +2657,14 @@ async function loadChatExecution(v) {
       syncProjects();
     };
     machine.onchange = change; project.onchange = change; syncProjects();
-    $('#chat-execution-hint').textContent = v.sessionId ? rt('会话固定在原机器执行。换机器请新建会话。', 'This session stays on its original machine. Start a new session to change machines.') : rt('目录在所选机器上校验。IM 主节点只接收消息。', 'Directories are validated on the execution machine. The IM leader only receives messages.');
+    $('#chat-execution-hint').textContent = v.sessionId ? rt('可手动切换执行机器、项目或引擎；下一次发送时创建接续会话，保留可获取的对话检查点。原任务不会被重复执行。', 'Change machine, project or engine manually. The next send starts a continuation with available checkpoints; previous commands are not replayed.') : rt('目录在所选机器上校验。IM 主节点只接收消息。', 'Directories are validated on the execution machine. The IM leader only receives messages.');
   } catch { if ($('#chat-execution-hint')) $('#chat-execution-hint').textContent = rt('执行机器信息暂不可用；已有会话保持原执行位置。', 'Machine details are unavailable; existing sessions keep their execution location.'); }
 }
 function renderChat() {
   chatScrollObserver?.disconnect();
   chatModel = modelPreference(chatView.engine);
   const v = chatView, existing = !!v.sessionId, engineName = engineLabel(v.engine);
-  const engine = existing || ENGINES.length < 2
+  const engine = ENGINES.length < 2
     ? `<span class="chat-engine-badge ${engineClass(v.engine)}" style="${esc(engineStyle(v.engine))}">${esc(engineName)}</span>`
     : `<div class="chat-engine" role="group" aria-label="${esc(rt('引擎', 'Engine', 'エンジン'))}">${ENGINES.map(item => `<button type="button" data-engine="${esc(item.id)}" aria-pressed="${v.engine === item.id}">${esc(item.label)}</button>`).join('')}</div>`;
   const project =`<div class="chat-field chat-project"><span>${esc(rt('项目', 'Project'))}</span><div class="chat-project-current" title="${esc(v.cwd)}">${icon('folder')}<span>${esc((v.worktree?.repository || v.cwd).split('/').filter(Boolean).pop() || v.cwd || rt('未知', 'Unknown'))}</span><small>${esc(v.cwd.replace(/^\/Users\/[^/]+/, '~'))}</small></div></div>`;
@@ -2691,6 +2692,7 @@ function renderChat() {
   document.querySelectorAll('.chat-engine button').forEach(button => button.onclick = () => {
     if (v.engine === button.dataset.engine) return;
     const draft = $('#chat-prompt').value;
+    if (v.sessionId) v.switchMachine = true;
     v.engine = button.dataset.engine; localStorage.setItem('panel-chat-engine', v.engine);
     renderChat(); $('#chat-prompt').value = draft;
   });
@@ -2866,7 +2868,7 @@ async function sendChat(mode = 'steer') {
   if ((!prompt && !v.attachments?.length) || v.readingImages || v.changingModel) return;
   const images = (v.attachments || []).slice();
   chatModel = $('#chat-model').value.trim(); localStorage.setItem('panel-chat-model-' + (chatView.engine || LEGACY_ENGINE), chatModel);
-  if (v.run && v.run.model !== chatModel) {
+  if (v.run && (v.run.model !== chatModel || v.switchMachine)) {
     if (Array.from(v.run.turns.values()).some(item => !item.finished)) { toast(rt('当前回复完成后，再发送消息使用新模型', 'Wait for the current reply before sending with the new model'), false); return; }
     const previous = v.run;
     v.changingModel = true;
@@ -2933,6 +2935,8 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
       if (payload.engine) v.engine = payload.engine;
       if (payload.cwd) v.cwd = payload.cwd;
       if (payload.machineId) v.machineId = payload.machineId;
+      v.switchMachine = false;
+      if (payload.handoff && shown) toast(rt(`执行位置已切换：${payload.handoff.from} → ${payload.handoff.to}；上下文：${payload.handoff.context === 'checkpoint' ? '对话检查点' : '未恢复'}`, `Execution moved: ${payload.handoff.from} → ${payload.handoff.to}; context: ${payload.handoff.context}`));
       if (payload.worktree) v.worktree = payload.worktree;
       if (shown && payload.cwd) {
         const project = $('.chat-project-current');
@@ -2943,7 +2947,7 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
       v.liveId = payload.sessionId; v.lastReplayJobId = payload.jobId; resolveReady(); refreshRoutes();
       if (!shown) return;
       const picker = document.querySelector('.chat-engine');
-      if (picker) { const badge = engineTag(v.engine, engineLabel(v.engine), 'chat-engine-badge'); picker.replaceWith(badge); }
+      if (picker) picker.querySelectorAll('button').forEach(button => { button.disabled = false; button.setAttribute('aria-pressed', String(button.dataset.engine === v.engine)); });
       if (!$('#chat-detail')) {
         const actions = $('.chat-top-actions'), settings = $('#chat-settings-toggle');
         for (const [id, text, action] of [['chat-detail', rt('详情', 'Details', '詳細'), () => { state.sessionDetail = true; openItem(v.sessionId); }], ['chat-replay', replayLabel(v.engine), () => loadReplay(v.sessionId)]]) {
@@ -3038,7 +3042,7 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
         if (resume && attempt) resetRun();
         const response = await fetch(resume ? `/api/chat/${encodeURIComponent(v.sessionId)}/events` : '/api/chat', {
           method: resume ? 'GET' : 'POST', headers: resume ? undefined : { 'Content-Type': 'application/json' },
-          body: resume ? undefined : JSON.stringify({ prompt, images, cwd: v.cwd, worktree: v.worktreeEnabled !== false, model: chatModel, machineId: v.machineId, workspaceId: v.workspaceId, sessionId: v.sessionId, messageId: turn.id, accountId: can(v.engine, 'accounts') ? v.accountId : undefined, engine: v.engine }), signal: abort.signal,
+          body: resume ? undefined : JSON.stringify({ prompt, images, cwd: v.cwd, worktree: v.worktreeEnabled !== false, model: chatModel, machineId: v.machineId, workspaceId: v.workspaceId, switchMachine: !!v.switchMachine, sessionId: v.sessionId, messageId: turn.id, accountId: can(v.engine, 'accounts') ? v.accountId : undefined, engine: v.engine }), signal: abort.signal,
         });
         if (!response.ok) throw await responseError(response);
         const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';

@@ -152,3 +152,12 @@ test('older nodes give an actionable update error when isolation is requested', 
   await assert.rejects(manager.start({ prompt: 'Task', cwd: os.tmpdir(), worktree: true }), error => error.status === 400 && /更新节点/.test(error.message));
   assert.equal(opened.length, 0); manager.shutdown();
 });
+
+test('a machine handoff creates a fresh native session and carries checkpoints without replaying previous commands', async () => {
+  const {registry,opened}=setup();
+  const manager=createSessionManager({registry,resolveLocation:()=>({machineId:'linux',node:'local',cwd:os.tmpdir(),handoff:{from:'mac',to:'linux',reason:'offline',previousSessionId:'existing-thread'}}),history:{ownerOf:()=>({engine:'assigned',machineId:'mac'}),messages:()=>({messages:[{role:'user',text:'Previous request'},{role:'assistant',text:'Previous result'}]}),touch(){}}});
+  const result=await manager.start({sessionId:'existing-thread',prompt:'Continue with the next task'});
+  assert.notEqual(result.sessionId,'existing-thread');assert.equal(opened[0].resume,false);assert.equal(result.run.job.meta.handoff.context,'checkpoint');
+  await settle();assert.equal(result.run.job.events.filter(e=>e.event==='input').length,1);
+  manager.shutdown();
+});

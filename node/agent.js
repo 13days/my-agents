@@ -13,7 +13,7 @@ const VERSION = require('../package.json').version;
 // Notifications (node → hub): session.event, session.idle, session.ready,
 // session.failed, session.accepted, session.closed. Each carries the session
 // state so the hub can answer currentId / busy synchronously.
-function serveNode({ peer, host, engines, id = os.hostname(), label = id, beforeOpen = () => {} }) {
+function serveNode({ peer, host, engines, id = os.hostname(), label = id, beforeOpen = () => {}, history = null }) {
   const byId = new Map(engines.map(engine => [engine.id, engine]));
   const sessions = new Map();
   const engineOf = name => { const engine = byId.get(name); if (!engine) throw Object.assign(new Error(`节点上没有引擎：${name}`), { status: 400 }); return engine; };
@@ -31,6 +31,10 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id, before
     projects: typeof host.projects === 'function' ? host.projects() : [],
   }));
   peer.handle('engine.owns', async ({ engine, id: sessionId }) => !!await engineOf(engine).owns(sessionId));
+  if (history) {
+    peer.handle('history.messages', ({ id }) => history.messages(id));
+    peer.handle('history.list', () => history.list());
+  }
   peer.handle('host.resolveDir', ({ dir }) => host.resolveDir(dir));
   peer.handle('host.createWorktree', async ({ dir }) => host.createWorktree(await host.resolveDir(dir)));
 

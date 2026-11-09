@@ -12,8 +12,8 @@ test('project mappings validate paths on their own machine and resolve after a l
   const f = fixture(t, 'linux');
   await f.store.save({ defaults: { mac: '/Users/test/work', linux: '/home/test/work' }, projects: [{ id: 'app', name: 'App', paths: { mac: '/Users/test/app', linux: '/home/test/app' } }] });
   assert.deepEqual(f.resolved, [['mac','/Users/test/work'],['linux','/home/test/work'],['mac','/Users/test/app'],['linux','/home/test/app']]);
-  assert.deepEqual(f.store.resolve({ machineId: 'mac', workspaceId: 'app' }), { machineId: 'mac', node: 'mac', cwd: '/Users/test/app' });
-  assert.deepEqual(f.store.resolve({ machineId: 'linux', workspaceId: 'app' }), { machineId: 'linux', node: 'local', cwd: '/home/test/app' });
+  assert.deepEqual(f.store.resolve({ machineId: 'mac', workspaceId: 'app' }), { machineId: 'mac', node: 'mac', cwd: '/Users/test/app', workspaceId: 'app' });
+  assert.deepEqual(f.store.resolve({ machineId: 'linux', workspaceId: 'app' }), { machineId: 'linux', node: 'local', cwd: '/home/test/app', workspaceId: 'app' });
   assert.deepEqual(f.store.resolve({ machineId: 'linux' }, { machineId: 'mac', project: '/Users/test/app' }), { machineId: 'mac', node: 'mac', cwd: '/Users/test/app' });
 });
 test('foreign paths fail without rewriting or creating directories', async t => {
@@ -27,4 +27,17 @@ test('an unchanged path can be retained while its machine is offline', async t =
   f.hosts.linux = null;
   await f.store.save({ defaults: { linux: '/home/test' }, projects: [] });
   await assert.rejects(f.store.save({ defaults: { linux: '/home/other' }, projects: [] }), /未连接/);
+});
+
+test('offline execution follows the valid leader using project mappings; manual selection remains explicit', async t => {
+  const f = fixture(t, 'linux');
+  await f.store.save({ defaults: {}, projects: [{ id:'app',name:'App',paths:{mac:'/Users/test/app',linux:'/home/test/app'} }] });
+  const store=createWorkspaces({dir:f.dir,selfId:()=> 'linux',machines:()=>[{id:'mac',online:false},{id:'linux',online:true}],hostFor:id=>f.hosts[id],leaderId:()=> 'linux'});
+  const owner={machineId:'mac',project:'/Users/test/app'};
+  const target=store.resolve({sessionId:'saved-session',machineId:'mac'},owner);
+  assert.equal(target.machineId,'linux');assert.equal(target.cwd,'/home/test/app');assert.equal(target.handoff.reason,'offline');
+  assert.throws(()=>store.resolve({machineId:'mac',allowFailover:false},owner),/离线/);
+  assert.throws(()=>store.resolve({machineId:'mac'}, {...owner,worktree:{repository:'/Users/test/app',branch:'task'}}),/独立工作区/);
+  assert.equal(store.resolve({switchMachine:true,machineId:'linux',workspaceId:'app'},owner).handoff.reason,'manual');
+  assert.throws(()=>store.resolve({machineId:'mac'}, {...owner,project:'/Users/test/missing'}),/目录映射/);
 });

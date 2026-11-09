@@ -52,6 +52,7 @@
     "capture-store.js",
     "lark-setup.js",
     "feishu-cards.js",
+    "feishu-new-session.js",
     "feishu-inbox.js",
     "feishu-contacts.js",
     "feishu-commands.js",

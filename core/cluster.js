@@ -15,7 +15,7 @@ function createCluster({ dir, config, network, gateway = { start: async () => {}
   let lastLeaderAt = now(), preferred = config.preferred || '', snapshotChecksum = '', heartbeatBusy = false;
   const peerReports = new Map();
   const gatewayPhase = () => gateway.status?.().phase || (gateway.active ? 'connected' : 'disabled');
-  const syncNames = ['panel-feishu.json', 'panel-feishu-state.json', 'panel-workspaces.json'];
+  const syncNames = ['panel-feishu.json', 'panel-feishu-state.json', 'panel-workspaces.json', 'panel-conversations.json'];
   const localSnapshot = () => {
     const files = Object.fromEntries(syncNames.flatMap(name => { try { return [[name, fs.readFileSync(path.join(dir, name), 'utf8')]]; } catch { return []; } }));
     const checksum = crypto.createHash('sha256').update(JSON.stringify(files)).digest('hex');
