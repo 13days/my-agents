@@ -2013,6 +2013,10 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store');
       if (req.method === 'GET' && parts.length === 2) return sendJSON(res, 200, accountRouter.status());
       if (req.method === 'GET' && parts[2] === 'sessions') return sendJSON(res, 200, accountRouter.sessions());
+      if (req.method === 'GET' && parts[2] === 'models' && parts.length === 3) {
+        try { return sendJSON(res, 200, await accountRouter.models({ accountId: url.searchParams.get('accountId') || '', sessionId: url.searchParams.get('sessionId') || '', refresh: url.searchParams.get('refresh') === '1' })); }
+        catch (error) { return sendJSON(res, 400, { error: error.message }); }
+      }
       if (!String(req.headers['content-type'] || '').startsWith('application/json')) return sendJSON(res, 415, { error: '需要 application/json' });
       try {
         if (req.method === 'PUT' && parts.length === 2) return sendJSON(res, 200, accountRouter.save(JSON.parse(await readBody(req))));

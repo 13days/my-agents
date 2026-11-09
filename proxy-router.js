@@ -334,6 +334,9 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
     if (!account || account.authType === 'passthrough' || account.modelMap['*']) return {};
     const explicit = { ...(process.env || {}), ...(account.env || {}) };
     for (const family of ['OPUS', 'SONNET', 'HAIKU']) if (account.modelMap[family.toLowerCase()]) explicit[`ANTHROPIC_DEFAULT_${family}_MODEL`] = account.modelMap[family.toLowerCase()];
+    return modelDefaults((await discoverModels(account, sessionId, !!pinned)).map(model => model.id), explicit);
+  }
+  async function discoverModels(account, sessionId = '', pinned = false) {
     const cacheKey = account.id + account.url + account.token;
     let entry = modelCache.get(cacheKey);
     if (!entry || Date.now() - entry.at > 5 * 60 * 1000) {
@@ -348,13 +351,22 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
           catch { try { record(new URL(url).pathname, 502, Date.now() - startedAt, Buffer.alloc(0), Buffer.from('{"error":"model discovery failed"}'), false, {}, '', account.id, account.name, info); } catch {} return []; }
           try { record(new URL(url).pathname, response.status, Date.now() - startedAt, Buffer.alloc(0), Buffer.from(text), false, {}, '', account.id, account.name, info); } catch {}
           if (!response.ok) return [];
-          const body = JSON.parse(text); return (Array.isArray(body.data) ? body.data : []).map(model => model.id);
+          const body = JSON.parse(text); return (Array.isArray(body.data) ? body.data : []).filter(model => model && typeof model.id === 'string' && model.id.trim()).map(model => ({ id: model.id, name: typeof (model.display_name || model.name) === 'string' ? (model.display_name || model.name) : model.id }));
         } catch { return []; }
       })();
       entry = { at: Date.now(), request }; modelCache.set(cacheKey, entry);
     }
-    return modelDefaults(await entry.request, explicit);
+    return entry.request;
   }
+  async function models({ accountId = '', sessionId = '', refresh = false } = {}) {
+    const pinned = config.sessionRoutes[String(sessionId).toLowerCase()];
+    const account = accountId ? config.accounts.find(a => a.enabled && a.id === accountId) : config.accounts.find(a => a.enabled && a.id === (pinned || config.selected)) || config.accounts.find(a => a.enabled);
+    if (accountId && !account) throw new Error('账号不存在或已禁用');
+    if (!account || account.authType === 'passthrough') return { models: [], accountName: account?.name || '', forcedModel: '' };
+    if (refresh) modelCache.delete(account.id + account.url + account.token);
+    return { models: await discoverModels(account, sessionId, !!pinned), accountName: account.name, forcedModel: account.modelMap['*'] || '' };
+  }
+
   // Live view of sessions that recently went through the proxy, plus per-session account pins.
   function sessions() {
     const now = Date.now();
@@ -383,6 +395,6 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
     if (!config.accounts.some(a => a.id === selected && a.enabled)) selected = '';
     return save({ mode, selected, accounts: config.accounts.map(({ token, env, ...a }) => a) });
   }
-  return { status, save, route, importSettings, setup, handle, clientEnv, modelEnvForSession, sessions, setSessionRoute, reset: () => { health.clear(); return status(); } };
+  return { status, save, route, importSettings, setup, handle, clientEnv, modelEnvForSession, models, sessions, setSessionRoute, reset: () => { health.clear(); return status(); } };
 }
 module.exports = { createRouter, parseEnvInput };

@@ -2189,6 +2189,33 @@ $('#langSel').onchange = e => setLang(e.target.value);
 // 新建对话（＋）或打开已有会话后在此接续；每条消息由本机 `claude -p [--resume]` 执行。
 let chatAbort = null, chatModel = '';
 function modelPreference(engine) { const legacy = 'claude', id = engine || legacy; return localStorage.getItem('panel-chat-model-' + id) ?? (id === legacy ? localStorage.getItem('panel-chat-model') || '' : ''); } // the unsuffixed key predates multi-engine support and belonged to Claude
+function chatModelOptions(models, current) {
+  const unique = new Map(models.map(model => [model.id, model]));
+  if (current && !unique.has(current)) unique.set(current, { id: current, name: current });
+  return `<option value="">${esc(rt('默认（跟随账号）', 'Default (account)'))}</option>` + Array.from(unique.values(), model => `<option value="${esc(model.id)}" title="${esc(model.id)}"${model.id === current ? ' selected' : ''}>${esc(model.name || model.id)}</option>`).join('');
+}
+async function loadChatModels(force = false) {
+  const select = $('#chat-model');
+  if (!select || select.tagName !== 'SELECT') return;
+  const accountId = $('#chat-route')?.value || '';
+  const key = JSON.stringify([accountId, routeInfo?.selected, routeInfo?.mode, chatView.sessionId]);
+  if (!force && select.dataset.modelsKey === key) return;
+  select.dataset.modelsKey = key;
+  const request = select.modelsRequest = (select.modelsRequest || 0) + 1;
+  const hint = $('#chat-model-hint');
+  hint.textContent = rt('正在读取可用模型…', 'Loading available models…');
+  try {
+    const data = await api('GET', `proxy/models?accountId=${encodeURIComponent(accountId)}&sessionId=${encodeURIComponent(chatView.sessionId || '')}${force ? '&refresh=1' : ''}`);
+    if (!select.isConnected || select.modelsRequest !== request) return;
+    select.innerHTML = chatModelOptions(data.models || [], select.value);
+    syncChatPicker(select);
+    hint.textContent = data.forcedModel
+      ? rt(`账号固定映射到 ${data.forcedModel}，会覆盖模型选择`, `Account mapping overrides selection: ${data.forcedModel}`)
+      : (data.models?.length ? `${data.accountName} · ${data.models.length} ${rt('个模型，下一轮生效', 'models; applies next turn')}` : rt('未获取到模型，可刷新或手动输入', 'No models returned. Refresh or enter a model ID.'));
+  } catch (error) {
+    if (select.isConnected && select.modelsRequest === request) hint.textContent = rt('模型列表加载失败，可刷新或手动输入', 'Unable to load models. Refresh or enter a model ID.');
+  }
+}
 function replayLabel(engine) { const name = engineLabel(engine, true); return rt(`查看 ${name} 提示词`, `View ${name} prompts`, `${name} のプロンプトを表示`); }
 let chatScrollObserver = null;
 let chatView = { sessionId: '', cwd: '', messages: [] };
@@ -2303,6 +2330,7 @@ function paintRoutes() {
     if (sel && document.activeElement !== sel) {
       const cur = chatView.sessionId ? ((routeInfo && routeInfo.routes[chatView.sessionId.toLowerCase()]) || '') : (chatView.accountId || '');
       const html = routeOptions(cur); if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; syncChatPicker(sel); }
+      loadChatModels();
     }
   }
 }
@@ -2493,7 +2521,7 @@ function renderChat() {
   $('#render').innerHTML = `<section class="chat-shell">
     <header class="chat-settings"><div class="chat-settings-bar"><div class="chat-project-group">${project}<div id="chat-workspace">${chatWorkspaceControl(v, existing)}</div></div>${engine}<span class="chat-live" id="chat-live" hidden></span><div class="chat-top-actions">${actions}<button type="button" class="btn" id="chat-settings-toggle" aria-controls="chat-settings-panel">${esc(rt('设置', 'Settings'))} ⌄</button></div></div>
     <div class="chat-top" id="chat-settings-panel" hidden>
-      <label class="chat-field chat-model">${esc(rt('模型', 'Model'))}<input id="chat-model" type="text" placeholder="${esc(rt('默认', 'Default'))}" value="${esc(chatModel)}"></label>
+      <div class="chat-field chat-model"><div class="chat-model-heading"><label for="chat-model">${esc(rt('模型', 'Model'))}</label>${can(v.engine, 'accounts') ? `<button type="button" class="chat-model-refresh" id="chat-model-refresh">${esc(rt('刷新', 'Refresh'))}</button>` : ''}</div>${can(v.engine, 'accounts') ? `<select id="chat-model" aria-label="${esc(rt('模型', 'Model'))}">${chatModelOptions([], chatModel)}</select><small id="chat-model-hint" role="status"></small><details class="chat-custom-model"><summary>${esc(rt('手动输入模型 ID', 'Enter a model ID'))}</summary><input id="chat-custom-model" type="text" aria-label="${esc(rt('自定义模型 ID', 'Custom model ID'))}" placeholder="model-id" value="${esc(chatModel)}"></details>` : `<input id="chat-model" type="text" placeholder="${esc(rt('默认', 'Default'))}" value="${esc(chatModel)}">`}</div>
       <div class="chat-field chat-route"${can(v.engine, 'accounts') ? '' : ' hidden'}><span>${esc(rt('代理账号', 'Proxy account'))}</span><select id="chat-route" aria-label="${esc(rt('代理账号', 'Proxy account'))}" title="${esc(rt('只影响这个会话；其他会话可以走不同账号', 'Only affects this session; other sessions can use other accounts'))}">${routeOptions(existing ? ((routeInfo && routeInfo.routes[v.sessionId.toLowerCase()]) || '') : (v.accountId || ''))}</select></div>
     </div></header>
     <div class="chat-conversation"><div class="chat-messages" id="chat-messages"></div><div class="chat-scroll-controls" hidden><button type="button" id="chat-scroll-top" title="${esc(rt('会话顶部', 'Top of conversation'))}" aria-label="${esc(rt('会话顶部', 'Top of conversation'))}">↑</button><button type="button" id="chat-scroll-bottom" title="${esc(rt('会话底部', 'Bottom of conversation'))}" aria-label="${esc(rt('会话底部', 'Bottom of conversation'))}">↓</button></div></div>
@@ -2506,6 +2534,7 @@ function renderChat() {
   setSettingsCollapsed(localStorage.getItem('panel-chat-settings-collapsed') !== 'false');
   settingsToggle.onclick = () => { const collapsed = !settingsPanel.hidden; localStorage.setItem('panel-chat-settings-collapsed', String(collapsed)); setSettingsCollapsed(collapsed); };
   enhanceChatPicker($('#chat-route'));
+  if ($('#chat-model').tagName === 'SELECT') enhanceChatPicker($('#chat-model'));
   document.querySelectorAll('.chat-engine button').forEach(button => button.onclick = () => {
     if (v.engine === button.dataset.engine) return;
     const draft = $('#chat-prompt').value;
@@ -2544,12 +2573,19 @@ function renderChat() {
   }
   $('#chat-route').onchange = async e => {
     const accountId = e.target.value;
-    if (!v.sessionId) { v.accountId = accountId; return; }
+    if (!v.sessionId) { v.accountId = accountId; loadChatModels(); return; }
     try { routeInfo = await api('PUT', `proxy/sessions/${encodeURIComponent(v.sessionId)}`, { accountId }); paintRoutes(); toast(accountId ? rt('已为此会话固定代理账号，下一条请求生效', 'Pinned; applies from the next request') : rt('此会话已改为跟随全局路由', 'Now follows the global route')); }
     catch (err) { toast(err.message, false); refreshRoutes(); }
   };
   paintRoutes();
-  $('#chat-model').onchange = e => { chatModel = e.target.value.trim(); localStorage.setItem('panel-chat-model-' + (chatView.engine || LEGACY_ENGINE), chatModel); };
+  $('#chat-model').onchange = e => { chatModel = e.target.value.trim(); localStorage.setItem('panel-chat-model-' + (chatView.engine || LEGACY_ENGINE), chatModel); if ($('#chat-custom-model')) $('#chat-custom-model').value = chatModel; };
+  $('#chat-custom-model')?.addEventListener('change', e => {
+    const select = $('#chat-model'), value = e.target.value.trim();
+    if (value && !Array.from(select.options).some(option => option.value === value)) select.add(new Option(value, value));
+    select.value = value; select.dispatchEvent(new Event('change')); syncChatPicker(select);
+  });
+  $('#chat-model-refresh')?.addEventListener('click', () => loadChatModels(true));
+  loadChatModels();
   $('#chat-stop').onclick = async () => {
     try { await api('POST', `chat/${encodeURIComponent(v.sessionId)}/stop`, {}); }
     catch (e) { toast(e.message, false); }
@@ -2674,9 +2710,16 @@ function createChatTurn(v, prompt, images, id = crypto.randomUUID()) {
 }
 async function sendChat(mode = 'steer') {
   const v = chatView, prompt = $('#chat-prompt').value.trim();
-  if ((!prompt && !v.attachments?.length) || v.readingImages) return;
+  if ((!prompt && !v.attachments?.length) || v.readingImages || v.changingModel) return;
   const images = (v.attachments || []).slice();
   chatModel = $('#chat-model').value.trim(); localStorage.setItem('panel-chat-model-' + (chatView.engine || LEGACY_ENGINE), chatModel);
+  if (v.run && v.run.model !== chatModel) {
+    if (Array.from(v.run.turns.values()).some(item => !item.finished)) { toast(rt('当前回复完成后，再发送消息使用新模型', 'Wait for the current reply before sending with the new model'), false); return; }
+    const previous = v.run;
+    v.changingModel = true;
+    try { previous.abort.abort(); await previous.finished; }
+    finally { v.changingModel = false; }
+  }
   document.querySelectorAll('.chat-engine button').forEach(button => { button.disabled = true; });
   registerChatInSidebar(v, prompt);
   const turn = createChatTurn(v, prompt, images);
@@ -2696,7 +2739,9 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
   const abort = new AbortController(); chatAbort = abort;
   let resolveReady, rejectReady;
   const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; }); ready.catch(() => {});
-  const run = v.run = { abort, turns: new Map(turn ? [[turn.id, turn]] : []), activeId: turn?.id || '', ready, inputChain: Promise.resolve(), lastStatus: '', permissions: new Map(), metaSeen: false, ended: false };
+  let resolveFinished;
+  const finished = new Promise(resolve => { resolveFinished = resolve; });
+  const run = v.run = { abort, model: chatModel, finished, turns: new Map(turn ? [[turn.id, turn]] : []), activeId: turn?.id || '', ready, inputChain: Promise.resolve(), lastStatus: '', permissions: new Map(), metaSeen: false, ended: false };
   const status = $('#chat-status');
   const visible = () => chatView === v && !!$('#chat-messages');
   const updateStatus = () => {
@@ -2879,6 +2924,7 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
     else { run.lastStatus = rt('任务仍在后台运行', 'Task continues in the background', 'タスクはバックグラウンドで続行中です'); run.turns.forEach(item => { if (!item.finished) item.finish(''); }); }
   } finally {
     clearInterval(timer);
+    resolveFinished();
     if (failure) {
       rejectReady(failure);
       run.lastStatus = failure.message;

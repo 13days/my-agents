@@ -53,6 +53,33 @@ test('model discovery uses the pinned account, authenticates upstream, and cache
   assert.deepEqual(hits, [0, 1]);
 });
 const reply = (req, res, raw) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ id: req.headers.authorization, model: JSON.parse(raw).model, apiKey: req.headers['x-api-key'] || null })); };
+test('model picker discovers the selected or pinned account and shares its cache with defaults', async t => {
+  const hits = [0, 0];
+  const f = await fixture(t, [0, 1].map(index => (req, res) => {
+    hits[index]++;
+    assert.equal(req.headers.authorization, `Bearer secret-${index}`);
+    res.end(JSON.stringify({ data: [{ id: `claude-sonnet-${index + 5}`, display_name: `Model ${index}` }, null, { id: 123 }] }));
+  }));
+  f.accounts[1].modelMap = { '*': 'fixed-model' };
+  f.router.save({ mode: 'manual', selected: 'a0', accounts: f.accounts });
+  const sid = '11111111-1111-4111-8111-111111111111';
+  f.router.setSessionRoute(sid, 'a1');
+  assert.deepEqual(await f.router.models({ sessionId: sid }), { accountName: 'Account 1', forcedModel: 'fixed-model', models: [{ id: 'claude-sonnet-6', name: 'Model 1' }] });
+  const global = await f.router.models();
+  assert.equal(global.models[0].id, 'claude-sonnet-5');
+  await f.router.modelEnvForSession('');
+  assert.deepEqual(hits, [1, 1]);
+  await f.router.models({ accountId: 'a0', refresh: true });
+  assert.deepEqual(hits, [2, 1]);
+  await assert.rejects(f.router.models({ accountId: 'unknown' }), /账号不存在/);
+  assert.doesNotMatch(JSON.stringify(global), /secret|token|http:/);
+});
+
+test('unavailable model discovery leaves manual/default selection usable', async t => {
+  const f = await fixture(t, [(req, res) => { res.writeHead(503); res.end('unavailable'); }]);
+  f.router.save({ mode: 'manual', selected: 'a0', accounts: f.accounts });
+  assert.deepEqual((await f.router.models()).models, []);
+});
 test('manual switching applies to the next request, preserves hidden tokens and maps models', async t => {
   const f = await fixture(t, [reply, reply]);
   f.accounts[0].modelMap = { sonnet: 'gateway-sonnet' };
