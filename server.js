@@ -2461,6 +2461,7 @@ if (!HISTORY_WORKER) server.listen(PORT, BIND_HOST, () => {
   if (DATA_DIR !== CLAUDE_DIR) console.log(`数据目录: ${DATA_DIR}`);
   console.log(`Inspector 代理: http://localhost:${PROXY_PORT}`);
   ensureProxyInstalled();
+  feishuGateway.bootstrapRuntime();
   nodeHub.start();
   cluster.start().catch(e => console.warn('集群启动：' + e.message));
 });

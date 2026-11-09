@@ -888,3 +888,18 @@ test('a follower cannot connect the Feishu gateway through start or configure', 
   await assert.rejects(gateway.start(), { status: 409 });
   assert.equal(connects, 0);
 });
+
+test('cold startup and cluster reload restore the configured Mac keep-awake state', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'feishu-awake-')), calls = [];
+  fs.writeFileSync(path.join(dir, 'panel-feishu.json'), JSON.stringify({ keepAwake: true }));
+  const runtime = { status: () => ({}), keepAwake: enabled => calls.push(enabled) };
+  const gateway = createFeishuGateway({ dir, panel: { engines: () => [{ id: 'claude', label: 'Claude', capabilities: {} }] }, runtime });
+  t.after(async () => { await gateway.stop(); fs.rmSync(dir, { recursive: true, force: true }); });
+
+  gateway.bootstrapRuntime();
+  assert.deepEqual(calls, [true]);
+
+  fs.writeFileSync(path.join(dir, 'panel-feishu.json'), JSON.stringify({ keepAwake: false }));
+  await gateway.reload();
+  assert.deepEqual(calls, [true, false]);
+});

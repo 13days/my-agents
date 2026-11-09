@@ -57,6 +57,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     catch (e) { lastError = e.message; phase = 'error'; }
   }
   reloadFiles();
+  const applyRuntime = () => runtime.keepAwake(config.keepAwake);
   // Engines come from the panel registry; unknown defaults fall back at use time.
   const catalog = () => engineCatalog(panel.engines?.());
   const defaultEngine = () => catalog().fallback(config.defaultEngine, 'claude');
@@ -705,7 +706,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (next.appId !== config.appId || next.domain !== config.domain) { next.cardCallbacksReady = input.cardCallbacksReady || false; next.allowAllUsers = input.allowAllUsers || false; next.allowAllGroups = input.allowAllGroups || false; next.allowedUserIds = input.allowedUserIds || []; next.disabledUserIds = input.disabledUserIds || []; pairing = null; state = { bindings: {}, engineBindings: {}, cards: {}, taskCards: {}, sessionModels: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} }; persist(); }
     const reconnect = next.enabled !== config.enabled || next.appId !== config.appId || next.appSecret !== config.appSecret || next.domain !== config.domain;
     if (reconnect) await stop();
-    config = next; atomic(configFile, config); runtime.keepAwake(config.keepAwake);
+    config = next; atomic(configFile, config); applyRuntime();
     // Access rules are evaluated locally for every message; changing them must
     // not interrupt an existing connection or its live task cards.
     if (config.enabled && (!leadership || leadership.canStart()) && (reconnect || ['disabled', 'error'].includes(phase))) await start();
@@ -731,11 +732,12 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   }
   return {
     start, stop, configure, status, receive, action, sendReply, labelContact, refreshContacts,
-    async reload() { await stop(); reloadFiles(); return status(); },
+    bootstrapRuntime: applyRuntime,
+    async reload() { await stop(); reloadFiles(); applyRuntime(); return status(); },
     revealSecret: () => config.appSecret,
     messages: options => inbox.messages(config.appId, options),
     newPairing() { pairing = { code: crypto.randomBytes(9).toString('base64url'), expires: now() + 10 * 60 * 1000 }; return { command: '/pair ' + pairing.code, expiresAt: pairing.expires }; },
-    bootstrap() { runtime.keepAwake(config.keepAwake); return start(); },
+    bootstrap() { applyRuntime(); return start(); },
   };
 }
 module.exports = { createFeishuGateway, contextKey, messageUUID, errorMessage };
