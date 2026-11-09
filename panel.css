@@ -69,7 +69,10 @@ button, a, input, select, textarea, summary { outline-offset: 3px; }
 .machine-card dl { display:grid; grid-template-columns:auto minmax(0,1fr); gap:13px 14px; margin:22px 0; font-size:12px; }
 .machine-card dt { color:var(--muted); }
 .machine-card dd { margin:0; text-align:right; min-width:0; }
-.machine-directory { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-family:var(--mono); font-size:10px; }
+.machine-card dd.machine-directory { grid-column:1 / -1; text-align:left; white-space:normal; overflow-wrap:anywhere; font-family:var(--mono); font-size:11px; line-height:1.7; user-select:all; }
+.machine-directory-actions { display:flex; justify-content:flex-end; gap:10px; }
+.machine-directory-actions button { padding:0; border:0; background:none; color:var(--accent); font:inherit; cursor:pointer; }
+.machine-directory-actions button:hover { text-decoration:underline; }
 .machine-card footer { padding-top:12px; border-top:1px solid var(--border); font-size:10px; }
 .machine-error { margin-top:14px; color:var(--danger); font-size:11px; overflow-wrap:anywhere; }
 .cluster-diagnostics,.runtime-advanced { margin:22px 0; padding:16px 18px; background:var(--panel); border:1px solid var(--border); border-radius:10px; }
@@ -80,7 +83,7 @@ button, a, input, select, textarea, summary { outline-offset: 3px; }
 .workspace-paths { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; margin-top:20px; }
 .workspace-paths label,.workspace-project header label { display:grid; gap:7px; font-size:12px; min-width:0; }
 .workspace-paths small { color:var(--muted); font-size:10px; }
-.workspace-section input { width:100%; min-width:0; padding:10px; border:1px solid var(--border); border-radius:7px; background:var(--bg); color:var(--text); font-size:12px; }
+.workspace-section input, .workspace-section textarea { width:100%; min-width:0; padding:10px; border:1px solid var(--border); border-radius:7px; background:var(--bg); color:var(--text); font-size:12px; }
 .workspace-project { padding-top:20px; margin-top:20px; border-top:1px solid var(--border); }
 .workspace-project header { display:flex; justify-content:space-between; align-items:end; gap:15px; }
 .workspace-project header label { flex:1; max-width:350px; }
@@ -990,3 +993,6 @@ body[data-nav-collapsed="true"] .resource-engine-switch button { padding: 5px 1p
 #render .guide-section-body .guide-note { padding: 12px 15px; margin-top: 16px; border-left: 2px solid var(--accent); background: #dca17d08; border-radius: 0 7px 7px 0; }
 @media (max-width: 1000px) { #navUtilities { padding: 10px 8px; } }
 @media (max-width: 600px) { .guide-section summary { padding: 16px; font-size: 14px; } .guide-section-body { padding: 0 16px 18px; } #guide-search { width: 100%; min-width: 0; } }
+
+.workspace-section textarea { font-family:var(--mono); line-height:1.6; resize:vertical; overflow-wrap:anywhere; }
+.workspace-section textarea:focus { outline:2px solid var(--accent); outline-offset:2px; }
