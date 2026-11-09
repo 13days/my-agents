@@ -2564,6 +2564,19 @@ if (!HISTORY_WORKER) server.listen(PORT, BIND_HOST, () => {
   ensureProxyInstalled();
   feishuGateway.bootstrapRuntime();
   nodeHub.start();
+  // Re-send this machine's checkpoints after a leader connection changes. This
+  // also heals a rolling upgrade where the first publish met an older peer.
+  let mirroredPeer = null, mirroring = false;
+  setInterval(async () => {
+    const leader = cluster.status().leader, peer = leader && clusterNetwork?.peer(leader);
+    if (!peer || leader === machineId() || peer === mirroredPeer || mirroring) return;
+    mirroring = true;
+    try {
+      const rows = Object.values(conversations.read()).filter(row => row.machineId === machineId());
+      const results = await Promise.allSettled(rows.map(row => clusterNetwork.call(leader, 'conversations.put', row, { timeout: 5000 })));
+      if (results.every(result => result.status === 'fulfilled')) mirroredPeer = peer;
+    } finally { mirroring = false; }
+  }, 5000).unref();
   setTimeout(() => { try {
     const state = JSON.parse(fs.readFileSync(path.join(DATA_DIR,'panel-feishu-state.json'),'utf8'));
     const bindings = [...Object.values(state.bindings || {}), ...Object.values(state.engineBindings || {}).flatMap(value=>Object.values(value))];
