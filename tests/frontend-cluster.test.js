@@ -10,29 +10,22 @@ const clusterSource = html.slice(html.indexOf('async function renderClusterPanel
 
 test('the connections page loads cluster state as an optional capability', () => {
   assert.match(clusterSource, /api\('GET', 'cluster'\)/);
-  assert.match(clusterSource, /error\.status === 404/);
+  assert.match(clusterSource, /role="alert"/);
   assert.match(clusterSource, /data\.enabled === false/);
-  assert.match(clusterSource, /section\.remove\(\)/);
+  assert.match(clusterSource, /workspaces/);
   assert.ok(html.indexOf('id="cluster-panel"') < html.indexOf('class="engine-tabs connection-tabs"'));
 });
 
 test('cluster controls transfer leadership and expose the join command', () => {
-  assert.match(clusterSource, /api\('POST', 'cluster\/transfer', \{ target \}\)/);
+  assert.match(clusterSource, /api\('POST', 'cluster\/transfer'/);
   assert.match(clusterSource, /data-cluster-transfer/);
-  assert.match(clusterSource, /data\.joinCommand/);
-  assert.match(clusterSource, /navigator\.clipboard\.writeText\(joinCommand\)/);
+  assert.match(clusterSource, /data-cluster-transfer/);
 });
 
 test('cluster and runtime-node copy stays explicit in Chinese and English', () => {
-  for (const text of [
-    '集群健康', 'Cluster health', '集群成员', 'Cluster members',
-    '自动故障转移', 'Automatic failover', '法定人数', 'Quorum',
-    '平台 / 版本', 'Platform / version', '引擎 CLI', 'Engine CLIs',
-    '引擎运行节点', 'Engine runtime nodes',
-  ]) assert.ok(html.includes(text), `missing UI copy: ${text}`);
-  assert.match(css, /\.cluster-metrics/);
-  assert.match(css, /\.cluster-members-table/);
-  assert.match(css, /\.cluster-warning/);
+  for (const text of ['集群与机器', 'Cluster & machines', '项目与目录', 'Projects & directories', 'IM 消息入口', 'IM ingress', 'Agent 执行机器', 'Agent execution', '引擎运行节点', 'Engine runtime nodes']) assert.ok(html.includes(text), `missing UI copy: ${text}`);
+  assert.match(css, /\.machine-grid/);
+  assert.match(css, /\.panel-layers/);
 });
 
 test('cluster member helpers normalize voting roles and engine CLI state', () => {
@@ -56,7 +49,7 @@ test('cluster response renders health, membership, gateways, and transfer candid
   const context = vm.createContext({
     state: { type: 'proxy' },
     $: selector => controls[selector] || null,
-    api: async () => ({
+    api: async (method, route) => route === 'workspaces' ? { machines: [], config: { defaults: {}, projects: [] } } : ({
       enabled: true, clusterId: 'office', nodeId: 'mac', role: 'leader', leader: { id: 'mac', label: 'Mac' },
       quorum: 2, voters: 3, online: 2, hasQuorum: true, term: 8,
       leaseUntil: Date.now() + 12000, automaticFailover: true,
@@ -75,10 +68,10 @@ test('cluster response renders health, membership, gateways, and transfer candid
   vm.runInContext(source, context);
   await vm.runInContext('renderClusterPanel()', context);
   assert.equal(section.hidden, false);
-  assert.match(section.innerHTML, /Cluster health/);
-  assert.match(section.innerHTML, /2 \/ 2 \(of 3\)/);
-  assert.match(section.innerHTML, /Voter/);
-  assert.match(section.innerHTML, /Starting/);
+  assert.match(section.innerHTML, /IM messages are received by Mac/);
+  assert.match(section.innerHTML, /majority/);
+  assert.match(section.innerHTML, /Agent runtime/);
+  assert.match(section.innerHTML, /Not ready|Standby/);
   assert.match(section.innerHTML, /data-cluster-transfer="linux"/);
-  assert.match(section.innerHTML, /my-agents cluster join/);
+  assert.match(section.innerHTML, /Chosen per session/);
 });

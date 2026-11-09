@@ -8,7 +8,7 @@ test('external transcript updates move existing sessions ahead of stale CLI hist
   const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   const start = source.indexOf('function listSessions() {');
   const end = source.indexOf('function transcriptPathFor(', start);
-  const context = vm.createContext({
+  const context = vm.createContext({ machineId: () => 'mac',
     codexSessions: { list: () => [], pathFor: () => '', messages: () => null }, isCodexPath: () => false, isCodexSession: () => false,
     path,
     sessionStore: { read: () => ({ older: { title: 'Renamed older session' }, removed: { deleted: true } }) },

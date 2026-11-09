@@ -39,6 +39,36 @@ async function fixture(t) {
   return { gateway, panel, calls, sent, updated, rows, dir, msg, pair, options, channel, handlers, policies, reactions, advance: value => { clock += value; } };
 }
 
+test('a shared conversation keeps its execution machine when the IM leader changes', async t => {
+  const f = await fixture(t); await f.pair();
+  f.panel.machineId = () => 'mac';
+  await f.gateway.receive(f.msg('/new'));
+  f.panel.machineId = () => 'linux';
+  f.panel.nodes = () => [{ id: 'mac', label: 'Mac', connected: true }];
+  await f.gateway.receive(f.msg('Continue on the original machine'));
+  assert.equal(f.calls.at(-1).machineId, 'mac');
+  assert.equal(f.calls.at(-1).node, 'mac');
+  assert.equal(f.calls.at(-1).cwd, fs.realpathSync(f.dir));
+});
+
+test('a late IM handshake cannot reconnect a gateway after its leadership lease is lost', async t => {
+  const f = await fixture(t); await f.gateway.stop();
+  let permitted = true, release, connected = false, disconnected = 0;
+  const callbacks = {};
+  const gateway = createFeishuGateway({ ...f.options, leadership: { canStart: () => permitted }, channelFactory: () => ({
+    ...f.channel, on: (event, fn) => { callbacks[event] = fn; },
+    connect: () => { connected = true; return new Promise(resolve => { release = resolve; }); },
+    disconnect: async () => { disconnected++; },
+  }) });
+  t.after(() => gateway.stop());
+  const starting = gateway.start();
+  while (!connected) await new Promise(resolve => setTimeout(resolve, 5));
+  permitted = false; await gateway.stop(); release(); await starting;
+  callbacks.reconnected(); callbacks.message(f.msg('A stale channel must ignore this'));
+  assert.equal(gateway.status().phase, 'disabled');
+  assert.equal(f.calls.length, 0); assert.ok(disconnected >= 2);
+});
+
 test('Feishu model dropdown persists its option, submits that model and rejects stale session cards', async t => {
   const f = await fixture(t); await f.pair();
   f.panel.models = async () => ({ accountName: 'Proxy', models: [{ id: 'model-a', name: 'Model A' }, { id: 'model-b', name: 'Model B' }] });

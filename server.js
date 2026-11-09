@@ -819,7 +819,7 @@ function listSessions() {
     const meta = sessionMetadata[s.id] || {}, manual = isManualTitle(meta, s.firstTitle);
     const pendingInput = manager.busy(s.id);
     const automatic = meta.autoTitle && (pendingInput || meta.autoTitleAt >= (s.promptAt || 0)) ? meta.autoTitle : s.promptAt ? s.title : meta.title || s.title;
-    return { ...s, ...(meta.worktree ? { worktree: meta.worktree } : {}), ...(meta.node ? { node: meta.node } : {}), engine: s.engine || 'claude', title: manual ? meta.title : automatic || meta.title || s.id, titleSource: manual ? 'manual' : 'auto', last: Math.max(s.last, meta.lastAt || 0) };
+    return { ...s, ...(meta.worktree ? { worktree: meta.worktree } : {}), ...(meta.node ? { node: meta.node } : {}), machineId: meta.machineId || (meta.node && meta.node !== 'local' ? meta.node : machineId()), engine: s.engine || 'claude', title: manual ? meta.title : automatic || meta.title || s.id, titleSource: manual ? 'manual' : 'auto', last: Math.max(s.last, meta.lastAt || 0) };
   }).sort((a, b) => b.last - a.last);
 }
 
@@ -1794,22 +1794,33 @@ registry.register(createCodexEngine({
   // Panel-started Codex runs go through the capture proxy unless disabled; resumed threads keep their provider.
   capture: ({ provider }) => (provider ? provider === 'panel' : codexCaptureEnabled()) ? { config: codexProviderConfig(PROXY_PORT, { apiKey: codexAuthMode() === 'apikey' }) } : null,
 }));
+let cluster;
+const machineId = () => clusterConfig?.nodeId || 'local';
+const executionMachines = () => {
+  const members = clusterConfig?.members || [], result = new Map();
+  for (const item of members) result.set(item.id, { id: item.id, label: item.label || item.id, panelOnline: item.id === machineId() || !!clusterNetwork?.connected().includes(item.id), online: item.id === machineId() || !!registry.node(item.id) });
+  result.set(machineId(), { id: machineId(), label: members.find(item => item.id === machineId())?.label || '本机', panelOnline: true, online: true });
+  for (const node of registry.nodes()) if (node.id !== 'local') result.set(node.id, { ...result.get(node.id), id: node.id, label: node.label, online: true });
+  return [...result.values()];
+};
+const workspaceStore = require('./core/workspaces').createWorkspaces({ dir: DATA_DIR, selfId: machineId, machines: executionMachines, hostFor: id => registry.node(id === machineId() ? 'local' : id)?.host });
 const manager = createSessionManager({
   registry,
-  ensureNode: id => nodeHub.ensure(id),
+  ensureNode: async id => { if (registry.node(id)) return; const peer = clusterNetwork?.peer(id); if (peer) await attachClusterRuntime(id, peer); if (!registry.node(id)) await nodeHub.ensure(id); },
+  resolveLocation: (input, owner) => workspaceStore.resolve(input, owner),
   history: {
     async ownerOf(id) {
       const meta = sessionStore.read()[id] || {};
-      if (meta.engine && registry.has(meta.engine)) return { engine: meta.engine, node: meta.node || 'local', project: meta.project, worktree: meta.worktree };
+      if (meta.engine && registry.has(meta.engine)) return { engine: meta.engine, machineId: meta.machineId, node: meta.node || 'local', project: meta.project, worktree: meta.worktree };
       // Unrecorded sessions (started in a terminal) can only be found on this machine.
       for (const engine of registry.node('local').engines.values()) if (await engine.owns(id)) return { engine: engine.id, node: 'local' };
       return null;
     },
     messages: id => sessionMessages(id),
-    touch(id, { engine, node, cwd, worktree, prompt }) {
+    touch(id, { engine, node, machineId: executionMachine, cwd, worktree, prompt }) {
       const meta = sessionStore.read()[id] || {};
       const fp = transcriptPathFor(id);
-      const created = engine ? { engine, ...(node && node !== 'local' ? { node } : {}), project: cwd, ...(worktree ? { worktree } : {}), initialPrompt: meta.initialPrompt || prompt, createdAt: meta.createdAt || Date.now() } : {};
+      const created = engine ? { engine, machineId: executionMachine || machineId(), ...(node && node !== 'local' ? { node } : {}), project: cwd, ...(worktree ? { worktree } : {}), initialPrompt: meta.initialPrompt || prompt, createdAt: meta.createdAt || Date.now() } : {};
       sessionStore.update(id, { ...autoTitlePatch(meta, prompt, fp ? transcriptHead(fp).title : ''), ...created, lastAt: Date.now() });
     },
   },
@@ -1822,14 +1833,19 @@ proxyServer.on('error', e => {
 });
 if (!HISTORY_WORKER) proxyServer.listen(PROXY_PORT, '127.0.0.1');
 
-let cluster;
+
 const clusterLeadership = { canStart: () => !cluster || cluster.canStart() };
 const macRuntime = require('./mac-runtime').createMacRuntime({ dir: DATA_DIR, claudeDir: CLAUDE_DIR, serverPath: path.join(__dirname, 'server.js'), port: PORT, proxyPort: PROXY_PORT, claudeInfo: HISTORY_WORKER ? undefined : resolveClaude() });
 const feishuGateway = require('./feishu-gateway').createFeishuGateway({
   dir: DATA_DIR, runtime: macRuntime, replyURL: `http://127.0.0.1:${PORT}/api/feishu/reply`, leadership: clusterLeadership,
   panel: {
+    machineId,
+    machines: executionMachines,
+    defaultDirectory: id => workspaceStore.view().machines.find(item => item.id === (id === 'local' ? machineId() : id))?.defaultDirectory || '',
+    resolveDirectory: (id, dir) => { const host = registry.node(!id || id === machineId() || id === 'local' ? 'local' : id)?.host; if (!host) throw new Error('执行机器未连接'); return host.resolveDir(dir); },
     sessions: listSessions,
     projects: knownProjects,
+    nodeProjects: id => registry.node(id)?.info.projects || [],
     cluster: { status: () => cluster?.status() || { enabled: false, nodeId: 'local', role: 'leader', leader: 'local' }, transfer: target => cluster?.transfer(target) || Promise.reject(new Error('未配置集群')) },
     running: id => manager.busy(id) || !!accountRouter.sessions().items.find(item => item.id === id)?.running,
     submit: async ({ gatewayContext, ...input }) => {
@@ -1837,7 +1853,7 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
       if (!live && accountRouter.sessions().items.some(item => item.id === input.sessionId && item.running)) throw new Error('此会话正在外部 CLI 中运行，请等本轮结束后续接；可先用 /history 查看记录');
       if (live && (run.job.meta.model || '') === (input.model || '')) { manager.send(input.sessionId, { ...input, context: gatewayContext }); return { sessionId: run.id }; }
       const { sessionId, run: started } = await manager.start({ ...input, context: gatewayContext });
-      return { sessionId, cwd: started.job.meta.cwd, worktree: started.job.meta.worktree };
+      return { sessionId, cwd: started.job.meta.cwd, machineId: started.job.meta.machineId, worktree: started.job.meta.worktree };
     },
     engine: id => sessionEngine(id),
     engines: () => registry.list().map(engine => ({ id: engine.id, ...engine.meta, capabilities: engine.capabilities })),
@@ -1845,7 +1861,7 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
     models: ({ engine, sessionId, refresh }) => registry.get(engine)?.capabilities?.accounts ? accountRouter.models({ sessionId, refresh }) : Promise.resolve({ models: [] }),
     validModel: (engine, model, node = 'local') => !!(registry.adapter(engine, node) || registry.get(engine))?.validModel(model),
     currentModel: id => { const run = manager.get(id); return run && !run.job.closed ? run.job.meta.model || '' : ''; },
-    nodes: () => nodeHub.list().filter(node => node.id !== 'local').map(node => ({ id: node.id, label: node.label, connected: node.connected, platform: node.platform, home: node.home })),
+    nodes: () => executionMachines().filter(item => item.id !== machineId()).map(item => ({ ...item, connected: item.online, home: registry.node(item.id)?.host.homeDir() })),
     routes: () => ({ ...accountRouter.status(), pins: accountRouter.sessions().routes }),
     route: input => accountRouter.route(input),
     resetRoutes: () => accountRouter.reset(),
@@ -1864,6 +1880,22 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
 });
 
 const larkSetup = require('./lark-setup').createLarkSetup({ dir: DATA_DIR, configure: input => feishuGateway.configure(input) });
+async function sharedGateway(method, input) {
+  const info = cluster?.status();
+  if (info?.enabled && !cluster.canStart()) {
+    if (!info.leader) throw Object.assign(new Error('当前没有有效 IM 主节点，请先恢复集群连接'), { status: 409 });
+    return clusterNetwork.call(info.leader, 'gateway.invoke', { method, input }, { timeout: 20000 });
+  }
+  return feishuGateway[method](input);
+}
+async function gatewayView() {
+  const local = feishuGateway.status(), info = cluster.status();
+  let effective = local;
+  if (info.enabled && info.leader && !cluster.canStart()) {
+    try { effective = await sharedGateway('status'); } catch (error) { effective = { ...local, lastError: error.message }; }
+  }
+  return { ...effective, execution: local.execution, runtime: local.runtime, cluster: { nodeId: info.nodeId, leader: info.leader, label: info.members?.find(item => item.id === info.leader)?.label }, cliSetup: larkSetup.status() };
+}
 
 // Usage annotations must never delay the resource list itself.
 let resourceUsage, resourceUsageAt = 0, resourceUsagePending;
@@ -1924,13 +1956,13 @@ const server = http.createServer(async (req, res) => {
 
     if (type === 'feishu') {
       res.setHeader('Cache-Control', 'no-store');
-      if (req.method === 'GET' && parts[2] === 'messages') return sendJSON(res, 200, await feishuGateway.messages({ before: url.searchParams.has('before') ? url.searchParams.get('before') : undefined, userId: url.searchParams.get('userId'), chatId: url.searchParams.get('chatId') }));
-      if (req.method === 'GET') return sendJSON(res, 200, { ...feishuGateway.status(), cliSetup: larkSetup.status() });
+      if (req.method === 'GET' && parts[2] === 'messages') return sendJSON(res, 200, await sharedGateway('messages', { before: url.searchParams.has('before') ? url.searchParams.get('before') : undefined, userId: url.searchParams.get('userId'), chatId: url.searchParams.get('chatId') }));
+      if (req.method === 'GET') return sendJSON(res, 200, await gatewayView());
       if (!String(req.headers['content-type'] || '').startsWith('application/json')) return sendJSON(res, 415, { error: '需要 application/json' });
       if (req.method === 'POST' && parts[2] === 'contacts' && parts.length === 4) {
         try {
-          if (parts[3] === 'refresh') return sendJSON(res, 200, await feishuGateway.refreshContacts());
-          if (parts[3] === 'label') return sendJSON(res, 200, await feishuGateway.labelContact(JSON.parse(await readBody(req) || '{}')));
+          if (parts[3] === 'refresh') return sendJSON(res, 200, await sharedGateway('refreshContacts'));
+          if (parts[3] === 'label') return sendJSON(res, 200, await sharedGateway('labelContact', JSON.parse(await readBody(req) || '{}')));
           return sendJSON(res, 404, { error: '联系人操作不存在' });
         } catch (error) { return sendJSON(res, 400, { error: error.message }); }
       }
@@ -1938,8 +1970,9 @@ const server = http.createServer(async (req, res) => {
         try { return sendJSON(res, 200, await feishuGateway.sendReply(JSON.parse(await readBody(req)))); }
         catch (e) { return sendJSON(res, 400, { error: e.message }); }
       }
-      if (req.method === 'POST' && parts.length === 3 && parts[2] === 'secret') return sendJSON(res, 200, { appSecret: feishuGateway.revealSecret() });
+      if (req.method === 'POST' && parts.length === 3 && parts[2] === 'secret') return sendJSON(res, 200, { appSecret: await sharedGateway('revealSecret') });
       if (req.method === 'POST' && parts[2] === 'setup') {
+        if (cluster.status().enabled && !cluster.canStart()) return sendJSON(res, 409, { error: '扫码创建机器人请打开 IM 主节点的面板；现有连接和共享设置可在当前页面管理' });
         const input = JSON.parse(await readBody(req) || '{}');
         if (input.cancel) { larkSetup.cancel(); return sendJSON(res, 200, larkSetup.status()); }
         if (input.repairCallbacks) return sendJSON(res, 202, await larkSetup.repairCallbacks());
@@ -1947,15 +1980,15 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 202, await larkSetup.start(input.domain));
       }
       if (req.method === 'POST' && parts[2] === 'pairing') {
-        if (feishuGateway.status().phase !== 'connected') return sendJSON(res, 409, { error: '请先连接机器人，再生成配对命令' });
-        return sendJSON(res, 200, feishuGateway.newPairing());
+        if ((await sharedGateway('status')).phase !== 'connected') return sendJSON(res, 409, { error: '请先连接机器人，再生成配对命令' });
+        return sendJSON(res, 200, await sharedGateway('newPairing'));
       }
-      if (req.method === 'POST' && parts[2] === 'connect') { await feishuGateway.start(); return sendJSON(res, 200, feishuGateway.status()); }
+      if (req.method === 'POST' && parts[2] === 'connect') { await sharedGateway('start'); return sendJSON(res, 200, await gatewayView()); }
       if (req.method === 'PUT' && parts.length === 2) {
         const input = JSON.parse(await readBody(req));
-        const result = await feishuGateway.configure(input);
+        await sharedGateway('configure', input);
         if (typeof input.autoStart === 'boolean') macRuntime.setAutoStart(input.autoStart);
-        return sendJSON(res, 200, { ...result, runtime: macRuntime.status() });
+        return sendJSON(res, 200, await gatewayView());
       }
       return sendJSON(res, 405, { error: 'method not allowed' });
     }
@@ -1971,9 +2004,31 @@ const server = http.createServer(async (req, res) => {
       } finally { folderPickerBusy = false; }
     }
 
+    if (type === 'workspaces') {
+      res.setHeader('Cache-Control', 'no-store');
+      if (req.method === 'GET' && parts[2] === 'check') {
+        try {
+          const target = workspaceStore.resolve({ machineId: url.searchParams.get('machineId') || machineId(), workspaceId: url.searchParams.get('workspaceId') || '', cwd: url.searchParams.get('path') || '' });
+          if (!registry.node(target.node)) throw new Error('执行机器未连接');
+          const cwd = await registry.node(target.node).host.resolveDir(target.cwd);
+          const id = url.searchParams.get('sessionId'), engine = url.searchParams.get('engine') || registry.defaultId();
+          return sendJSON(res, 200, { ...target, cwd, ...(id ? { sessionExists: !!await registry.adapter(engine, target.node)?.owns(id) } : {}) });
+        } catch (error) { return sendJSON(res, 400, { error: error.message }); }
+      }
+      if (req.method === 'GET') return sendJSON(res, 200, workspaceStore.view());
+      if (req.method === 'PUT') {
+        try {
+          const input = JSON.parse(await readBody(req, 256 * 1024));
+          let config;
+          if (cluster?.status().enabled && !cluster.canStart()) { const leader = cluster.status().leader; if (!leader) return sendJSON(res, 409, { error: '当前没有有效主节点，共享目录尚不能保存；请先恢复集群连接' }); config = await clusterNetwork.call(leader, 'workspaces.save', input, { timeout: 15000 }); }
+          else config = await workspaceStore.save(input); return sendJSON(res, 200, { ...workspaceStore.view(), config });
+        } catch (error) { return sendJSON(res, error.status || 400, { error: error.message }); }
+      }
+      return sendJSON(res, 405, { error: 'method not allowed' });
+    }
     if (type === 'cluster') {
       res.setHeader('Cache-Control', 'no-store');
-      if (req.method === 'GET') return sendJSON(res, 200, cluster.status());
+      if (req.method === 'GET') { const data = cluster.status(); const members = (data.members || []).map(item => { const node = registry.node(item.id === data.nodeId ? 'local' : item.id); return { ...item, runtimeConnected: !!node, home: node?.host.homeDir(), platform: node?.info.platform || node?.host.platform, version: item.id === data.nodeId ? require('./package.json').version : node?.info.version }; }); return sendJSON(res, 200, { ...data, members, panel: { id: machineId(), bind: BIND_HOST, port: PORT }, gateway: { phase: feishuGateway.status().phase } }); }
       if (req.method === 'POST' && parts[2] === 'transfer') {
         const { target } = JSON.parse(await readBody(req, 64 * 1024) || '{}');
         return sendJSON(res, 202, await cluster.transfer(String(target || '')));
@@ -2251,7 +2306,7 @@ const server = http.createServer(async (req, res) => {
         if (fp) { const st = fs.statSync(fp); revision = `${st.mtimeMs}:${st.size}`; }
         if (revision && url.searchParams.get('since') === revision) return sendJSON(res, 200, { unchanged: true, revision });
         const r = sessionMessages(id, { before: url.searchParams.has('before') ? url.searchParams.get('before') : undefined, limit: Math.max(1, Number(url.searchParams.get('limit')) || 80) });
-        return r ? sendJSON(res, 200, { ...r, worktree: sessionStore.read()[id]?.worktree || null, revision }) : sendJSON(res, 404, { error: T(lang, 'errNotFound') });
+        return r ? sendJSON(res, 200, { ...r, machineId: sessionStore.read()[id]?.machineId || sessionStore.read()[id]?.node || machineId(), worktree: sessionStore.read()[id]?.worktree || null, revision }) : sendJSON(res, 404, { error: T(lang, 'errNotFound') });
       }
       if (req.method === 'GET' && parts.length === 4 && parts[3] === 'replay') {
         const r = sessionReplay(decodeURIComponent(parts[2]));
@@ -2429,7 +2484,7 @@ server.on('error', e => {
 });
 // Remote nodes dial in over WebSocket on the panel port, or are launched over SSH.
 // Claude and Codex on remote nodes go through this panel's proxy, relayed over the node link.
-const nodeHub = require('./node/hub').createNodeHub({ registry, token: auth?.token, dir: DATA_DIR, routing: {
+const runtimeRouting = {
   target: `http://127.0.0.1:${PROXY_PORT}`,
   engines: {
     async claude(options) {
@@ -2446,13 +2501,37 @@ const nodeHub = require('./node/hub').createNodeHub({ registry, token: auth?.tok
       return { MY_AGENTS_CODEX_BASE: mode === 'api-key' ? '/codex-openai/v1' : '/backend-api/codex', [RELAY_TOKEN_ENV]: codexRelayToken };
     }, { accounts: false }),
   },
-} });
+};
+const nodeHub = require('./node/hub').createNodeHub({ registry, token: auth?.token, dir: DATA_DIR, routing: runtimeRouting });
+
+const clusterRuntimePending = new Map();
+async function attachClusterRuntime(id, peer) {
+  if (registry.node(id)) return;
+  if (clusterRuntimePending.has(id)) return clusterRuntimePending.get(id);
+  const member = clusterConfig?.members.find(item => item.id === id);
+  if (member?.witness) return;
+  const pending = (async () => { for (let attempt = 0; attempt < 3; attempt++) { if (registry.node(id)) return registry.node(id); try { return await require('./node/remote').attachRemoteNode({ peer, registry, transport: 'cluster', pin: { id, label: member?.label || id }, routing: runtimeRouting }); } catch (error) { if (attempt === 2) throw error; await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1))); } } })();
+  clusterRuntimePending.set(id, pending);
+  try { return await pending; } finally { clusterRuntimePending.delete(id); }
+}
 let clusterNetwork = null;
 let clusterConfig = null;
 try { clusterConfig = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'panel-cluster.json'), 'utf8')); } catch {}
 if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token && Array.isArray(clusterConfig.members)) {
-  clusterNetwork = require('./node/cluster-peer').createClusterNetwork({ token: clusterConfig.token, selfId: clusterConfig.nodeId, members: clusterConfig.members });
-  cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: feishuGateway });
+  clusterNetwork = require('./node/cluster-peer').createClusterNetwork({ token: clusterConfig.token, selfId: clusterConfig.nodeId, members: clusterConfig.members, onPeer: async (id, peer) => {
+    const self = clusterConfig.members.find(item => item.id === clusterConfig.nodeId);
+    if (self?.witness) return;
+    const oldRuntime = registry.node(id); if (oldRuntime?.info.transport === 'cluster' && oldRuntime.peer !== peer) { registry.removeNode(id); clusterRuntimePending.delete(id); }
+    require('./node/agent').serveNode({ peer, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, beforeOpen: id => { if (id && (manager.busy(id) || accountRouter.sessions().items.some(item => item.id === id && item.running))) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed) previous.session.close(); } });
+    setImmediate(() => attachClusterRuntime(id, peer).catch(error => console.warn('集群执行连接：' + error.message)));
+  } });
+  cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: feishuGateway, canTransfer: () => manager.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });
+  clusterNetwork.handle('workspaces.save', async (_, input) => { if (!cluster.canStart()) throw new Error('当前节点没有主节点租约，请刷新后重试'); return workspaceStore.save(input); });
+  clusterNetwork.handle('gateway.invoke', async (_, { method, input }) => {
+    if (!cluster.canStart()) throw new Error('当前节点没有 IM 主节点租约');
+    if (!['status', 'configure', 'messages', 'refreshContacts', 'labelContact', 'newPairing', 'start', 'revealSecret'].includes(method)) throw new Error('未知网关操作');
+    return feishuGateway[method](input);
+  });
 } else cluster = require('./core/cluster').createStandalone(feishuGateway);
 server.on('upgrade', (req, socket, head) => { if (clusterNetwork?.upgrade(req, socket, head)) return; if (!nodeHub.upgrade(req, socket, head)) socket.destroy(); });
 if (!HISTORY_WORKER) server.listen(PORT, BIND_HOST, () => {

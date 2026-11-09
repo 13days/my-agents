@@ -116,6 +116,11 @@ test('auth: loopback needs no token but blocks foreign hosts and cross-site orig
   assert.equal(remote.check({ headers: { host: 'dev-box:4321', authorization: `Bearer ${remote.token}` } }), '');
   assert.equal(remote.check({ headers: { host: 'dev-box:4321', cookie: `my_agents_token=${remote.token}` } }), '');
   assert.equal((fs.statSync(path.join(dir, 'panel-token')).mode & 0o777).toString(8), '600');
+  const loopback = { headers: { host: 'localhost:4321' }, socket: { remoteAddress: '127.0.0.1' } };
+  assert.equal(remote.check(loopback), ''); assert.equal(remote.pageAllowed(loopback), true);
+  assert.ok(remote.check({ ...loopback, socket: { remoteAddress: '10.1.2.3' } }));
+  assert.ok(remote.check({ ...loopback, headers: { host: 'attacker.example:4321' } }));
+  assert.doesNotThrow(() => remote.check({ headers: { host: 'dev-box:4321', authorization: 'Bearer ' + '中'.repeat(remote.token.length) } }));
 });
 
 test('fresh tasks open in their isolated directory and resume keeps its persisted directory', async () => {

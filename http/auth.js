@@ -19,7 +19,8 @@ function createAuth({ port, bindHost = '127.0.0.1', dir, publicHosts = [] }) {
   }
   const requireToken = !isLoopback(bindHost);
   const hosts = new Set([`localhost:${port}`, `127.0.0.1:${port}`, `[::1]:${port}`, ...publicHosts]);
-  const matches = (a, b) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  const matches = (a, b) => { const left = Buffer.from(a), right = Buffer.from(b); return left.length === right.length && crypto.timingSafeEqual(left, right); };
+  const localRequest = req => hosts.has(String(req.headers.host || '')) && isLoopback(String(req.socket?.remoteAddress || '').replace(/^::ffff:/, ''));
   const cookieToken = req => (String(req.headers.cookie || '').match(/(?:^|;\s*)my_agents_token=([a-f0-9]+)/) || [])[1] || '';
   const bearer = req => (String(req.headers.authorization || '').match(/^Bearer\s+(\S+)$/i) || [])[1] || '';
   const hasToken = req => [cookieToken(req), bearer(req)].some(value => value && matches(value, token));
@@ -37,7 +38,7 @@ function createAuth({ port, bindHost = '127.0.0.1', dir, publicHosts = [] }) {
         if (!hosts.has(originHost) && originHost !== req.headers.host) return '拒绝跨站请求';
       }
       if (req.headers['sec-fetch-site'] === 'cross-site') return '拒绝跨站请求';
-      if (requireToken && !hasToken(req)) return '需要访问令牌';
+      if (requireToken && !localRequest(req) && !hasToken(req)) return '需要访问令牌';
       return '';
     },
     // Opening /?token=… once stores the token as an HttpOnly cookie for remote binds.
@@ -47,7 +48,7 @@ function createAuth({ port, bindHost = '127.0.0.1', dir, publicHosts = [] }) {
       res.setHeader('Set-Cookie', `my_agents_token=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000`);
       return true;
     },
-    pageAllowed(req) { return !requireToken || hasToken(req); },
+    pageAllowed(req) { return !requireToken || localRequest(req) || hasToken(req); },
   };
 }
 

@@ -11,7 +11,7 @@ const httpError = (status, message) => Object.assign(new Error(message), { statu
 //
 // Every run publishes the same event vocabulary (see core/events.js) into a
 // replayable job so a reconnecting client resumes where it left off.
-function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, retentionMs = 5 * 60 * 1000, readyTimeoutMs = 90000, ensureNode = async () => {}, log = console }) {
+function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, retentionMs = 5 * 60 * 1000, readyTimeoutMs = 90000, ensureNode = async () => {}, resolveLocation = null, log = console }) {
   const runs = new Map();
   const aliases = new Map();
   const resolveId = id => aliases.get(id) || id;
@@ -39,12 +39,15 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
     // An existing session always stays on the engine and node that own it.
     const owner = requested ? await history.ownerOf(requested) : null;
     const engineId = owner?.engine || input.engine || registry.defaultId();
-    const nodeId = input.node || owner?.node || 'local';
+    const location = resolveLocation ? await resolveLocation(input, owner) : null;
+    const nodeId = location?.node || owner?.node || input.node || 'local';
     await ensureNode(nodeId);
     const engine = registry.adapter(engineId, nodeId);
     if (!engine) throw httpError(400, `节点 ${nodeId} 上没有引擎：${engineId}`);
     const host = registry.node(nodeId).host;
-    let cwd = await host.resolveDir(owner?.project || input.cwd);
+    let cwd;
+    try { cwd = await host.resolveDir(location?.cwd || owner?.project || input.cwd); }
+    catch (error) { throw httpError(error.status || 400, `执行机器「${registry.node(nodeId).label || nodeId}」无法使用目录 ${location?.cwd || owner?.project || input.cwd || '(默认)'}：${error.message}。请在「机器与引擎 → 项目与目录」检查映射`); }
 
     const previous = requested && runs.get(requested);
     if (live(previous)) {
@@ -98,9 +101,9 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
       throw e.status ? e : httpError(503, e.message);
     }
     if (requested && realId !== requested) aliases.set(requested, realId);
-    history.touch(realId, { engine: engineId, node: host.id, cwd, worktree, prompt: turn.prompt, created: !known });
+    history.touch(realId, { engine: engineId, node: host.id, ...(location?.machineId ? { machineId: location.machineId } : {}), cwd, worktree, prompt: turn.prompt, created: !known });
 
-    const job = createChatJob({ routed: !!session.routed, engine: engineId, node: host.id, cwd, worktree, model, sessionId: realId, jobId: crypto.randomUUID() });
+    const job = createChatJob({ routed: !!session.routed, engine: engineId, node: host.id, machineId: location?.machineId, cwd, worktree, model, sessionId: realId, jobId: crypto.randomUUID() });
     run = { id: realId, engine: engineId, node: host.id, job, session, baseHistory, baseMessages: baseHistory?.messages || [], stopped: false, requestedId: requested };
     runs.set(realId, run);
     for (const [event, data] of buffered.splice(0)) job.publish(event, data);

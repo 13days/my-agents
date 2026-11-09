@@ -15,11 +15,12 @@ function mesh(ids) {
     block(other) { blocked.add([id, other].sort().join(':')); }, unblock(other) { blocked.delete([id, other].sort().join(':')); },
   }]));
 }
-function fixture(spec) {
+function fixture(spec, initial = {}) {
   const ids = spec.map(x => x.id), networks = mesh(ids), gateways = {}, clusters = {}, dirs = {};
   for (const member of spec) {
     const gateway = gateways[member.id] = { active: false, starts: 0, reloads: 0, async start() { this.active = true; this.starts++; }, async stop() { this.active = false; }, async reload() { this.reloads++; } };
     const dir = dirs[member.id] = fs.mkdtempSync(path.join(os.tmpdir(), `cluster-${member.id}-`));
+    if (initial[member.id]) fs.writeFileSync(path.join(dir, 'panel-cluster-state.json'), JSON.stringify(initial[member.id]));
     clusters[member.id] = createCluster({ dir, config: { clusterId: 'c', nodeId: member.id, members: spec }, network: networks[member.id], gateway, heartbeatMs: 30, electionMinMs: 60, leaseMs: 100, random: () => ids.indexOf(member.id) / 10 });
   }
   return { clusters, gateways, networks, dirs };
@@ -71,4 +72,17 @@ test('the leader replicates versioned Feishu configuration and state', async t =
   fs.writeFileSync(path.join(f.dirs[leader], 'panel-feishu-state.json'), '{"bindings":{"topic":{"id":"s"}}}');
   await sleep(140);
   for (const id of Object.keys(f.clusters).filter(id => id !== leader)) assert.match(fs.readFileSync(path.join(f.dirs[id], 'panel-feishu-state.json'), 'utf8'), /topic/);
+});
+
+
+test('a stale member with a high term rejoins without preventing the freshest majority from electing', async t => {
+  const f = fixture([{ id: 'a' }, { id: 'b' }, { id: 'c' }], { a: { term: 100, votedFor: 'a', snapshotIndex: 0 }, b: { term: 3, snapshotIndex: 22 }, c: { term: 3, snapshotIndex: 22 } });
+  t.after(() => Promise.all(Object.values(f.clusters).map(c => c.stop())));
+  await Promise.all(Object.values(f.clusters).map(c => c.start()));
+  await sleep(700);
+  const leaders = Object.values(f.clusters).filter(c => c.status().role === 'leader');
+  assert.equal(leaders.length, 1);
+  assert.notEqual(leaders[0].status().nodeId, 'a');
+  assert.ok(Object.values(f.clusters).every(c => c.status().leader === leaders[0].status().nodeId));
+  assert.equal(Object.values(f.gateways).filter(g => g.active).length, 1);
 });

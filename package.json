@@ -58,6 +58,7 @@
     "feishu-markdown.js",
     "docs/migration.md",
     "docs/im-channels.md",
+    "docs/execution-workspaces.md",
     "upstream-network.js",
     "history-worker.js",
     "message-timing.js",

@@ -145,6 +145,7 @@ function currentSession({ binding, item, running, model = '默认（CLI 配置�
   const projectName = path.posix.basename(binding.worktree?.repository || binding.cwd) || binding.cwd, project = escape(projectName), where = escape(nodeLabel);
   const elements = pending ? [markdown(`**当前项目：${project}**`), muted(`${context.location || '当前位置'} · ${engine} · ${where} · 项目确认后，直接发送问题开始对话`)] : [markdown(`**${escape(clip(title, 100))}**`), muted(`${context.location ? context.location + ' · ' : ''}${engine} · ${where} · ${project} · ${running ? '● 正在运行' : '已就绪，直接发消息继续'}`)];
   elements.push(muted(`模型：${escape(model)}`));
+  if (nodeLabel) elements.push(muted(`执行机器：${escape(nodeLabel)}`));
   if (binding.worktree) elements.push(muted(`独立工作区 · ${escape(binding.worktree.branch)}`));
   elements.push(...permissions(context, binding, requests), collapse(pending ? '项目位置' : '会话信息', [markdown(pending ? escape(binding.cwd) : `${escape(binding.cwd)}\n\`${binding.id}\``, true)]));
   const actions = pending ? [button('切换项目', action(context, { action: 'projects', engine: engineId }), 'primary'), button('切换引擎', action(context, { action: 'engine' })), button('切换运行位置', action(context, { action: 'nodes' }))] : [button('最近对话', action(context, { action: 'history', id: binding.id })), button('切换会话', action(context, { action: 'sessions' })), button('换项目新建', action(context, { action: 'projects', engine: engineId })), button('切换引擎', action(context, { action: 'engine' })), button('切换运行位置', action(context, { action: 'nodes' }))];
@@ -153,7 +154,7 @@ function currentSession({ binding, item, running, model = '默认（CLI 配置�
   elements.push(buttons(actions), muted(`此绑定仅用于当前位置；群和话题内已授权用户共用。${engines.switchHint(engineId)} 切换引擎，各自接续上下文。`));
   return card(pending ? '新会话已就绪' : '当前会话', elements, { subtitle: `${engine} · ${nodeLabel} · ${projectName}`, template: requests.length ? 'orange' : 'grey' });
 }
-function task({ binding, title, view, elapsed, model = '默认（CLI 配置）', ...context }) {
+function task({ binding, title, view, elapsed, nodeLabel = '', model = '默认（CLI 配置）', ...context }) {
   const tools = [...view.tools.values()], requests = view.done ? [] : [...view.permissions.values()];
   const done = tools.filter(item => item.state === '已完成').length;
   const failed = view.phase === '失败' || view.phase === '连接已结束';
@@ -167,6 +168,7 @@ function task({ binding, title, view, elapsed, model = '默认（CLI 配置）',
   }
   const elements = [muted(`${context.location ? context.location + ' · ' : ''}${catalogOf(context).label(binding.engine || 'claude')} · ${escape(path.basename(binding.cwd) || '项目')} · ${Math.max(0, Math.floor(elapsed / 1000))} 秒${tools.length ? ` · 工具 ${done}/${tools.length}` : ''}`)];
   elements.push(muted(`模型：${escape(model)}`));
+  if (nodeLabel) elements.push(muted(`执行机器：${escape(nodeLabel)}`));
   if (view.warning && !view.done) elements.push(muted(clip(view.warning, 500)));
   if (view.text) elements.push(markdown(clip(view.text, REPLY_PREVIEW)));
   else elements.push(markdown(requests.length ? '请确认下方工具调用，授权后继续。' : view.done ? '本轮已结束。' : '正在处理你的请求，进展会更新在这张卡片中。'));

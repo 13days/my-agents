@@ -248,7 +248,7 @@ function viewDescription(type) {
   const descriptions = {
     stats: ['两个引擎，一个工作空间。随时掌握你的使用情况。', 'Two engines, one workspace. Keep your work and usage in view.'],
     im: ['在聊天工具中使用你的 Agent，统一管理消息渠道与会话。', 'Connect messaging channels to your agents and sessions.'],
-    proxy: ['管理引擎接入、代理账号与请求记录方式。', 'Manage engine connections, accounts, and request capture.'],
+    proxy: ['查看 IM 主节点、选择执行机器，配置每台机器的项目目录。', 'See the IM leader, choose execution machines, and configure project paths.'],
     inspector: ['还原每次模型调用，看清请求、上下文与响应。', 'Inspect every model request, context, and response.'],
     sessions: ['找回工作上下文，继续之前的对话。', 'Find your context and pick up where you left off.'],
     voyage: ['沿着时间，回看你与 Claude 一起完成的工作。', 'Follow the timeline of your work with Claude.'],
@@ -309,7 +309,7 @@ const LANGS = [
 const DEFAULT_LANG = 'zh';
 const I18N = {
   zh: {
-    tabs: { im: 'IM 接入', proxy: '引擎与接入', commands: '/ 命令', skills: '技能', agents: '智能体', plugins: '插件', config: '配置', workflows: '工作流', inspector: '抓包', sessions: '会话', voyage: '航程', stats: '工作台' },
+    tabs: { im: 'IM 接入', proxy: '机器与引擎', commands: '/ 命令', skills: '技能', agents: '智能体', plugins: '插件', config: '配置', workflows: '工作流', inspector: '抓包', sessions: '会话', voyage: '航程', stats: '工作台' },
     typeLabel: { commands: '命令', skills: '技能', agents: '智能体', plugins: '插件', config: '配置', workflows: '工作流', inspector: '请求', sessions: '会话', voyage: '航程', stats: '工作台' },
     search: '搜索名称 / 描述…', mineOnly: '仅自建', all: '全部',
     newBtn: '＋ 新建', edit: '编辑', save: '保存', cancel: '取消', del: '删除', uninstall: '卸载', create: '创建',
@@ -363,7 +363,7 @@ const I18N = {
     },
   },
   en: {
-    tabs: { im: 'IM connections', proxy: 'Engines & connections', commands: '/ Commands', skills: 'Skills', agents: 'Agents', plugins: 'Plugins', config: 'Config', workflows: 'Workflows', inspector: 'Inspector', sessions: 'Sessions', voyage: 'Voyage', stats: 'Overview' },
+    tabs: { im: 'IM connections', proxy: 'Machines & engines', commands: '/ Commands', skills: 'Skills', agents: 'Agents', plugins: 'Plugins', config: 'Config', workflows: 'Workflows', inspector: 'Inspector', sessions: 'Sessions', voyage: 'Voyage', stats: 'Overview' },
     typeLabel: { commands: 'command', skills: 'skill', agents: 'agent', plugins: 'plugin', config: 'config', workflows: 'workflow', inspector: 'request', sessions: 'session', voyage: 'voyage', stats: 'stats' },
     search: 'Search name / description…', mineOnly: 'Mine', all: 'All',
     newBtn: '＋ New', edit: 'Edit', save: 'Save', cancel: 'Cancel', del: 'Delete', uninstall: 'Uninstall', create: 'Create',
@@ -2543,7 +2543,7 @@ async function openSessionChat(id) {
   try {
     const d = await api('GET', `sessions/${encodeURIComponent(id)}/messages`);
     if (state.type !== 'sessions' || state.current !== id || revision !== detailRevision) return;
-    chatView = { sessionId: id, cwd: d.project || '', worktree: d.worktree, messages: d.messages, truncated: d.truncated, historyBefore: d.historyBefore, revision: d.revision, engine: d.engine || LEGACY_ENGINE };
+    chatView = { sessionId: id, cwd: d.project || '', worktree: d.worktree, messages: d.messages, truncated: d.truncated, historyBefore: d.historyBefore, revision: d.revision, machineId: d.machineId, engine: d.engine || LEGACY_ENGINE };
     const first = d.messages.find(m => m.role === 'user');
     chatChrome(state.items.find(item => item.key === id)?.name || (first ? first.text.replace(/\s+/g, ' ').slice(0, 60) : id.slice(0, 8)), (d.project || '').replace(/^\/Users\/[^/]+/, '~'));
     renderChat();
@@ -2555,6 +2555,31 @@ function chatWorkspaceControl(v, existing) {
   const isolated = v.worktreeEnabled !== false;
   const hint = rt('独立工作区：从当前提交创建分支，不带入未提交改动。原目录：直接在项目中工作。普通文件夹始终使用原目录。', 'Isolated workspace: create a branch from the current commit without uncommitted changes. Original folder: work directly in the project. Non-Git folders always use the original folder.');
   return `<div class="chat-workspace-mode" role="group" aria-label="${esc(rt('工作目录', 'Working directory'))}" title="${esc(hint)}"><button type="button" data-workspace="isolated" aria-pressed="${isolated}">${esc(rt('独立工作区', 'Isolated'))}</button><button type="button" data-workspace="shared" aria-pressed="${!isolated}">${esc(rt('原目录', 'Original folder'))}</button></div>`;
+}
+async function loadChatExecution(v) {
+  const machine = $('#chat-machine'), project = $('#chat-project-map'); if (!machine || !project) return;
+  try {
+    const data = await api('GET', 'workspaces'); if (chatView !== v || !machine.isConnected) return;
+    const id = v.machineId || data.selfId; v.machineId = id;
+    machine.innerHTML = data.machines.map(item => `<option value="${esc(item.id)}"${item.id === id ? ' selected' : ''}${!item.online && item.id !== id ? ' disabled' : ''}>${esc(item.label)} (${esc(item.id)})${item.online ? '' : ' · ' + esc(rt('未连接', 'Disconnected'))}</option>`).join('');
+    if (!Array.from(machine.options).some(option => option.value === id)) machine.add(new Option(id, id));
+    machine.value = id; machine.disabled = !!v.sessionId;
+    const syncProjects = () => {
+      project.innerHTML = `<option value="">${esc(rt('使用当前目录', 'Use current directory'))}</option>` + data.config.projects.map(item => `<option value="${esc(item.id)}"${item.id === v.workspaceId ? ' selected' : ''}${item.paths[machine.value] ? '' : ' disabled'}>${esc(item.name)}${item.paths[machine.value] ? '' : ' · ' + esc(rt('此机器未配置目录', 'No path on this machine'))}</option>`).join('');
+      project.disabled = !!v.sessionId; syncChatPicker(machine); syncChatPicker(project);
+    };
+    const change = () => {
+      if (v.sessionId) return;
+      v.machineId = machine.value; v.workspaceId = project.value;
+      const mapped = data.config.projects.find(item => item.id === v.workspaceId);
+      v.cwd = mapped ? mapped.paths[v.machineId] || '' : data.machines.find(item => item.id === v.machineId)?.defaultDirectory || '';
+      if (mapped && !v.cwd) $('#chat-execution-hint').textContent = rt('此项目未配置这台机器的目录，请先添加映射。', 'Configure a project path on this machine before sending.');
+      const current = $('.chat-project-current'); if (current) { current.title = v.cwd; current.querySelector('span').textContent = mapped?.name || v.cwd.split('/').filter(Boolean).pop() || rt('默认目录', 'Default directory'); current.querySelector('small').textContent = v.cwd; }
+      syncProjects();
+    };
+    machine.onchange = change; project.onchange = change; syncProjects();
+    $('#chat-execution-hint').textContent = v.sessionId ? rt('会话固定在原机器执行。换机器请新建会话。', 'This session stays on its original machine. Start a new session to change machines.') : rt('目录在所选机器上校验。IM 主节点只接收消息。', 'Directories are validated on the execution machine. The IM leader only receives messages.');
+  } catch { if ($('#chat-execution-hint')) $('#chat-execution-hint').textContent = rt('执行机器信息暂不可用；已有会话保持原执行位置。', 'Machine details are unavailable; existing sessions keep their execution location.'); }
 }
 function renderChat() {
   chatScrollObserver?.disconnect();
@@ -2569,7 +2594,7 @@ function renderChat() {
     : '';
   $('#render').innerHTML = `<section class="chat-shell">
     <header class="chat-settings"><div class="chat-settings-bar"><div class="chat-project-group">${project}<div id="chat-workspace">${chatWorkspaceControl(v, existing)}</div></div>${engine}<span class="chat-live" id="chat-live" hidden></span><div class="chat-top-actions">${actions}<button type="button" class="btn" id="chat-settings-toggle" aria-controls="chat-settings-panel">${esc(rt('设置', 'Settings'))} ⌄</button></div></div>
-    <div class="chat-top" id="chat-settings-panel" hidden>
+    <div class="chat-top" id="chat-settings-panel" hidden><div class="chat-field"><label for="chat-machine">${esc(rt('执行机器', 'Execution machine'))}</label><select id="chat-machine" aria-label="${esc(rt('执行机器', 'Execution machine'))}"><option value="">${esc(rt('读取中…', 'Loading…'))}</option></select><small id="chat-execution-hint"></small></div><div class="chat-field"><label for="chat-project-map">${esc(rt('项目目录映射', 'Project mapping'))}</label><select id="chat-project-map"><option value="">${esc(rt('使用当前目录', 'Use current directory'))}</option></select></div>
       <div class="chat-field chat-model"><div class="chat-model-heading"><label for="chat-model">${esc(rt('模型', 'Model'))}</label>${can(v.engine, 'accounts') ? `<button type="button" class="chat-model-refresh" id="chat-model-refresh">${esc(rt('刷新', 'Refresh'))}</button>` : ''}</div>${can(v.engine, 'accounts') ? `<select id="chat-model" aria-label="${esc(rt('模型', 'Model'))}">${chatModelOptions([], chatModel)}</select><small id="chat-model-hint" role="status"></small><details class="chat-custom-model"><summary>${esc(rt('手动输入模型 ID', 'Enter a model ID'))}</summary><input id="chat-custom-model" type="text" aria-label="${esc(rt('自定义模型 ID', 'Custom model ID'))}" placeholder="model-id" value="${esc(chatModel)}"></details>` : `<input id="chat-model" type="text" placeholder="${esc(rt('默认', 'Default'))}" value="${esc(chatModel)}">`}</div>
       <div class="chat-field chat-route"${can(v.engine, 'accounts') ? '' : ' hidden'}><span>${esc(rt('代理账号', 'Proxy account'))}</span><select id="chat-route" aria-label="${esc(rt('代理账号', 'Proxy account'))}" title="${esc(rt('只影响这个会话；其他会话可以走不同账号', 'Only affects this session; other sessions can use other accounts'))}">${routeOptions(existing ? ((routeInfo && routeInfo.routes[v.sessionId.toLowerCase()]) || '') : (v.accountId || ''))}</select></div>
     </div></header>
@@ -2582,6 +2607,7 @@ function renderChat() {
   const setSettingsCollapsed = collapsed => { settingsPanel.hidden = collapsed; settingsToggle.setAttribute('aria-expanded', String(!collapsed)); settingsToggle.textContent = rt(collapsed ? '设置 ⌄' : '收起 ⌃', collapsed ? 'Settings ⌄' : 'Collapse ⌃'); };
   setSettingsCollapsed(localStorage.getItem('panel-chat-settings-collapsed') !== 'false');
   settingsToggle.onclick = () => { const collapsed = !settingsPanel.hidden; localStorage.setItem('panel-chat-settings-collapsed', String(collapsed)); setSettingsCollapsed(collapsed); };
+  loadChatExecution(v);
   enhanceChatPicker($('#chat-route'));
   if ($('#chat-model').tagName === 'SELECT') enhanceChatPicker($('#chat-model'));
   document.querySelectorAll('.chat-engine button').forEach(button => button.onclick = () => {
@@ -2828,6 +2854,7 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
       }
       if (payload.engine) v.engine = payload.engine;
       if (payload.cwd) v.cwd = payload.cwd;
+      if (payload.machineId) v.machineId = payload.machineId;
       if (payload.worktree) v.worktree = payload.worktree;
       if (shown && payload.cwd) {
         const project = $('.chat-project-current');
@@ -2933,7 +2960,7 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
         if (resume && attempt) resetRun();
         const response = await fetch(resume ? `/api/chat/${encodeURIComponent(v.sessionId)}/events` : '/api/chat', {
           method: resume ? 'GET' : 'POST', headers: resume ? undefined : { 'Content-Type': 'application/json' },
-          body: resume ? undefined : JSON.stringify({ prompt, images, cwd: v.cwd, worktree: v.worktreeEnabled !== false, model: chatModel, sessionId: v.sessionId, messageId: turn.id, accountId: can(v.engine, 'accounts') ? v.accountId : undefined, engine: v.engine }), signal: abort.signal,
+          body: resume ? undefined : JSON.stringify({ prompt, images, cwd: v.cwd, worktree: v.worktreeEnabled !== false, model: chatModel, machineId: v.machineId, workspaceId: v.workspaceId, sessionId: v.sessionId, messageId: turn.id, accountId: can(v.engine, 'accounts') ? v.accountId : undefined, engine: v.engine }), signal: abort.signal,
         });
         if (!response.ok) throw await responseError(response);
         const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
@@ -3087,116 +3114,67 @@ function clusterEngineSummary(member) {
     return `${label} ${rt('未安装', 'not installed')}`;
   }).join(' · ');
 }
+let infrastructureTimer = null;
+function setupInfrastructure() {
+  clearInterval(infrastructureTimer);
+  const root = $('#render'), cluster = $('#cluster-panel');
+  const overview = document.createElement('section'); overview.dataset.infraPanel = 'machines';
+  const projects = document.createElement('section'); projects.dataset.infraPanel = 'workspaces'; projects.id = 'workspaces-panel';
+  const accounts = document.createElement('section'); accounts.dataset.infraPanel = 'accounts';
+  const children = Array.from(root.children), first = children.indexOf(cluster);
+  children.slice(first + 1).forEach(child => accounts.append(child));
+  overview.append(cluster);
+  const advanced = document.createElement('details'); advanced.className = 'runtime-advanced';
+  advanced.innerHTML = `<summary>${esc(rt('高级：独立执行节点接入', 'Advanced: separate runtime nodes'))}</summary><section id="nodes-panel" class="nodes-panel chart"></section>`;
+  overview.append(advanced);
+  const tabs = document.createElement('div'); tabs.className = 'infrastructure-tabs'; tabs.setAttribute('role', 'tablist');
+  tabs.innerHTML = [['machines', rt('集群与机器', 'Cluster & machines')], ['workspaces', rt('项目与目录', 'Projects & directories')], ['accounts', rt('引擎与账号', 'Engines & accounts')]].map(([id, name]) => `<button type="button" data-infra-tab="${id}" role="tab">${esc(name)}</button>`).join('');
+  root.append(tabs, overview, projects, accounts);
+  const select = id => { if (!['machines','workspaces','accounts'].includes(id)) id = 'machines'; root.querySelectorAll('[data-infra-panel]').forEach(panel => { panel.hidden = panel.dataset.infraPanel !== id; }); tabs.querySelectorAll('button').forEach(button => button.setAttribute('aria-selected', String(button.dataset.infraTab === id))); localStorage.setItem('panel-infra-tab', id); };
+  tabs.querySelectorAll('button').forEach(button => button.onclick = () => select(button.dataset.infraTab));
+  select(localStorage.getItem('panel-infra-tab') || 'machines');
+  infrastructureTimer = setInterval(() => { if (state.type !== 'proxy' || !overview.isConnected) { clearInterval(infrastructureTimer); return; } if (!document.hidden && !overview.hidden && !document.querySelector('.panel-select-menu:popover-open')) renderClusterPanel(); }, 5000);
+}
 async function renderClusterPanel() {
-  const section = $('#cluster-panel');
-  if (!section) return;
-  const stateMeta = value => {
-    const key = String(value ?? '').toLowerCase();
-    if (['healthy', 'ok', 'ready', 'online', 'connected', 'active', 'valid', 'met'].includes(key)) return { tone: 'good', label: rt('健康', 'Healthy') };
-    if (['degraded', 'warning', 'warn', 'recovering'].includes(key)) return { tone: 'warning', label: rt('需关注', 'Degraded') };
-    if (['unhealthy', 'critical', 'error', 'failed', 'no-quorum', 'expired'].includes(key)) return { tone: 'danger', label: rt('异常', 'Unhealthy') };
-    return { tone: 'muted', label: value === undefined || value === null || value === '' ? rt('未知', 'Unknown') : String(value) };
-  };
-  const membershipLabel = kind => ({ voter: rt('投票成员', 'Voter'), witness: rt('见证成员', 'Witness'), learner: rt('学习成员', 'Learner') })[kind];
-  const roleLabel = role => ({ leader: rt('主节点', 'Leader'), follower: rt('跟随节点', 'Follower'), candidate: rt('候选节点', 'Candidate') })[role] || role || '—';
-  const load = async () => {
-    let data;
-    try { data = await api('GET', 'cluster'); }
-    catch (error) {
-      if (error.status === 404) { section.remove(); return; }
-      if (state.type !== 'proxy' || !section.isConnected) return;
-      section.hidden = false;
-      section.innerHTML = `<div class="cluster-error chart" role="status"><div><strong>${esc(rt('集群状态暂不可用', 'Cluster status unavailable'))}</strong><p class="route-muted">${esc(error.message)}</p></div><button class="btn" id="cluster-retry">${esc(rt('重试', 'Retry'))}</button></div>`;
-      $('#cluster-retry').onclick = load;
-      return;
-    }
-    if (state.type !== 'proxy' || !section.isConnected) return;
-    if (data.enabled === false) { section.remove(); return; }
-    const members = Array.isArray(data.members) ? data.members : [];
-    const healthInfo = data.health && typeof data.health === 'object' ? data.health : {};
-    const healthRaw = healthInfo.status ?? (healthInfo.healthy === true ? 'healthy' : healthInfo.healthy === false ? 'unhealthy' : undefined) ?? (typeof data.health === 'string' ? data.health : typeof data.health === 'boolean' ? (data.health ? 'healthy' : 'unhealthy') : undefined) ?? data.status ?? (data.healthy === true || data.hasQuorum === true ? 'healthy' : data.healthy === false || data.hasQuorum === false ? 'unhealthy' : undefined);
-    const health = stateMeta(healthRaw);
-    const leaderValue = data.leader ?? data.leaderId ?? healthInfo.leader ?? data.raft?.leader;
-    const leaderIdValue = typeof leaderValue === 'object' ? leaderValue.id ?? leaderValue.nodeId : leaderValue;
-    const leaderId = leaderIdValue === undefined || leaderIdValue === null ? '' : String(leaderIdValue);
-    const leaderMember = members.find(member => String(member.id) === leaderId || member.role === 'leader' || member.raftRole === 'leader');
-    const leaderLabel = (typeof leaderValue === 'object' ? leaderValue.label || leaderValue.id || leaderValue.nodeId : '') || leaderMember?.label || leaderMember?.id || leaderId || rt('尚未选出', 'Not elected');
-    const quorum = data.quorum ?? healthInfo.quorum ?? data.raft?.quorum;
-    const quorumInfo = quorum && typeof quorum === 'object' ? quorum : {};
-    const onlineVoters = quorumInfo.online ?? quorumInfo.available ?? quorumInfo.current ?? data.onlineVoters ?? data.online;
-    const requiredVoters = quorumInfo.required ?? quorumInfo.needed ?? quorumInfo.majority ?? data.requiredVoters ?? (typeof quorum === 'number' ? quorum : undefined);
-    const voterValue = quorumInfo.total ?? quorumInfo.voters ?? data.totalVoters ?? data.voters;
-    const totalVoters = Array.isArray(voterValue) ? voterValue.length : voterValue;
-    const quorumMet = typeof quorum === 'boolean' ? quorum : quorumInfo.met ?? quorumInfo.healthy ?? quorumInfo.hasQuorum ?? data.hasQuorum;
-    const quorumText = onlineVoters !== undefined && requiredVoters !== undefined
-      ? `${onlineVoters} / ${requiredVoters}${totalVoters !== undefined ? ` (${rt('共', 'of')} ${totalVoters})` : ''}`
-      : quorumMet === true ? rt('已满足', 'Met') : quorumMet === false ? rt('未满足', 'Not met') : '—';
-    const term = data.term ?? healthInfo.term ?? data.raft?.term;
-    const leaseUntil = data.leaseUntil;
-    const lease = data.lease ?? data.leaderLease ?? leaseUntil ?? healthInfo.lease ?? data.raft?.lease;
-    let leaseText = '—';
-    if (leaseUntil !== undefined && leaseUntil !== null) {
-      const numeric = typeof leaseUntil === 'number' ? leaseUntil : /^\d+$/.test(String(leaseUntil)) ? Number(leaseUntil) : NaN;
-      const expiresAt = Number.isFinite(numeric) ? new Date(numeric < 1e12 ? numeric * 1000 : numeric) : new Date(leaseUntil);
-      if (!Number.isNaN(expiresAt.getTime())) {
-        const remaining = expiresAt.getTime() - Date.now();
-        leaseText = remaining <= 0 ? rt('已到期', 'Expired') : `${rt(`剩余 ${Math.ceil(remaining / 1000)} 秒`, `${Math.ceil(remaining / 1000)}s remaining`)} · ${expiresAt.toLocaleString()}`;
-      } else leaseText = String(leaseUntil);
-    } else if (typeof lease === 'string' || typeof lease === 'number') leaseText = String(lease);
-    else if (lease && typeof lease === 'object') {
-      const remainingMs = lease.remainingMs ?? lease.ttlMs;
-      const expiresAt = lease.expiresAt ?? lease.expires ?? lease.until;
-      if (remainingMs !== undefined) leaseText = remainingMs <= 0 ? rt('已到期', 'Expired') : rt(`剩余 ${Math.ceil(remainingMs / 1000)} 秒`, `${Math.ceil(remainingMs / 1000)}s remaining`);
-      else if (expiresAt) leaseText = new Date(expiresAt).toLocaleString();
-      else if (lease.valid !== undefined) leaseText = lease.valid ? rt('有效', 'Valid') : rt('已失效', 'Expired');
-    }
-    const failover = data.automaticFailover ?? data.autoFailover ?? data.failover ?? healthInfo.failover;
-    const failoverInfo = failover && typeof failover === 'object' ? failover : {};
-    const failoverState = String(failoverInfo.status ?? (typeof failover === 'string' ? failover : '')).toLowerCase();
-    const failoverEnabled = typeof failover === 'boolean' ? failover : failoverInfo.enabled ?? failoverInfo.automatic ?? data.autoFailoverEnabled ?? (failoverState ? !['disabled', 'off'].includes(failoverState) : undefined);
-    const failoverReady = failoverInfo.ready ?? failoverInfo.healthy ?? failoverInfo.available ?? (failoverState ? ['ready', 'active', 'healthy'].includes(failoverState) ? true : ['unavailable', 'blocked', 'failed', 'error'].includes(failoverState) ? false : undefined : undefined);
-    const warningValue = failoverInfo.warning || failoverInfo.warnings || failoverInfo.reason || data.failoverWarning;
-    const failoverWarning = (Array.isArray(warningValue) ? warningValue.join(' · ') : warningValue) || (failoverEnabled === false ? rt('主节点自动故障转移未启用。', 'Automatic leader failover is disabled.') : failoverReady === false ? rt('主节点自动故障转移暂不可用。', 'Automatic leader failover is not ready.') : quorumMet === false ? rt('当前没有法定人数，无法自动选出主节点。', 'Quorum is unavailable, so a leader cannot be elected automatically.') : '');
-    const failoverLabel = failoverEnabled === false ? rt('未启用', 'Disabled') : failoverReady === true ? rt('已就绪', 'Ready') : failoverReady === false ? rt('不可用', 'Unavailable') : failoverEnabled === true ? rt('已启用', 'Enabled') : rt('未知', 'Unknown');
-    const failoverTone = failoverEnabled === false || failoverReady === false ? 'danger' : failoverReady === true || failoverEnabled === true ? 'good' : 'muted';
-    const memberRows = members.map(member => {
-      const id = String(member.id || '');
-      const kind = clusterMemberKind(member);
-      const memberStatus = member.status ? String(member.status).toLowerCase() : '';
-      const online = member.online ?? member.connected ?? member.alive ?? (memberStatus ? ['online', 'connected', 'ready', 'healthy'].includes(memberStatus) : undefined);
-      const onlineBadge = online === true ? clusterStatusBadge(rt('在线', 'Online'), 'good') : online === false ? clusterStatusBadge(rt('离线', 'Offline'), 'muted') : clusterStatusBadge(rt('未知', 'Unknown'), 'muted');
-      const roleValue = String(member.raftRole || member.role || '').toLowerCase();
-      const rawRole = ['leader', 'follower', 'candidate'].includes(roleValue) ? roleValue : id && id === leaderId ? 'leader' : 'follower';
-      const gateway = member.gatewayStatus ?? member.gateway?.status ?? member.feishuGateway?.status ?? member.gateway;
-      const gatewayKey = String(gateway && typeof gateway === 'object' ? gateway.status || '' : gateway || '').toLowerCase();
-      const gatewayUp = ['connected', 'online', 'ready', 'running', 'healthy'];
-      const gatewayDown = ['disconnected', 'offline', 'stopped', 'disabled'];
-      const gatewayConnected = typeof gateway === 'boolean' ? gateway : gateway && typeof gateway === 'object' ? gateway.connected ?? gateway.online : gatewayUp.includes(gatewayKey) ? true : gatewayDown.includes(gatewayKey) ? false : undefined;
-      const gatewayLabel = gateway === undefined || gateway === null || gateway === '' ? rt('未配置', 'Not configured') : gatewayConnected === true ? rt('已连接', 'Connected') : gatewayConnected === false ? rt('未连接', 'Disconnected') : ['error', 'failed', 'unhealthy'].includes(gatewayKey) ? rt('异常', 'Error') : gatewayKey === 'starting' ? rt('启动中', 'Starting') : String(gatewayKey || gateway);
-      const gatewayTone = gatewayConnected === true ? 'good' : ['error', 'failed', 'unhealthy'].includes(gatewayKey) ? 'danger' : gatewayConnected === false || gateway === undefined || gateway === null || gateway === '' ? 'muted' : 'warning';
-      const canTransfer = member.transferable ?? (online === true && kind === 'voter' && id && id !== leaderId && rawRole !== 'leader');
-      const platform = typeof member.platform === 'object' ? member.platform.name || member.platform.platform : member.platform;
-      const version = member.version || member.agentVersion || (typeof member.platform === 'object' ? member.platform.version : '');
-      return `<tr data-cluster-member="${esc(id)}"><td><div class="cluster-member-name"><strong>${esc(member.label || id || rt('未命名成员', 'Unnamed member'))}</strong>${member.label && member.label !== id ? `<code>${esc(id)}</code>` : ''}</div></td><td><div class="cluster-platform"><span>${esc(platform || '—')}</span><small>${esc(version ? (String(version).startsWith('v') ? version : 'v' + version) : '')}</small></div></td><td><span class="cluster-kind is-${kind}">${esc(membershipLabel(kind))}</span></td><td>${onlineBadge}</td><td>${esc(roleLabel(rawRole))}</td><td>${clusterStatusBadge(gatewayLabel, gatewayTone)}</td><td class="cluster-engine-clis">${esc(clusterEngineSummary(member))}</td><td class="cluster-member-action">${canTransfer ? `<button class="btn" data-cluster-transfer="${esc(id)}">${esc(rt('移交主节点', 'Transfer leader'))}</button>` : rawRole === 'leader' || id === leaderId ? `<span class="route-muted">${esc(rt('当前主节点', 'Current leader'))}</span>` : '—'}</td></tr>`;
+  const section = $('#cluster-panel'); if (!section) return;
+  try {
+    const [data, spaces] = await Promise.all([api('GET', 'cluster'), api('GET', 'workspaces').catch(() => null)]);
+    if (!section.isConnected || state.type !== 'proxy') return;
+    const members = data.members || [], leaderId = typeof data.leader === 'object' ? data.leader?.id : data.leader; const self = members.find(item => item.id === data.nodeId), leader = members.find(item => item.id === leaderId);
+    const label = id => members.find(item => item.id === id)?.label || id;
+    const connected = data.gateway?.phase === 'connected' && data.role === 'leader' || leader?.gatewayStatus === 'connected';
+    const healthy = data.enabled === false || !!data.leader && data.hasQuorum;
+    const heading = !data.enabled ? rt('当前使用单机面板', 'Standalone panel') : !leaderId ? rt('当前没有有效的 IM 主节点', 'No valid IM leader') : connected ? rt(`IM 消息由 ${label(leaderId)} 接收`, `IM messages are received by ${label(leaderId)}`) : rt(`主节点：${label(leaderId)}，IM 连接尚未就绪`, `Leader: ${label(leaderId)}; IM is not ready`);
+    const reason = data.health?.reason || (data.leader ? rt('会话固定在指定机器执行，切换主节点不会改写工作目录。', 'Sessions stay on their execution machine when leadership changes.') : rt('主节点选举未完成，消息接入暂不可用。下方显示连接与同步故障。', 'Election is incomplete. See connection and replication diagnostics below.'));
+    const cards = (members.length ? members : [{ id: spaces?.selfId || 'local', label: rt('本机', 'This machine'), online: true, runtimeConnected: true }]).map(member => {
+      const directory = spaces?.machines?.find(item => item.id === member.id)?.defaultDirectory;
+      const local = member.id === data.nodeId, primary = member.id === leaderId;
+      const gateway = member.gatewayStatus === 'connected' ? rt('已连接', 'Connected') : member.gatewayStatus === 'connecting' || member.gatewayStatus === 'reconnecting' ? rt('连接中', 'Connecting') : primary ? rt('未就绪', 'Not ready') : rt('待命', 'Standby');
+      const diagnostic = (data.diagnostics || []).find(item => item.id === member.id);
+      return `<article class="machine-card${primary ? ' is-leader' : ''}"><header><div><h3>${esc(member.label || member.id)}</h3><code>${esc(member.id)}</code></div>${clusterStatusBadge(primary ? rt('IM 主节点', 'IM leader') : local ? rt('当前面板', 'This panel') : rt('集群成员', 'Member'), primary ? 'good' : 'muted')}</header><dl><dt>${esc(rt('面板通信', 'Panel link'))}</dt><dd>${clusterStatusBadge(member.online ? rt('已连接', 'Connected') : rt('未连接', 'Disconnected'), member.online ? 'good' : 'danger')}</dd><dt>${esc(rt('Agent 执行通道', 'Agent runtime'))}</dt><dd>${esc(member.runtimeConnected ? rt('可执行', 'Ready') : rt('未连接', 'Disconnected'))}</dd><dt>${esc(rt('IM 接收', 'IM reception'))}</dt><dd>${esc(gateway)}</dd><dt>${esc(rt('默认工作目录', 'Default directory'))}</dt><dd class="machine-directory" title="${esc(directory || '')}">${esc(directory || rt('尚未获取', 'Not available'))}</dd></dl><footer><span class="route-muted">${esc([member.platform, member.version && 'v' + String(member.version).replace(/^v/, '')].filter(Boolean).join(' · ') || rt('平台信息未上报', 'Platform not reported'))}</span>${data.leader && !primary && member.online && !member.witness ? `<button class="btn" data-cluster-transfer="${esc(member.id)}">${esc(rt('接管 IM', 'Take over IM'))}</button>` : ''}</footer>${diagnostic?.error ? `<p class="machine-error">${esc(diagnostic.error)}</p>` : ''}</article>`;
     }).join('');
-    const joinCommand = typeof data.joinCommand === 'object' ? data.joinCommand.command || '' : data.joinCommand;
     section.hidden = false;
-    section.innerHTML = `<div class="cluster-overview chart" data-health="${esc(health.tone)}"><div class="cluster-heading"><div><p class="cluster-eyebrow">${esc(rt('集群控制面', 'Cluster control plane'))}</p><h3 id="cluster-title">${esc(rt('集群健康', 'Cluster health'))}</h3><p class="route-muted">${esc(rt('主节点、法定人数和故障转移状态。', 'Leader, quorum, and failover readiness.'))}</p></div><button class="btn" id="cluster-refresh">${esc(rt('刷新', 'Refresh'))}</button></div><div class="cluster-metrics"><div><span>${esc(rt('健康状态', 'Health'))}</span>${clusterStatusBadge(health.label, health.tone)}</div><div><span>${esc(rt('主节点', 'Leader'))}</span><strong>${esc(leaderLabel)}</strong></div><div><span>${esc(rt('法定人数', 'Quorum'))}</span><strong>${esc(quorumText)}</strong></div><div><span>${esc(rt('任期 / 租约', 'Term / lease'))}</span><strong>${esc(term === undefined || term === null ? '—' : `#${term}`)}</strong><small>${esc(leaseText)}</small></div><div><span>${esc(rt('自动故障转移', 'Automatic failover'))}</span>${clusterStatusBadge(failoverLabel, failoverTone)}</div></div>${failoverWarning ? `<div class="cluster-warning" role="alert"><strong>${esc(rt('故障转移警告', 'Failover warning'))}</strong><span>${esc(failoverWarning)}</span></div>` : ''}</div>
-      <div class="cluster-members chart"><div class="cluster-heading"><div><h3>${esc(rt('集群成员', 'Cluster members'))}</h3><p class="route-muted">${esc(rt('共识成员决定控制面主节点；它们与下方执行引擎任务的运行节点相互独立。', 'Consensus members elect the control-plane leader. They are separate from the engine runtime nodes below.'))}</p></div><span class="cluster-member-count">${members.length}</span></div>${memberRows ? `<div class="cluster-table-wrap"><table class="cluster-members-table"><thead><tr><th>${esc(rt('成员', 'Member'))}</th><th>${esc(rt('平台 / 版本', 'Platform / version'))}</th><th>${esc(rt('成员类型', 'Membership'))}</th><th>${esc(rt('在线状态', 'Online'))}</th><th>${esc(rt('角色', 'Role'))}</th><th>${esc(rt('网关状态', 'Gateway'))}</th><th>${esc(rt('引擎 CLI', 'Engine CLIs'))}</th><th>${esc(rt('操作', 'Action'))}</th></tr></thead><tbody>${memberRows}</tbody></table></div>` : `<div class="route-empty"><p>${esc(rt('还没有集群成员。', 'No cluster members yet.'))}</p></div>`}</div>
-      ${joinCommand ? `<details class="cluster-join chart"><summary>${esc(rt('添加集群成员', 'Join another member'))}</summary><p class="route-muted">${esc(rt('在要加入的机器上运行以下命令。', 'Run this command on the machine you want to join.'))}</p><div><code>${esc(joinCommand)}</code><button class="btn" id="cluster-copy-join">${esc(rt('复制命令', 'Copy command'))}</button></div></details>` : ''}`;
-    $('#cluster-refresh').onclick = load;
-    const copy = $('#cluster-copy-join');
-    if (copy) copy.onclick = async () => { try { await navigator.clipboard.writeText(joinCommand); toast(rt('已复制加入命令', 'Join command copied')); } catch { toast(rt('复制失败，请选择命令手动复制', 'Select the command and copy it manually'), false); } };
-    section.querySelectorAll('[data-cluster-transfer]').forEach(button => button.onclick = async () => {
-      const target = button.dataset.clusterTransfer;
-      const label = members.find(member => String(member.id) === target)?.label || target;
-      if (!confirm(rt(`确定将主节点移交给 ${label}？`, `Transfer leadership to ${label}?`))) return;
-      const buttons = section.querySelectorAll('[data-cluster-transfer]'); buttons.forEach(item => { item.disabled = true; });
-      try { await api('POST', 'cluster/transfer', { target }); toast(rt('主节点移交已发起', 'Leader transfer started')); await load(); }
-      catch (error) { toast(error.message, false); buttons.forEach(item => { if (item.isConnected) item.disabled = false; }); }
-    });
-  };
-  await load();
+    section.innerHTML = `<section class="cluster-summary ${healthy ? 'is-ready' : 'is-blocked'}"><div><span class="cluster-eyebrow">${esc(rt('运行状态', 'Runtime status'))}</span><h2 id="cluster-title">${esc(heading)}</h2><p>${esc(reason)}</p></div><button class="btn" id="cluster-refresh">${esc(rt('刷新', 'Refresh'))}</button></section><div class="panel-layers"><div><span>${esc(rt('你正在打开', 'You are viewing'))}</span><strong>${esc(self?.label || data.nodeId || rt('本机面板', 'Local panel'))}</strong></div><span class="layer-arrow">→</span><div><span>${esc(rt('IM 消息入口', 'IM ingress'))}</span><strong>${esc(leader?.label || leaderId || (data.enabled === false ? rt('本机', 'Local') : rt('暂不可用', 'Unavailable')))}</strong></div><span class="layer-arrow">→</span><div><span>${esc(rt('Agent 执行机器', 'Agent execution'))}</span><strong>${esc(rt('由会话指定', 'Chosen per session'))}</strong></div></div><div class="machine-grid">${cards}</div><details class="cluster-diagnostics"><summary>${esc(rt('查看选举与连接诊断', 'Election & connection diagnostics'))}</summary><p>${esc(rt(`可达成员 ${data.quorum?.online ?? members.length} / ${data.quorum?.total ?? members.length}；多数派需要 ${data.quorum?.required ?? 1} 个成员；主节点确认${data.hasQuorum ? '已完成' : '未完成'}`, `Reachable ${data.quorum?.online ?? members.length}/${data.quorum?.total ?? members.length}; majority ${data.quorum?.required ?? 1}; leader confirmation ${data.hasQuorum ? 'valid' : 'pending'}`))}</p><p>${esc(rt(`任期 ${data.term ?? '—'} · 同步版本 ${data.snapshotIndex ?? '—'} · 本机监听 ${data.panel?.bind || '未知'}:${data.panel?.port || ''}`, `Term ${data.term ?? '—'} · snapshot ${data.snapshotIndex ?? '—'} · bind ${data.panel?.bind || '?'}:${data.panel?.port || ''}`))}</p>${members.map(item => `<p><strong>${esc(item.label || item.id)}</strong> <code>${esc(item.url || '')}</code></p>`).join('')}</details>`;
+    $('#cluster-refresh').onclick = renderClusterPanel;
+    section.querySelectorAll('[data-cluster-transfer]').forEach(button => button.onclick = async () => { button.disabled = true; try { await api('POST', 'cluster/transfer', { target: button.dataset.clusterTransfer }); toast(rt('已请求移交 IM 主节点，当前执行机器保持不变', 'IM transfer requested; execution machines are unchanged')); await renderClusterPanel(); } catch (error) { toast(error.message, false); } finally { if (button.isConnected) button.disabled = false; } });
+  } catch (error) { if (section.isConnected) { section.hidden = false; section.innerHTML = `<p class="cluster-warning" role="alert">${esc(error.message)}</p>`; } }
+}
+async function renderWorkspacesPanel() {
+  const section = $('#workspaces-panel'); if (!section) return;
+  try {
+    const data = await api('GET', 'workspaces'); if (!section.isConnected) return;
+    const config = data.config;
+    const project = item => `<article class="workspace-project" data-workspace-id="${esc(item.id)}"><header><label>${esc(rt('项目名称', 'Project name'))}<input data-project-name value="${esc(item.name)}" required maxlength="80"></label><button type="button" class="btn" data-remove-project>${esc(rt('移除映射', 'Remove mapping'))}</button></header><div class="workspace-paths">${data.machines.map(machine => `<label>${esc(machine.label)}<input data-project-path="${esc(machine.id)}" value="${esc(item.paths[machine.id] || '')}" placeholder="${esc(rt('该机器上的项目目录；留空表示未配置', 'Project directory on this machine; empty means unavailable'))}"></label>`).join('')}</div></article>`;
+    section.innerHTML = `<form id="workspace-form"><section class="workspace-section"><h2>${esc(rt('每台机器的默认目录', 'Default directory per machine'))}</h2><p class="route-muted">${esc(rt('未指定项目时使用。目录在对应机器上校验，不会把 Mac 路径套用到 Linux。', 'Used when no project is selected. Each path is validated on its own machine.'))}</p><div class="workspace-paths">${data.machines.map(machine => `<label>${esc(machine.label)}<small>${esc(machine.id)} · ${esc(machine.online ? rt('已连接', 'Connected') : rt('未连接', 'Disconnected'))}</small><input data-machine-default="${esc(machine.id)}" value="${esc(config.defaults[machine.id] || '')}" placeholder="${esc(machine.home || rt('连接后可获取默认目录', 'Connect to discover the home directory'))}"></label>`).join('')}</div></section><section class="workspace-section"><div class="route-heading"><h2>${esc(rt('项目目录映射', 'Project directory mappings'))}</h2><button type="button" class="btn" id="workspace-add">＋ ${esc(rt('添加项目', 'Add project'))}</button></div><p class="route-muted">${esc(rt('同一个项目可以在不同机器上使用不同路径。映射只记录位置，不复制代码、worktree 或 CLI 会话历史。', 'One project may have different paths on each machine. Mappings record locations; they do not copy code, worktrees, or CLI history.'))}</p><div id="workspace-projects">${config.projects.map(project).join('')}</div></section><div class="workspace-save"><p id="workspace-result" role="status"></p><button class="btn primary" type="submit">${esc(rt('校验并保存到集群', 'Validate & save to cluster'))}</button></div></form>`;
+    const rows = $('#workspace-projects');
+    $('#workspace-add').onclick = () => rows.insertAdjacentHTML('beforeend', project({ id: crypto.randomUUID(), name: '', paths: {} }));
+    rows.onclick = event => { const button = event.target.closest('[data-remove-project]'); if (button) button.closest('[data-workspace-id]').remove(); };
+    $('#workspace-form').onsubmit = async event => { event.preventDefault(); const button = event.submitter; button.disabled = true; const result = $('#workspace-result'); result.textContent = rt('正在对应机器上校验目录…', 'Validating directories on their machines…');
+      const defaults = Object.fromEntries(Array.from(section.querySelectorAll('[data-machine-default]')).map(input => [input.dataset.machineDefault, input.value.trim()]).filter(([,value]) => value));
+      const projects = Array.from(rows.children).map(row => ({ id: row.dataset.workspaceId, name: row.querySelector('[data-project-name]').value.trim(), paths: Object.fromEntries(Array.from(row.querySelectorAll('[data-project-path]')).map(input => [input.dataset.projectPath, input.value.trim()]).filter(([,value]) => value)) }));
+      try { await api('PUT', 'workspaces', { defaults, projects }); result.textContent = rt('已保存；后续会话按所选执行机器使用对应目录。', 'Saved. Sessions use paths for their selected execution machine.'); } catch (error) { result.textContent = error.message; } finally { button.disabled = false; }
+    };
+  } catch (error) { section.textContent = error.message; }
 }
 
 // Engine runtime nodes: machines whose engine CLIs this panel drives over WebSocket or SSH.
@@ -3273,7 +3251,7 @@ async function renderProxyTab() {
       <div class="route-foot"><span class="route-muted">${esc(rt('切换对下一次请求生效，正在生成的回复不受影响。', 'Changes apply to the next request. Active responses continue uninterrupted.'))}</span><button class="btn" id="route-refresh">${esc(rt('刷新', 'Refresh'))}</button><button class="btn" id="route-reset">${esc(rt('重置故障状态', 'Reset failures'))}</button></div>
       <section class="account-usage chart"><div class="route-heading"><div><h3>${esc(rt('账号用量', 'Account usage'))}</h3><p class="route-muted">${esc(rt('按本地代理抓取的最近请求统计；历史请求只从代理启用后开始记录。', 'Based on recent requests captured by the local proxy. Tracking starts when the proxy is enabled.'))}</p></div><button class="btn" id="account-usage-refresh">${esc(rt('刷新', 'Refresh'))}</button></div><div id="account-usage-list"><p class="route-muted">${esc(rt('正在读取用量…', 'Loading usage…'))}</p></div></section>
       </section><section class="codex-panel chart" id="codex-panel" data-connection-panel="codex"><div class="route-heading"><div><h3>Codex</h3><p class="route-muted">${esc(rt('Codex 使用你自己的 codex login；面板只负责选版本和透传抓包，不保存 Codex 凭证。', 'Codex uses your own codex login. The panel picks the CLI and passes requests through for capture; it never stores Codex credentials.'))}</p></div><button class="btn" id="codex-refresh">${esc(rt('刷新', 'Refresh'))}</button></div><div id="codex-body"><p class="route-muted">${esc(rt('正在读取…', 'Loading…'))}</p></div></section>${ENGINES.filter(engine => !DEDICATED_CONNECTION_PANELS.includes(engine.id)).map(genericConnectionPanel).join('')}`;
-    renderClusterPanel();
+    setupInfrastructure(); renderClusterPanel(); renderWorkspacesPanel();
     const selectConnection = engine => {
       localStorage.setItem('panel-connection-engine', engine);
       document.querySelectorAll('[data-connection-panel]').forEach(panel => { panel.hidden = panel.dataset.connectionPanel !== engine; });

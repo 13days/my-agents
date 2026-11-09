@@ -13,7 +13,7 @@ const VERSION = require('../package.json').version;
 // Notifications (node → hub): session.event, session.idle, session.ready,
 // session.failed, session.accepted, session.closed. Each carries the session
 // state so the hub can answer currentId / busy synchronously.
-function serveNode({ peer, host, engines, id = os.hostname(), label = id }) {
+function serveNode({ peer, host, engines, id = os.hostname(), label = id, beforeOpen = () => {} }) {
   const byId = new Map(engines.map(engine => [engine.id, engine]));
   const sessions = new Map();
   const engineOf = name => { const engine = byId.get(name); if (!engine) throw Object.assign(new Error(`节点上没有引擎：${name}`), { status: 400 }); return engine; };
@@ -28,12 +28,14 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id }) {
       try { const info = engine.detect?.(); if (info) cli = { path: info.path, version: info.version }; } catch {}
       return { id: engine.id, meta: engine.meta, capabilities: engine.capabilities, cli };
     }),
+    projects: typeof host.projects === 'function' ? host.projects() : [],
   }));
   peer.handle('engine.owns', async ({ engine, id: sessionId }) => !!await engineOf(engine).owns(sessionId));
   peer.handle('host.resolveDir', ({ dir }) => host.resolveDir(dir));
   peer.handle('host.createWorktree', async ({ dir }) => host.createWorktree(await host.resolveDir(dir)));
 
   peer.handle('session.open', async ({ sid, engine: name, sessionId, resume, cwd, model, routeEnv }) => {
+    await beforeOpen(sessionId);
     const engine = engineOf(name);
     const codexPath = String(routeEnv?.MY_AGENTS_CODEX_BASE || '');
     if (routeEnv?.ANTHROPIC_BASE_URL || /^\/(?!\/)/.test(codexPath)) {

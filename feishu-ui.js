@@ -35,8 +35,8 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
         </details>
         <div class="gateway-form-row"><label>${esc(rt('服务', 'Service'))}<select id="feishu-domain"><option value="feishu">飞书</option><option value="lark">Lark</option></select></label><label>${esc(rt('默认启动引擎', 'Default engine'))}<select id="feishu-default-engine" ${feishuEngineSupported(c) ? '' : 'disabled'}>${feishuEngineOptions(c)}</select></label></div>
         <p class="gateway-engine-hint route-muted">${esc(feishuEngineSupported(c) ? rt('新话题首次发送消息，或 /new 未指定引擎时，使用此默认值。已有话题继续使用各自绑定的引擎。', 'Used for the first message in an unbound topic and /new without an engine. Existing topics retain their engine.') : rt('当前运行的服务尚未加载引擎设置，请重启面板后使用默认引擎和 /engine 命令。', 'Restart the panel service to enable default-engine settings and /engine commands.'))}</p>
-        <label>${esc(rt('Claude Code 模型（选填）', 'Claude Code model (optional)'))}<input id="feishu-model" value="${esc(c.model)}" placeholder="${esc(rt('沿用 Claude Code 默认模型', 'Use Claude Code default'))}"></label>
-        <label>${esc(rt('默认项目', 'Default project'))}<div class="gateway-project"><input id="feishu-project" readonly value="${esc(c.defaultProject)}" placeholder="${esc(rt('未选择时，飞书里用 /new 选择项目', 'Use /new in Feishu when no default is selected'))}"><button type="button" class="btn" id="feishu-project-pick">${esc(rt('选择文件夹', 'Choose folder'))}</button></div></label>
+        <label>${esc(rt('默认执行机器', 'Default execution machine'))}<select id="feishu-default-machine">${(data.execution?.machines || []).map(machine => `<option value="${esc(machine.id)}">${esc(machine.label)} (${esc(machine.id)})</option>`).join('') || `<option value="local">${esc(rt('当前机器', 'This machine'))}</option>`}</select><small>${esc(rt('默认项目的目录属于这台机器，切换 IM 主节点时不会改变。', 'The default project belongs to this machine, independent of the IM leader.'))}</small></label><label>${esc(rt('Claude Code 模型（选填）', 'Claude Code model (optional)'))}<input id="feishu-model" value="${esc(c.model)}" placeholder="${esc(rt('沿用 Claude Code 默认模型', 'Use Claude Code default'))}"></label>
+        <label>${esc(rt('默认项目', 'Default project'))}<div class="gateway-project"><input id="feishu-project" value="${esc(c.defaultProject)}" placeholder="${esc(rt('填写所选执行机器上的目录，或在飞书用 /new 选择', 'Enter a directory on the execution machine, or use /new in IM'))}"><button type="button" class="btn" id="feishu-project-pick">${esc(rt('选择文件夹', 'Choose folder'))}</button></div></label>
         <label class="gateway-check"><input type="checkbox" id="feishu-worktree" ${c.worktree !== false ? 'checked' : ''}>${esc(rt('新会话使用独立 Git worktree，避免并发任务修改同一目录', 'Use an isolated Git worktree for new sessions'))}</label><p class="route-muted">${esc(rt('从当前提交创建分支，未提交改动不带入；已有会话继续原目录。普通文件夹使用原目录。', 'Branches from the current commit without uncommitted changes. Existing sessions and non-Git folders retain their directory.'))}</p>
         <details id="feishu-access" class="gateway-access" open><summary>${esc(rt('访问权限 · 自动发现的用户与群', 'Access · discovered users and groups'))}</summary>
           <label class="gateway-check"><input type="checkbox" id="feishu-all-users" ${c.allowAllUsers ? 'checked' : ''}>${esc(rt('放行所有私聊用户（无需配对）', 'Allow all private-chat users (no pairing required)'))}</label>
@@ -126,7 +126,15 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
 
   $('#feishu-domain').value = c.domain;
   $('#feishu-default-engine').value = c.defaultEngine || ENGINE_DEFAULT;
+  $('#feishu-default-machine').value = c.defaultMachine || data.execution?.selfId || 'local';
   $('#feishu-cli-brand').value = c.domain;
+  const syncProjectPicker = () => { $('#feishu-project-pick').disabled = $('#feishu-default-machine').value !== (data.execution?.selfId || 'local'); };
+  $('#feishu-default-machine').onchange = async () => {
+    syncProjectPicker();
+    const id = $('#feishu-default-machine').value;
+    $('#feishu-project').value = '';
+    try { const spaces = await api('GET', 'workspaces'); if ($('#feishu-default-machine')?.value === id) $('#feishu-project').value = spaces.machines.find(machine => machine.id === id)?.defaultDirectory || ''; } catch (error) { toast(error.message, false); }
+  }; syncProjectPicker();
   let setupWasActive = ['starting', 'waiting', 'completing'].includes(cliSetup.phase), hasCredentials = c.hasSecret, recoverExisting = false, callbackReady = !!c.cardCallbacksReady;
   let autoStart = data.runtime.autoStart, owners = c.allowedUserIds.join('\n');
   const secretInput = $('#feishu-app-secret'), secretToggle = $('#feishu-secret-toggle');
@@ -305,7 +313,8 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
     $('#feishu-phase').textContent = (d.phase === 'connected' ? '● ' : '') + (labels[d.phase] || d.phase);
     $('#feishu-phase').className = 'route-badge' + (d.phase === 'connected' ? '' : ' is-muted');
     const connectionError = typeof d.lastError === 'string' && !d.lastError.includes('[object Object]') ? d.lastError : rt('连接异常，请查看本机服务日志。', 'Connection issue. Check the local service log.');
-    $('#feishu-connection-note').textContent = d.phase !== 'connected' && d.lastError ? connectionError : (d.bot ? `${d.bot} · ${rt('长连接接入', 'Long connection')}` : rt(`连接后，可在飞书接续 ${ENGINES.map(engine => engine.label).join(' 与 ')} 会话。`, `Connect to continue ${ENGINES.map(engine => engine.label).join(' and ')} sessions from Feishu.`));
+    const leaderNote = d.cluster?.leader ? `${rt('IM 主节点', 'IM leader')}：${d.cluster.label || d.cluster.leader} · ` : '';
+    $('#feishu-connection-note').textContent = leaderNote + (d.phase !== 'connected' && d.lastError ? connectionError : (d.bot ? `${d.bot} · ${rt('长连接接入', 'Long connection')}` : rt(`连接后，可在飞书接续 ${ENGINES.map(engine => engine.label).join(' 与 ')} 会话。`, `Connect to continue ${ENGINES.map(engine => engine.label).join(' and ')} sessions from Feishu.`)));
     $('#feishu-runtime').title = d.runtime.claudeCli || '';
     $('#feishu-runtime').textContent = `${d.runtime.claudeVersion ? 'Claude Code ' + d.runtime.claudeVersion + ' · ' : ''}${d.runtime.keepAwake ? rt('Mac 保活中', 'Mac kept awake') : rt('未启用保活', 'Keep-awake off')} · ${d.runtime.autoStart ? rt('已配置登录启动', 'Login startup configured') : rt('未配置登录启动', 'Login startup off')}${d.runtime.backgroundService ? ' · ' + rt('后台服务运行中', 'Background service running') : ''}`;
     $('#feishu-paired-count').textContent = d.config.allowAllUsers ? rt('当前放行所有私聊用户（禁用账号除外）', 'All private-chat users allowed except disabled accounts') : `${rt('已授权账号：', 'Allowed accounts: ')}${d.config.allowedUserIds.length}`;
@@ -343,7 +352,7 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
     e.preventDefault(); const button = $('#feishu-save'); button.disabled = true; $('#feishu-save-result').textContent = rt('正在保存…', 'Saving…');
     try {
       await accessSave;
-      const input = { worktree: $('#feishu-worktree').checked, allowAllUsers: $('#feishu-all-users').checked, allowAllGroups: $('#feishu-all-groups').checked, enabled: $('#feishu-enabled').checked, appId: $('#feishu-app-id').value, appSecret: secretDirty ? secretInput.value : '', domain: $('#feishu-domain').value, defaultProject: $('#feishu-project').value, defaultEngine: $('#feishu-default-engine').value, model: $('#feishu-model').value, keepAwake: $('#feishu-awake').checked, allowedUserIds: $('#feishu-users').value.split(/[\s,]+/).filter(Boolean), disabledUserIds: [...ids('#feishu-disabled-users')], allowedChatIds: $('#feishu-chats').value.split(/[\s,]+/).filter(Boolean) };
+      const input = { worktree: $('#feishu-worktree').checked, allowAllUsers: $('#feishu-all-users').checked, allowAllGroups: $('#feishu-all-groups').checked, enabled: $('#feishu-enabled').checked, appId: $('#feishu-app-id').value, appSecret: secretDirty ? secretInput.value : '', domain: $('#feishu-domain').value, defaultProject: $('#feishu-project').value, defaultMachine: $('#feishu-default-machine').value, defaultEngine: $('#feishu-default-engine').value, model: $('#feishu-model').value, keepAwake: $('#feishu-awake').checked, allowedUserIds: $('#feishu-users').value.split(/[\s,]+/).filter(Boolean), disabledUserIds: [...ids('#feishu-disabled-users')], allowedChatIds: $('#feishu-chats').value.split(/[\s,]+/).filter(Boolean) };
       if ($('#feishu-autostart').checked !== autoStart) input.autoStart = $('#feishu-autostart').checked;
       const result = await api('PUT', 'feishu', input); autoStart = result.runtime.autoStart; owners = result.config.allowedUserIds.join('\n'); paint(result); $('#feishu-save-result').textContent = rt('已保存', 'Saved');
       $('#feishu-app-secret').placeholder = result.config.hasSecret ? rt('已保存，留空保持不变', 'Saved; leave blank to keep it') : '';
