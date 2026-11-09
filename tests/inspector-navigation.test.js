@@ -22,7 +22,7 @@ test('Inspector API links legacy responses to their exact transcript and navigat
     { type: 'assistant', sessionId: sid, timestamp: '2026-11-06T00:00:01Z', message: { id: 'legacy-response', role: 'assistant', model: 'test', usage: { input_tokens: 1, output_tokens: 1 }, content: [{ type: 'text', text: 'response' }] } },
   ].map(rec => JSON.stringify(rec)).join('\n') + '\n');
   const panelPort = await port(), proxyPort = await port();
-  const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: { ...process.env, CLAUDE_DIR: dir, PORT: String(panelPort), PROXY_PORT: String(proxyPort), CCP_NO_PROXY_SETUP: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: { ...process.env, MY_AGENTS_HOME: dir, MY_AGENTS_BIND: '127.0.0.1', CLAUDE_DIR: dir, PORT: String(panelPort), PROXY_PORT: String(proxyPort), CCP_NO_PROXY_SETUP: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   t.after(async () => { if (child.exitCode === null) { child.kill('SIGTERM'); await new Promise(resolve => child.once('exit', resolve)); } });
   await new Promise((resolve, reject) => {
     let output = ''; const timer = setTimeout(() => reject(new Error(output)), 8000);

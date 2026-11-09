@@ -8,7 +8,7 @@ test('Feishu cards drive the real Panel HTTP API, automatic tool approval, CLI s
   const panelPort = await port(), proxyPort = await port();
   try {
     const output = await new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, [path.join(__dirname, 'fixtures/feishu-server.cjs')], { env: { ...process.env, CLAUDE_DIR: dir, CODEX_HOME: path.join(dir, 'codex'), PORT: String(panelPort), PROXY_PORT: String(proxyPort), CCP_NO_PROXY_SETUP: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawn(process.execPath, [path.join(__dirname, 'fixtures/feishu-server.cjs')], { env: { ...process.env, MY_AGENTS_HOME: dir, MY_AGENTS_BIND: '127.0.0.1', CLAUDE_DIR: dir, CODEX_HOME: path.join(dir, 'codex'), PORT: String(panelPort), PROXY_PORT: String(proxyPort), CCP_NO_PROXY_SETUP: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
       let text = ''; child.stdout.on('data', x => { text += x; }); child.stderr.on('data', x => { text += x; });
       const timer = setTimeout(() => { child.kill('SIGTERM'); reject(new Error(text + '\nIntegration timeout')); }, 15000);
       child.on('error', reject); child.on('exit', () => { clearTimeout(timer); resolve(text); });
