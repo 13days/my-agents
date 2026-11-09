@@ -69,7 +69,10 @@
     "channels/",
     "node/",
     "http/",
-    "docs/architecture-v2.md"
+    "docs/architecture-v2.md",
+    "docs/user-guide.md",
+    "docs/cluster-setup.md",
+    "docs/agent-install.md"
   ],
   "dependencies": {
     "ws": "^8.18.0"
