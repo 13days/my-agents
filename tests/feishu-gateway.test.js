@@ -876,3 +876,15 @@ test('shutdown waits for an older card update before writing the terminal state'
   const stopping = f.gateway.stop(); release(); await stopping;
   assert.equal(f.updated.at(-1).card.header.title.content, '已完成');
 });
+
+test('a follower cannot connect the Feishu gateway through start or configure', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'feishu-follower-'));
+  let connects = 0;
+  const leadership = { canStart: () => false };
+  const gateway = createFeishuGateway({ dir, leadership, panel: { engines: () => [{ id: 'claude', label: 'Claude', capabilities: {} }] }, runtime: { status: () => ({}), keepAwake() {} }, channelFactory: () => ({ on() {}, async connect() { connects++; }, async disconnect() {} }) });
+  t.after(async () => { await gateway.stop(); fs.rmSync(dir, { recursive: true, force: true }); });
+  await gateway.configure({ enabled: true, appId: 'cli_follower', appSecret: 'secret', defaultEngine: 'claude' });
+  assert.equal(connects, 0, 'configure only saves on a follower');
+  await assert.rejects(gateway.start(), { status: 409 });
+  assert.equal(connects, 0);
+});

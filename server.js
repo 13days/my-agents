@@ -194,6 +194,8 @@ function ensureProxyInstalled() {
 const CLI_CMD = process.argv[2];
 // `my-agents node …` runs only the remote node daemon, never the panel.
 if (CLI_CMD === 'node') { require('./node/daemon').run(process.argv.slice(3)); return; }
+if (CLI_CMD === 'cluster') { require('./node/cluster-cli').run(process.argv.slice(3)); return; }
+if (CLI_CMD === 'witness') { require('./node/witness').run(process.argv.slice(3)); return; }
 if (CLI_CMD === 'install-proxy') { installProxy(); process.exit(0); }
 if (CLI_CMD === 'uninstall-proxy') { uninstallProxy(); process.exit(0); }
 if (CLI_CMD === 'migrate-data') {
@@ -210,6 +212,8 @@ if (CLI_CMD === '--help' || CLI_CMD === '-h') {
   console.log('my-agents migrate-data     copy panel data from ~/.claude to ~/.my-agents (originals kept)');
   console.log('my-agents node --hub ws://<hub>:4321 --token <token>   serve this machine\'s engines to a hub');
   console.log('my-agents node --stdio     same, over stdio (the hub launches it via SSH)');
+  console.log('my-agents cluster init|add|join|status    configure a panel cluster');
+  console.log('my-agents witness          run a voter-only cluster witness');
   console.log('my-agents install-proxy    add a smart `claude` wrapper to your shell rc');
   console.log('my-agents uninstall-proxy  remove it');
   process.exit(0);
@@ -1817,12 +1821,15 @@ proxyServer.on('error', e => {
 });
 if (!HISTORY_WORKER) proxyServer.listen(PROXY_PORT, '127.0.0.1');
 
+let cluster;
+const clusterLeadership = { canStart: () => !cluster || cluster.canStart() };
 const macRuntime = require('./mac-runtime').createMacRuntime({ dir: DATA_DIR, claudeDir: CLAUDE_DIR, serverPath: path.join(__dirname, 'server.js'), port: PORT, proxyPort: PROXY_PORT, claudeInfo: HISTORY_WORKER ? undefined : resolveClaude() });
 const feishuGateway = require('./feishu-gateway').createFeishuGateway({
-  dir: DATA_DIR, runtime: macRuntime, replyURL: `http://127.0.0.1:${PORT}/api/feishu/reply`,
+  dir: DATA_DIR, runtime: macRuntime, replyURL: `http://127.0.0.1:${PORT}/api/feishu/reply`, leadership: clusterLeadership,
   panel: {
     sessions: listSessions,
     projects: knownProjects,
+    cluster: { status: () => cluster?.status() || { enabled: false, nodeId: 'local', role: 'leader', leader: 'local' }, transfer: target => cluster?.transfer(target) || Promise.reject(new Error('未配置集群')) },
     running: id => manager.busy(id) || !!accountRouter.sessions().items.find(item => item.id === id)?.running,
     submit: async ({ gatewayContext, ...input }) => {
       const run = manager.get(input.sessionId), live = run && !run.job.closed;
@@ -1961,6 +1968,16 @@ const server = http.createServer(async (req, res) => {
         if (folder && !fs.statSync(folder).isDirectory()) return sendJSON(res, 400, { error: '请选择文件夹' });
         return sendJSON(res, 200, { path: folder });
       } finally { folderPickerBusy = false; }
+    }
+
+    if (type === 'cluster') {
+      res.setHeader('Cache-Control', 'no-store');
+      if (req.method === 'GET') return sendJSON(res, 200, cluster.status());
+      if (req.method === 'POST' && parts[2] === 'transfer') {
+        const { target } = JSON.parse(await readBody(req, 64 * 1024) || '{}');
+        return sendJSON(res, 202, await cluster.transfer(String(target || '')));
+      }
+      return sendJSON(res, 404, { error: '接口不存在' });
     }
 
     if (type === 'nodes') {
@@ -2429,7 +2446,14 @@ const nodeHub = require('./node/hub').createNodeHub({ registry, token: auth?.tok
     }, { accounts: false }),
   },
 } });
-server.on('upgrade', (req, socket, head) => { if (!nodeHub.upgrade(req, socket, head)) socket.destroy(); });
+let clusterNetwork = null;
+let clusterConfig = null;
+try { clusterConfig = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'panel-cluster.json'), 'utf8')); } catch {}
+if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token && Array.isArray(clusterConfig.members)) {
+  clusterNetwork = require('./node/cluster-peer').createClusterNetwork({ token: clusterConfig.token, selfId: clusterConfig.nodeId, members: clusterConfig.members });
+  cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: feishuGateway });
+} else cluster = require('./core/cluster').createStandalone(feishuGateway);
+server.on('upgrade', (req, socket, head) => { if (clusterNetwork?.upgrade(req, socket, head)) return; if (!nodeHub.upgrade(req, socket, head)) socket.destroy(); });
 if (!HISTORY_WORKER) server.listen(PORT, BIND_HOST, () => {
   console.log(`my-agents 已启动: http://localhost:${PORT}`);
   if (auth.requireToken) console.log(`远程访问链接（含令牌，勿外传）: http://<host>:${PORT}/?token=${auth.token}`);
@@ -2437,8 +2461,8 @@ if (!HISTORY_WORKER) server.listen(PORT, BIND_HOST, () => {
   if (DATA_DIR !== CLAUDE_DIR) console.log(`数据目录: ${DATA_DIR}`);
   console.log(`Inspector 代理: http://localhost:${PROXY_PORT}`);
   ensureProxyInstalled();
-  feishuGateway.bootstrap().catch(e => console.warn('飞书网关：' + e.message));
   nodeHub.start();
+  cluster.start().catch(e => console.warn('集群启动：' + e.message));
 });
 const stopPanel = async () => {
   const forceExit = setTimeout(() => process.exit(0), 8000); forceExit.unref();
@@ -2446,7 +2470,7 @@ const stopPanel = async () => {
   macRuntime.close();
   codexStats.close();
   historyWorker?.close();
-  await feishuGateway.stop().catch(() => {});
+  await cluster.stop().catch(() => {});
   manager.shutdown();
   nodeHub.stop();
   process.exit(0);

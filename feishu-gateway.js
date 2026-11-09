@@ -17,6 +17,7 @@ function helpText(engines) {
     `/new [${ids.join('|')}] [项目序号或路径] 选择引擎新建，省略时使用默认引擎；路径支持本机已有目录及 ~/`,
     ...engines.list.map(engine => `/${engine.id} [问题] 切到 ${engine.label}，可直接带问题`),
     '/node [节点名] [路径] 查看或切换运行位置（本机 / 远程开发机），例如 /node devbox ~/repos/项目',
+    '/leader [节点名] 查看集群或主动迁移 Timi 主节点',
     '/model [模型 ID|default] 查看或切换当前会话模型，default 恢复默认', '/use 引擎 切换引擎（支持别名）', '/engine 查看当前引擎和切换选项', '/current 查看当前位置的绑定会话', '/history 查看最近对话',
     '/rename 新名称 固定会话名称', '/queue 内容 排队处理', '/steer 内容 立即引导', '/stop 停止当前任务',
     '/route 代理路由：/route 序号切账号、auto 故障转移、rr 轮询、reset 清除冷却、pin 序号|off 固定当前会话、codex direct|proxy',
@@ -45,15 +46,17 @@ function errorMessage(value, seen = new Set()) {
   return typeof value.code === 'string' || typeof value.code === 'number' ? '飞书请求失败（' + value.code + '）' : '';
 }
 
-function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '', now = Date.now }) {
+function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '', leadership = null, now = Date.now }) {
   const configFile = path.join(dir, 'panel-feishu.json'), stateFile = path.join(dir, 'panel-feishu-state.json');
   const inbox = createFeishuInbox(dir);
   const defaults = { allowAllUsers: false, allowAllGroups: false, enabled: false, appId: '', appSecret: '', domain: 'feishu', allowedUserIds: [], disabledUserIds: [], allowedChatIds: [], defaultProject: '', defaultEngine: 'claude', worktree: true, model: '', keepAwake: false };
-  let config = defaults, state = { bindings: {}, engineBindings: {}, cards: {}, taskCards: {}, sessionModels: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} }, phase = 'disabled', lastError = '', channel = null, connecting = null, pairing = null;
-  try { config = { ...defaults, ...load(configFile, {}) }; state = { ...state, ...load(stateFile, {}) }; }
-  catch (e) { lastError = e.message; phase = 'error'; }
-  state.taskCards ||= {};
-  state.sessionModels ||= {};
+  const emptyState = () => ({ bindings: {}, engineBindings: {}, cards: {}, taskCards: {}, sessionModels: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} });
+  let config = defaults, state = emptyState(), phase = 'disabled', lastError = '', channel = null, connecting = null, pairing = null;
+  function reloadFiles() {
+    try { config = { ...defaults, ...load(configFile, {}) }; state = { ...emptyState(), ...load(stateFile, {}) }; state.taskCards ||= {}; state.sessionModels ||= {}; }
+    catch (e) { lastError = e.message; phase = 'error'; }
+  }
+  reloadFiles();
   // Engines come from the panel registry; unknown defaults fall back at use time.
   const catalog = () => engineCatalog(panel.engines?.());
   const defaultEngine = () => catalog().fallback(config.defaultEngine, 'claude');
@@ -482,6 +485,13 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (!allowed(msg)) { if (msg.chatType === 'p2p') await send(msg, { text: '此账号尚未配对。请在 Mac 面板“飞书网关”生成配对码，再发送 /pair 配对码。' }); return; }
     const key = scope(msg), binding = state.bindings[key];
     const engines = catalog();
+    if (command === 'leader' || command === 'cluster') {
+      const info = panel.cluster?.status();
+      if (!info?.enabled) throw new Error('当前以单机模式运行，尚未建立集群');
+      if (arg) await panel.cluster.transfer(arg);
+      const latest = panel.cluster.status();
+      return send(msg, { text: `集群：${latest.clusterId}\nTimi 主节点：${latest.leader || '选举中'}\n本机：${latest.nodeId}（${latest.role}）\n成员在线：${latest.online}/${latest.members.length}\n多数派：${latest.hasQuorum ? '正常' : '不可用，网关已隔离'}\n任期：${latest.term}\n\n使用 /leader 节点名 主动迁移。` });
+    }
     // /new [引擎] [项目]：首个参数可选择引擎（id 或别名）
     const firstWord = arg.split(/\s+/)[0], explicitEngine = command === 'new' ? engines.find(firstWord) : '';
     const newEngine = explicitEngine || defaultEngine();
@@ -661,6 +671,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   }
   async function start() {
     if (connecting) return connecting;
+    if (leadership && !leadership.canStart()) throw Object.assign(new Error('当前节点不是持有多数派租约的集群主节点'), { status: 409 });
     if (!config.enabled) { phase = 'disabled'; return; }
     if (phase === 'connected' && (!channel?.getConnectionStatus || channel.getConnectionStatus()?.state === 'connected')) return;
     connecting = (async () => {
@@ -697,7 +708,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     config = next; atomic(configFile, config); runtime.keepAwake(config.keepAwake);
     // Access rules are evaluated locally for every message; changing them must
     // not interrupt an existing connection or its live task cards.
-    if (config.enabled && (reconnect || ['disabled', 'error'].includes(phase))) await start();
+    if (config.enabled && (!leadership || leadership.canStart()) && (reconnect || ['disabled', 'error'].includes(phase))) await start();
     return status();
   }
   async function labelContact({ id, label }) {
@@ -720,6 +731,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   }
   return {
     start, stop, configure, status, receive, action, sendReply, labelContact, refreshContacts,
+    async reload() { await stop(); reloadFiles(); return status(); },
     revealSecret: () => config.appSecret,
     messages: options => inbox.messages(config.appId, options),
     newPairing() { pairing = { code: crypto.randomBytes(9).toString('base64url'), expires: now() + 10 * 60 * 1000 }; return { command: '/pair ' + pairing.code, expiresAt: pairing.expires }; },
