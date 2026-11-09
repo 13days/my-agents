@@ -125,3 +125,18 @@ test('a node without its own Codex login uses replicated credentials directly', 
   assert.equal(p.sent[0].headers.authorization, 'Bearer replicated-access');
   assert.equal(p.sent[0].headers['chatgpt-account-id'], 'same-shared-account');
 });
+
+test('a subscription quota rejection tries another account before sending response bytes', async t => {
+  const limited = await proxyWith({ token: 'limited', credentials: mode => codexCredentials(AUTH, mode) }, 429);
+  const ready = await proxyWith({ token: 'ready', credentials: mode => codexCredentials(AUTH, mode) });
+  const coordinator = await proxyWith({ token: 'pool', credentials: () => null, resolve: async (_mode, _session, excluded = []) => excluded.includes('limited') ? { id: 'ready', url: ready.url, token: 'ready' } : { id: 'limited', url: limited.url, token: 'limited' } });
+  t.after(() => { limited.close(); ready.close(); coordinator.close(); });
+  const response = await fetch(coordinator.url + '/backend-api/codex/responses', { method: 'POST', headers: { authorization: 'Bearer pool' }, body: '{"model":"gpt"}' });
+  assert.equal(response.status, 200); await response.text(); assert.equal(limited.sent.length, 1); assert.equal(ready.sent.length, 1);
+});
+
+test('an explicitly empty shared pool does not silently use a disabled native login', async t => {
+  const p = await proxyWith({ token: 'worker', credentials: mode => codexCredentials(AUTH, mode), resolve: async () => null }); t.after(p.close);
+  const response = await fetch(p.url + '/backend-api/codex/responses', { method: 'POST', headers: { authorization: 'Bearer worker' }, body: '{}' });
+  assert.equal(response.status, 401); assert.equal(p.sent.length, 0);
+});

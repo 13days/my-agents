@@ -15,13 +15,13 @@ function codexTurnInput({ prompt, images, context = '' }) {
 // Codex CLI engine adapter. Thread ids are created by the CLI ('discovered').
 // `sessions` answers which threads exist and which provider created them;
 // `capture` decides whether new threads go through the panel proxy.
-function createCodexEngine({ sessions, capture = () => null, env = process.env } = {}) {
+function createCodexEngine({ sessions, capture = () => null, accounts = false, env = process.env } = {}) {
   return {
     id: 'codex',
     meta: { label: 'Codex', short: 'Codex', emblem: '◎', color: '#10a37f', aliases: ['openai-codex'], upstreamHint: '可停止任务后检查网络或登录状态' },
     capabilities: {
       sessionId: 'discovered', steer: 'restart', streamingText: false, reasoning: true, permissions: 'none',
-      accounts: false, images: true, resources: ['skills', 'config'],
+      accounts: !!accounts, images: true, resources: ['skills', 'config'],
       usage: { cost: false }, search: false, wrapped: false, capture: true,
     },
     detect: () => resolveCodex({ env }),
@@ -29,11 +29,11 @@ function createCodexEngine({ sessions, capture = () => null, env = process.env }
     owns: id => !!sessions.pathFor(id),
     // `routeEnv` comes from a hub when this adapter runs inside a remote node: the hub's proxy
     // via this node's relay, authenticated with a relay token instead of a local Codex login.
-    open({ host, sessionId, cwd, model, routeEnv, emit, onIdle, onClosed }) {
+    open({ host, sessionId, cwd, model, accountId, routeEnv, emit, onIdle, onClosed }) {
       // Resumed threads keep their original provider: terminal threads (openai) cannot move to the panel and vice versa.
       const provider = sessionId ? sessions.provider(sessionId) : '';
       const relayed = routeEnv?.MY_AGENTS_CODEX_BASE && routeEnv[RELAY_TOKEN_ENV] ? routeEnv : null;
-      const proxy = relayed ? { config: codexRelayConfig(relayed.MY_AGENTS_CODEX_BASE) } : capture({ provider });
+      const proxy = relayed ? { config: codexRelayConfig(relayed.MY_AGENTS_CODEX_BASE, { accountId: relayed.MY_AGENTS_CODEX_ACCOUNT || accountId }) } : capture({ provider, accountId });
       const info = resolveCodex({ env });
       let stopping = false, closed = false;
       const close = () => {

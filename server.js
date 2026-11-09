@@ -1755,7 +1755,7 @@ const readCodexAuth = () => { try { return JSON.parse(fs.readFileSync(path.join(
 let accountPool;
 const codexProxy = createCodexProxy({
   record: recordExchange, reserveCapture: () => ({ id: captureStore.nextId(), startedAt: new Date().toISOString() }),
-  relay: { token: codexRelayToken, credentials: mode => codexCredentials(readCodexAuth(), mode), resolve: (mode, sessionId, excluded) => accountPool.resolveCodex(mode, sessionId, excluded) },
+  relay: { token: codexRelayToken, credentials: mode => codexCredentials(readCodexAuth(), mode), resolve: (mode, sessionId, excluded, forced) => accountPool.resolveCodex(mode, sessionId, excluded, forced), accepted: (route, id) => accountPool.accepted(route, id), rejected: (route, status, retryAfter) => accountPool.rejected(route, status, retryAfter) },
 });
 const upstreams = createUpstreams();
 upstreams.add({ id: 'anthropic', engine: 'claude', handle: accountRouter.handle }, { isDefault: true });
@@ -1778,6 +1778,11 @@ function codexAuthMode() {
   } catch { return ''; }
 }
 const codexProfile = require('./engines/codex/profile').createCodexProfile({ home: CODEX_HOME, port: PROXY_PORT, apiKey: () => codexAuthMode() === 'apikey', format: () => require('./engines/codex/profile').codexProfileFormat(resolveCodex().path) });
+function combinedAccountSessions() {
+  const claude = accountRouter.sessions(), codex = accountPool.codexStatus();
+  return { ...claude, codexRouting: { mode: codex.mode, selected: codex.selected }, accounts: [...claude.accounts.map(a => ({ ...a, engine: 'claude' })), ...codex.accounts.map(a => ({ ...a, engine: 'codex' }))], routes: { ...claude.routes, ...codex.routes }, items: [...claude.items, ...codexProxy.sessions()] };
+}
+function codexPoolModels() { try { const cache = JSON.parse(fs.readFileSync(path.join(CODEX_HOME, 'models_cache.json'), 'utf8')); return { models: (cache.models || []).map(item => ({ id: item.slug || item.id, name: item.display_name || item.slug || item.id })).filter(item => typeof item.id === 'string') }; } catch { return { models: [] }; } }
 function codexStatus() {
   const cli = resolveCodex();
   return { cli: cli.path, version: cli.version, candidates: cli.candidates, home: CODEX_HOME, authMode: codexAuthMode(), capture: codexCaptureEnabled(), proxyPort: Number(PROXY_PORT), profile: codexProfile.status() };
@@ -1791,9 +1796,9 @@ registry.register(createClaudeEngine({
   transcripts: { path: transcriptPathFor, messages: id => sessionMessages(id, { limit: 0 })?.messages || [] },
 }));
 registry.register(createCodexEngine({
-  sessions: codexSessions,
+  sessions: codexSessions, accounts: true,
   // Panel-started Codex runs go through the capture proxy unless disabled; resumed threads keep their provider.
-  capture: ({ provider }) => (provider ? provider === 'panel' : codexCaptureEnabled()) ? { config: require('./engines/codex/proxy').codexRelayConfig(`http://127.0.0.1:${PROXY_PORT}${codexAuthMode() === 'apikey' ? '/codex-openai/v1' : '/backend-api/codex'}`), env: { [RELAY_TOKEN_ENV]: codexRelayToken } } : null,
+  capture: ({ provider, accountId }) => (provider ? provider === 'panel' : codexCaptureEnabled()) ? { config: require('./engines/codex/proxy').codexRelayConfig(`http://127.0.0.1:${PROXY_PORT}${codexAuthMode() === 'apikey' ? '/codex-openai/v1' : '/backend-api/codex'}`, { accountId }), env: { [RELAY_TOKEN_ENV]: codexRelayToken } } : null,
 }));
 let cluster;
 const machineId = () => clusterConfig?.nodeId || 'local';
@@ -1877,14 +1882,14 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
     engine: id => sessionEngine(id),
     engines: () => registry.list().map(engine => ({ id: engine.id, ...engine.meta, capabilities: engine.capabilities })),
     engineInfo: (engine, node = 'local') => registry.adapter(engine, node)?.detect?.() || {},
-    models: ({ engine, sessionId, refresh }) => registry.get(engine)?.capabilities?.accounts ? accountRouter.models({ sessionId, refresh }) : Promise.resolve({ models: [] }),
+    models: ({ engine, sessionId, refresh }) => engine === 'codex' ? Promise.resolve(codexPoolModels()) : registry.get(engine)?.capabilities?.accounts ? accountRouter.models({ sessionId, refresh }) : Promise.resolve({ models: [] }),
     validModel: (engine, model, node = 'local') => !!(registry.adapter(engine, node) || registry.get(engine))?.validModel(model),
     currentModel: id => { const run = manager.get(id); return run && !run.job.closed ? run.job.meta.model || '' : ''; },
     nodes: () => executionMachines().filter(item => item.id !== machineId()).map(item => ({ ...item, connected: item.online, home: registry.node(item.id)?.host.homeDir() })),
-    routes: () => ({ ...accountRouter.status(), pins: accountRouter.sessions().routes }),
-    route: input => accountRouter.route(input),
-    resetRoutes: () => accountRouter.reset(),
-    pinRoute: (id, accountId) => accountRouter.setSessionRoute(id, accountId),
+    routes: engine => engine === 'codex' ? { ...accountPool.codexStatus(), engine: 'codex', pins: accountPool.codexStatus().routes } : ({ ...accountRouter.status(), pins: accountRouter.sessions().routes }),
+    route: (input, engine) => engine === 'codex' ? (accountPool.setRouting({ ...accountPool.codexStatus(), ...input }), accountPool.codexStatus()) : accountRouter.route(input),
+    resetRoutes: engine => engine === 'codex' ? accountPool.resetCodex() : accountRouter.reset(),
+    pinRoute: (id, accountId, engine) => engine === 'codex' ? accountPool.pinCodex(id, accountId) : accountRouter.setSessionRoute(id, accountId),
     codex: () => { const { version, authMode, capture } = codexStatus(); return { version, authMode, capture }; },
     setCodexCapture: capture => writePanelConfig({ ...readPanelConfig(), codexCapture: capture }),
     watch: (id, listener) => manager.watch(id, listener),
@@ -2108,9 +2113,9 @@ const server = http.createServer(async (req, res) => {
     if (type === 'proxy') {
       res.setHeader('Cache-Control', 'no-store');
       if (req.method === 'GET' && parts.length === 2) { await accountPool?.refresh(); return sendJSON(res, 200, { ...accountRouter.status(), pool: accountPool?.status() || [] }); }
-      if (req.method === 'GET' && parts[2] === 'sessions') return sendJSON(res, 200, accountRouter.sessions());
+      if (req.method === 'GET' && parts[2] === 'sessions') return sendJSON(res, 200, combinedAccountSessions());
       if (req.method === 'GET' && parts[2] === 'models' && parts.length === 3) {
-        try { return sendJSON(res, 200, await accountRouter.models({ accountId: url.searchParams.get('accountId') || '', sessionId: url.searchParams.get('sessionId') || '', refresh: url.searchParams.get('refresh') === '1' })); }
+        try { if (url.searchParams.get('engine') === 'codex') return sendJSON(res, 200, codexPoolModels()); return sendJSON(res, 200, await accountRouter.models({ accountId: url.searchParams.get('accountId') || '', sessionId: url.searchParams.get('sessionId') || '', refresh: url.searchParams.get('refresh') === '1' })); }
         catch (error) { return sendJSON(res, 400, { error: error.message }); }
       }
       if (!String(req.headers['content-type'] || '').startsWith('application/json')) return sendJSON(res, 415, { error: '需要 application/json' });
@@ -2119,7 +2124,7 @@ const server = http.createServer(async (req, res) => {
         if (req.method === 'POST' && parts[2] === 'import') return sendJSON(res, 200, accountRouter.importSettings());
         if (req.method === 'POST' && parts[2] === 'setup') return sendJSON(res, 200, accountRouter.setup());
         if (req.method === 'POST' && parts[2] === 'reset') return sendJSON(res, 200, accountRouter.reset());
-        if (req.method === 'PUT' && parts[2] === 'sessions' && parts.length === 4) return sendJSON(res, 200, accountRouter.setSessionRoute(decodeURIComponent(parts[3]), JSON.parse(await readBody(req)).accountId || ''));
+        if (req.method === 'PUT' && parts[2] === 'sessions' && parts.length === 4) { const body = JSON.parse(await readBody(req)); if (body.engine === 'codex') { accountPool.pinCodex(decodeURIComponent(parts[3]), body.accountId || ''); await accountPool.refresh(); return sendJSON(res, 200, combinedAccountSessions()); } accountRouter.setSessionRoute(decodeURIComponent(parts[3]), body.accountId || ''); return sendJSON(res, 200, combinedAccountSessions()); }
         return sendJSON(res, 405, { error: 'method not allowed' });
       } catch (e) { return sendJSON(res, 400, { error: e instanceof SyntaxError ? 'JSON 格式无效' : e.message }); }
     }
@@ -2127,9 +2132,20 @@ const server = http.createServer(async (req, res) => {
     if (type === 'codex') {
       res.setHeader('Cache-Control', 'no-store');
       if (req.method === 'GET' && parts.length === 2) return sendJSON(res, 200, codexStatus());
+      if (req.method === 'GET' && parts[2] === 'accounts') { await accountPool.refresh(); return sendJSON(res, 200, accountPool.codexStatus()); }
       if (req.method === 'GET' && parts[2] === 'stats') return sendJSON(res, 200, await codexStats.read());
       if (!String(req.headers['content-type'] || '').startsWith('application/json')) return sendJSON(res, 415, { error: '需要 application/json' });
       let body; try { body = JSON.parse(await readBody(req) || '{}'); } catch { return sendJSON(res, 400, { error: 'JSON 格式无效' }); }
+      if (parts[2] === 'accounts') {
+        try {
+          if (req.method === 'POST' && parts.length === 3) accountPool.importCodex(body.auth || readCodexAuth(), body.name);
+          else if (req.method === 'PUT' && parts[3] === 'routing') accountPool.setRouting(body);
+          else if (req.method === 'PUT' && parts[3]) accountPool.configureCodex(decodeURIComponent(parts[3]), body);
+          else if (req.method === 'DELETE' && parts[3]) accountPool.configureCodex(decodeURIComponent(parts[3]), { deleted: true });
+          else return sendJSON(res, 405, { error: 'method not allowed' });
+          await accountPool.refresh(); return sendJSON(res, 200, accountPool.codexStatus());
+        } catch (error) { return sendJSON(res, 400, { error: error.message }); }
+      }
       if (req.method === 'PUT' && parts.length === 2) {
         if (typeof body.capture === 'boolean') writePanelConfig({ ...readPanelConfig(), codexCapture: body.capture });
         resolveCodex({ refresh: true });
@@ -2517,12 +2533,12 @@ const runtimeRouting = {
       return env;
     },
     // Codex uses this machine's Codex login, which never leaves it (see engines/codex/proxy.js).
-    codex: Object.assign(async () => {
+    codex: Object.assign(async options => {
       await accountPool?.refresh();
       const mode = codexAuthMode() === 'apikey' ? 'api-key' : 'chatgpt';
       if (!accountPool) return null;
-      return { MY_AGENTS_CODEX_BASE: mode === 'api-key' ? '/codex-openai/v1' : '/backend-api/codex', [RELAY_TOKEN_ENV]: codexRelayToken };
-    }, { accounts: false }),
+      return { MY_AGENTS_CODEX_BASE: mode === 'api-key' ? '/codex-openai/v1' : '/backend-api/codex', [RELAY_TOKEN_ENV]: codexRelayToken, ...(options.accountId ? { MY_AGENTS_CODEX_ACCOUNT: options.accountId } : {}) };
+    }, { accounts: true }),
   },
 };
 const nodeHub = require('./node/hub').createNodeHub({ registry, token: auth?.token, dir: DATA_DIR, routing: runtimeRouting });

@@ -289,7 +289,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   // 路由切换完全在网关内完成，不经过模型：账号挂了也能救回来
   async function routesCard(msg, notice = '') {
     const binding = state.bindings[contextKey(msg)];
-    const status = panel.routes(), pinned = binding ? status.pins?.[binding.id] || '' : '';
+    const status = panel.routes(binding?.engine), pinned = binding ? status.pins?.[binding.id] || '' : '';
     const result = await send(msg, { card: cards.routes({ owner: msg.senderId, key: contextKey(msg), status, codex: panel.codex?.(), pinned, notice, now: now() }) });
     rememberCard(result, msg);
   }
@@ -301,23 +301,24 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     return matches.length === 1 ? matches[0] : enabled.filter(a => a.name.toLowerCase().includes(q)).length === 1 ? enabled.find(a => a.name.toLowerCase().includes(q)) : null;
   }
   async function applyRoute(msg, input) {
-    const status = panel.routes(), binding = state.bindings[contextKey(msg)];
-    if (input.reset) { panel.resetRoutes(); return '已清除所有账号的冷却状态。'; }
+    const binding = state.bindings[contextKey(msg)], status = panel.routes(binding?.engine);
+    if (input.reset) { panel.resetRoutes(binding?.engine); return '已清除所有账号的冷却状态。'; }
     if (typeof input.codexCapture === 'boolean') { panel.setCodexCapture(input.codexCapture); return input.codexCapture ? 'Codex 已改为经本地代理抓包，下一轮生效。' : 'Codex 已改为直连 OpenAI，下一轮生效。'; }
     if (input.pin !== undefined) {
       if (!binding) throw new Error('当前位置还没有绑定会话');
-      if (!catalog().can(engineOf(binding), 'accounts')) throw new Error(`${catalog().label(engineOf(binding))} 会话不走 Claude 账号路由`);
+      if (!catalog().can(engineOf(binding), 'accounts')) throw new Error(`${catalog().label(engineOf(binding))} 会话暂不支持账号路由`);
       const account = input.pin ? findAccount(status.accounts, input.pin) : null;
       if (input.pin && !account?.enabled) throw new Error('没有找到可用账号：' + input.pin);
-      panel.pinRoute(binding.id, account?.id || '');
+      panel.pinRoute(binding.id, account?.id || '', binding.engine);
       return account ? `当前会话已固定到「${account.name}」，下一条请求生效。` : '当前会话已改为跟随全局路由。';
     }
-    if (input.mode) { const result = panel.route({ mode: input.mode }); return `已切换为${cards.MODE_NAMES[input.mode]}。${result.restartRequired ? '（客户端环境变量有变化，外部终端的 Claude 需要重开）' : ''}`; }
+    if (input.mode) { const result = panel.route({ mode: input.mode }, binding?.engine); return `已切换为${cards.MODE_NAMES[input.mode]}。${result.restartRequired ? '（客户端环境变量有变化，外部终端的 Claude 需要重开）' : ''}`; }
     if (input.selected !== undefined) {
       const account = status.accounts.find(a => a.id === input.selected) || findAccount(status.accounts, String(input.selected));
       if (!account) throw new Error('没有找到该账号，发送 /route 查看序号');
-      if (!account.enabled) throw new Error(`「${account.name}」已停用，请在 Mac 面板启用`);
-      const result = panel.route({ mode: 'manual', selected: account.id });
+      if (!account.enabled) throw new Error(`「${account.name}」已停用，请在面板账号池启用`);
+      const result = panel.route({ mode: 'manual', selected: account.id }, binding?.engine);
+      if (binding?.engine === 'codex') panel.pinRoute(binding.id, account.id, binding.engine);
       return `已切到「${account.name}」（手动），下一条请求生效。${result.restartRequired ? '（客户端环境变量有变化，外部终端的 Claude 需要重开）' : ''}`;
     }
     return '';

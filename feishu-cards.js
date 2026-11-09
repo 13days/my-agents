@@ -206,12 +206,12 @@ function routes({ status, codex, pinned, notice = '', now = Date.now(), ...conte
   const { mode, selected, accounts = [] } = status;
   const elements = [];
   if (notice) elements.push(markdown(notice));
-  elements.push(muted(`Claude 路由：${MODE_NAMES[mode] || mode}${status.connection && !status.connection.connected ? ' · ⚠ Claude 尚未接入本地代理' : ''}`));
+  elements.push(muted(`${status.engine === 'codex' ? 'Codex 账号池' : 'Claude 路由'}：${MODE_NAMES[mode] || mode}${status.connection && !status.connection.connected ? ' · ⚠ Claude 尚未接入本地代理' : ''}`));
   accounts.forEach((account, index) => {
     const current = mode === 'manual' && account.id === selected;
     elements.push(row(`${index + 1}. ${escape(clip(account.name, 40))}${account.id === pinned ? '（本会话固定）' : ''}`, escape(accountState(account, selected, mode, now)), button(current ? '使用中' : '切到此账号', action(context, { action: 'route', selected: account.id }), current ? 'primary' : 'default')));
   });
-  if (!accounts.length) elements.push(markdown('还没有配置代理账号，Claude 请求直连 Anthropic。请在 Mac 面板「账号路由」添加。'));
+  if (!accounts.length) elements.push(markdown('还没有配置可用账号，请在面板「引擎与账号」添加或导入登录。'));
   const modes = [['failover', '自动故障转移'], ['round-robin', '轮询']].filter(([id]) => id !== mode).map(([id, label]) => button(label, action(context, { action: 'route', mode: id })));
   const controls = [...(accounts.length ? [...modes, button('清除冷却', action(context, { action: 'route', reset: true }))] : [])];
   if (codex) controls.push(button(codex.capture ? 'Codex 改直连' : 'Codex 改抓包', action(context, { action: 'route', codexCapture: !codex.capture })));

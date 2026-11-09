@@ -1025,3 +1025,13 @@ body[data-nav-collapsed="true"] .resource-engine-switch button { padding: 5px 1p
 
 .node-existing { margin:16px 0; padding:14px; border:1px solid var(--border); border-radius:10px; }
 .node-existing summary { color:var(--muted); cursor:pointer; font-size:12px; }
+
+.codex-pool-controls { display:flex; flex-wrap:wrap; align-items:end; gap:10px; margin:18px 0; }
+.codex-pool-controls label { display:flex; flex-direction:column; gap:8px; color:var(--muted); font-size:12px; }
+.codex-pool-controls select { padding:9px 12px; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:8px; font:inherit; }
+.codex-pool-account { display:flex; gap:18px; align-items:center; justify-content:space-between; padding:18px 0; border-top:1px solid var(--border); }
+.codex-pool-account h4 { margin:0 0 8px; }
+.codex-pool-account h4 small { margin-left:8px; color:var(--accent2); font-size:11px; font-weight:400; }
+.codex-pool-account p { margin:0 0 6px; }
+.codex-pool-account .node-actions { flex-wrap:wrap; justify-content:flex-end; }
+@media(max-width:900px) { .codex-pool-account { align-items:flex-start; flex-direction:column; } .codex-pool-account .node-actions { justify-content:flex-start; } }

@@ -150,3 +150,30 @@ test('local bridge dependencies are marked separately from portable replicated A
   f.disconnect(); await b.pool.refresh();
   const row = b.router.status().accounts[0]; assert.equal(row.enabled, false); assert.match(row.unavailableReason, /本地桥接服务/);
 });
+
+test('sequential subscription logins accumulate in one pool and sync to machines without those logins', async t => {
+  const f = fixture(t), one = auth('first-token'), two = { tokens: { account_id: 'second-subscriber', access_token: 'second-token', refresh_token: 'second-refresh' } };
+  const a = f.add('a', one), b = f.add('b'); await b.pool.refresh();
+  a.setAuth(two); await a.pool.refresh(); await b.pool.refresh();
+  assert.equal(a.pool.codexStatus().accounts.length, 2); assert.equal(b.pool.codexStatus().accounts.length, 2);
+  const firstId = accountId(one, 'chatgpt'); b.pool.configureCodex(firstId, { name: 'First subscription', enabled: false }); await a.pool.refresh();
+  assert.equal(a.pool.codexStatus().accounts.find(row => row.id === firstId).enabled, false);
+  b.pool.configureCodex(firstId, { deleted: true }); await a.pool.refresh();
+  a.setAuth(one); await a.pool.refresh(); assert.equal(a.pool.codexStatus().accounts.length, 1, 'an old native login cannot resurrect a removed pool account');
+  f.disconnect(); const restarted = createAccountPool(b.options); assert.equal(restarted.codexStatus().accounts.length, 1);
+});
+
+test('session stickiness survives pool growth, with explicit pins and shared quota cooldowns', async t => {
+  const f = fixture(t), a = f.add('a', auth()), b = f.add('b'); await b.pool.refresh();
+  const first = a.pool.codexRoute('chatgpt', 'saved-thread'); a.pool.accepted(first, 'saved-thread');
+  a.pool.importCodex({ tokens: { account_id: 'another-user', access_token: 'another-token' } }, 'Second');
+  const second = a.pool.codexStatus().accounts.find(row => row.id !== first.accountId);
+  assert.equal(a.pool.codexRoute('chatgpt', 'saved-thread').accountId, first.accountId);
+  a.pool.pinCodex('saved-thread', second.id); assert.equal(a.pool.codexRoute('chatgpt', 'saved-thread', [], first.accountId).accountId, second.id);
+  a.pool.pinCodex('saved-thread', ''); a.pool.setRouting({ mode: 'manual', selected: second.id });
+  assert.equal(a.pool.codexRoute('chatgpt', 'saved-thread', [], first.accountId).accountId, second.id);
+  a.pool.setRouting({ mode: 'round-robin', selected: '' }); a.pool.rejected(first, 429, '120'); await b.pool.refresh();
+  assert.equal(b.pool.codexRoute('chatgpt', 'new-thread').accountId, second.id);
+  assert.equal(b.pool.codexStatus().accounts.find(row => row.id === first.accountId).lastStatus, 429);
+  assert.ok(!JSON.stringify(b.pool.codexStatus()).includes('another-token'));
+});

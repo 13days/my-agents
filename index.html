@@ -2332,7 +2332,7 @@ async function loadChatModels(force = false) {
   const hint = $('#chat-model-hint');
   hint.textContent = rt('正在读取可用模型…', 'Loading available models…');
   try {
-    const data = await api('GET', `proxy/models?accountId=${encodeURIComponent(accountId)}&sessionId=${encodeURIComponent(chatView.sessionId || '')}${force ? '&refresh=1' : ''}`);
+    const data = await api('GET', `proxy/models?engine=${encodeURIComponent(chatView.engine)}&accountId=${encodeURIComponent(accountId)}&sessionId=${encodeURIComponent(chatView.sessionId || '')}${force ? '&refresh=1' : ''}`);
     if (!select.isConnected || select.modelsRequest !== request) return;
     select.innerHTML = chatModelOptions(data.models || [], select.value);
     syncChatPicker(select);
@@ -2418,7 +2418,7 @@ async function refreshRoutes() {
   if (state.type === 'sessions') paintRoutes();
 }
 function routeGlobalLabel() {
-  const r = routeInfo; if (!r) return rt('全局路由', 'Global route');
+  const r = chatView?.engine === 'codex' && routeInfo ? { ...routeInfo, ...(routeInfo.codexRouting || {}) } : routeInfo; if (!r) return rt('全局路由', 'Global route');
   const m = ROUTE_MODES[r.mode] || [r.mode, r.mode];
   const sel = r.mode === 'manual' && r.accounts.find(a => a.id === r.selected);
   return `${rt('跟随全局', 'Follow global')} · ${rt(m[0], m[1])}${sel ? ' · ' + sel.name : ''}`;
@@ -2431,7 +2431,7 @@ function routeOf(id) {
 }
 function routeOptions(current) {
   const r = routeInfo, opts = [`<option value="">${esc(routeGlobalLabel())}</option>`];
-  for (const a of (r ? r.accounts : []).filter(a => a.enabled || a.id === current)) opts.push(`<option value="${esc(a.id)}"${a.id === current ? ' selected' : ''}${a.enabled ? '' : ' disabled'}>📌 ${esc(a.name)}</option>`);
+  for (const a of (r ? r.accounts : []).filter(a => (!a.engine || a.engine === (chatView?.engine || 'claude')) && (a.enabled || a.id === current))) opts.push(`<option value="${esc(a.id)}"${a.id === current ? ' selected' : ''}${a.enabled ? '' : ' disabled'}>📌 ${esc(a.name)}</option>`);
   return opts.join('');
 }
 function paintRoutes() {
@@ -2729,7 +2729,7 @@ function renderChat() {
   $('#chat-route').onchange = async e => {
     const accountId = e.target.value;
     if (!v.sessionId) { v.accountId = accountId; loadChatModels(); return; }
-    try { routeInfo = await api('PUT', `proxy/sessions/${encodeURIComponent(v.sessionId)}`, { accountId }); paintRoutes(); toast(accountId ? rt('已为此会话固定代理账号，下一条请求生效', 'Pinned; applies from the next request') : rt('此会话已改为跟随全局路由', 'Now follows the global route')); }
+    try { routeInfo = await api('PUT', `proxy/sessions/${encodeURIComponent(v.sessionId)}`, { accountId, engine: v.engine }); paintRoutes(); toast(accountId ? rt('已为此会话固定代理账号，下一条请求生效', 'Pinned; applies from the next request') : rt('此会话已改为跟随全局路由', 'Now follows the global route')); }
     catch (err) { toast(err.message, false); refreshRoutes(); }
   };
   paintRoutes();
@@ -3326,6 +3326,30 @@ async function renderNodesPanel(editing = false) {
   await load();
 }
 let routeData;
+async function renderCodexAccountPool() {
+  let section = $('#codex-account-pool');
+  if (!section) { section = document.createElement('section'); section.id = 'codex-account-pool'; section.className = 'codex-panel chart'; ($('#render [data-infra-panel="accounts"]') || $('#render')).append(section); }
+  let data;
+  try { data = await api('GET', 'codex/accounts'); } catch (error) { section.innerHTML = `<p class="route-muted">${esc(error.message)}</p>`; return; }
+  if (!section.isConnected || state.type !== 'proxy') return;
+  section.innerHTML = `<div class="route-heading"><div><h3>${esc(rt('Codex 订阅账号池', 'Codex subscription pool'))} <small>(${data.accounts.length})</small></h3><p class="route-muted">${esc(rt('每个账号只需登录、导入一次，所有机器共享。添加新账号会保留池内旧账号；已有会话优先保持原账号。', 'Sign in and import each account once for all machines. New accounts do not replace existing entries; conversations keep their account when available.'))}</p></div><button class="btn" id="codex-pool-refresh">${esc(rt('刷新', 'Refresh'))}</button></div><div class="codex-pool-controls"><label>${esc(rt('新会话路由', 'New session routing'))}<select id="codex-pool-mode">${[['round-robin',rt('轮询分配', 'Round robin')],['failover',rt('自动故障转移', 'Failover')],['manual',rt('手动固定', 'Manual')]].map(([id, label]) => `<option value="${id}"${data.mode === id ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label><button class="btn primary" id="codex-pool-import">＋ ${esc(rt('导入当前机器的登录', 'Import this machine’s login'))}</button><button class="btn" id="codex-pool-file">${esc(rt('导入登录文件', 'Import login file'))}</button><input type="file" accept=".json,application/json" id="codex-pool-file-input" hidden></div><p id="codex-pool-notice" class="route-muted" role="status"></p><div class="codex-pool-list">${data.accounts.map(account => {
+    const cooling = account.cooldownUntil > Date.now(), label = !account.enabled ? rt('已停用','Disabled') : cooling ? rt('冷却中','Cooling down') : account.available ? rt('可用','Ready') : account.renewable ? rt('可自动刷新','Refreshable') : rt('需重新登录','Sign in needed');
+    return `<article class="codex-pool-account" data-codex-account="${esc(account.id)}"><div><h4>${esc(account.name)} ${data.selected === account.id ? `<small>${esc(rt('新会话首选','Preferred'))}</small>` : ''}</h4><p class="route-muted">${esc(label)} · ${esc(account.mode === 'chatgpt' ? rt('ChatGPT 订阅','ChatGPT subscription') : 'API Key')} · ${esc(rt('添加于','Added on'))} ${esc(account.origin)}</p><small class="route-muted">${esc(account.expiresAt ? rt('凭证有效期至 ','Credential expires ') + new Date(account.expiresAt).toLocaleString() : rt('已加密同步到集群','Replicated with encryption'))}${account.lastStatus ? ' · HTTP ' + account.lastStatus : ''}</small></div><div class="node-actions"><button class="btn" data-codex-action="use" ${account.enabled ? '' : 'disabled'}>${esc(rt('新会话用此账号','Use for new chats'))}</button><button class="btn" data-codex-action="rename">${esc(rt('改名','Rename'))}</button><button class="btn" data-codex-action="toggle">${esc(account.enabled ? rt('停用','Disable') : rt('启用','Enable'))}</button><button class="btn" data-codex-action="remove">${esc(rt('移除','Remove'))}</button></div></article>`;
+  }).join('') || `<p class="route-muted">${esc(rt('暂无账号。在任意一台机器完成 Codex 登录后导入即可，其余机器不必登录。','No accounts yet. Sign in to Codex on one machine and import its login; other machines need no login.'))}</p>`}</div>`;
+  const run = async fn => { try { await fn(); await renderCodexAccountPool(); } catch (error) { const notice = $('#codex-pool-notice'); if (notice) notice.textContent = error.message; } };
+  $('#codex-pool-refresh').onclick = renderCodexAccountPool;
+  $('#codex-pool-import').onclick = () => run(() => api('POST', 'codex/accounts', {}));
+  $('#codex-pool-file').onclick = () => $('#codex-pool-file-input').click();
+  $('#codex-pool-file-input').onchange = event => run(async () => { const file = event.target.files[0]; if (!file) return; if (file.size > 100000) throw new Error(rt('登录文件过大','Login file is too large')); let auth; try { auth = JSON.parse(await file.text()); } catch { throw new Error(rt('请选择有效的登录 JSON 文件','Choose a valid login JSON file')); } await api('POST', 'codex/accounts', { auth }); });
+  $('#codex-pool-mode').onchange = event => run(async () => { const mode = event.target.value, selected = data.selected || data.accounts.find(a => a.enabled)?.id || ''; await api('PUT', 'codex/accounts/routing', { mode, selected }); });
+  section.querySelectorAll('[data-codex-action]').forEach(button => button.onclick = () => run(async () => {
+    const id = button.closest('[data-codex-account]').dataset.codexAccount, account = data.accounts.find(a => a.id === id), action = button.dataset.codexAction;
+    if (action === 'use') await api('PUT', 'codex/accounts/routing', { mode: 'manual', selected: id });
+    if (action === 'toggle') await api('PUT', 'codex/accounts/' + encodeURIComponent(id), { enabled: !account.enabled });
+    if (action === 'rename') { const name = prompt(rt('账号名称','Account name'), account.name); if (name?.trim()) await api('PUT', 'codex/accounts/' + encodeURIComponent(id), { name: name.trim() }); }
+    if (action === 'remove' && confirm(rt('从共享池移除此账号？不会删除原机器的 CLI 登录文件。','Remove this shared account? Native CLI login files are preserved.'))) await api('DELETE', 'codex/accounts/' + encodeURIComponent(id), {});
+  }));
+}
 async function renderProxyTab() {
   stopInspectorPoll();
   try {
@@ -3392,6 +3416,7 @@ async function renderProxyTab() {
       const c = routeData.connection;
       let pool = $('#shared-account-pool'); if (!pool) { pool = document.createElement('div'); pool.id = 'shared-account-pool'; pool.className = 'shared-account-pool'; $('#route-connect').after(pool); }
       pool.innerHTML = `<strong>${esc(rt('集群共享账号池', 'Cluster account pool'))}</strong><p class="route-muted">${esc(rt('账号与登录已加密同步，本机可独立请求；来源机器离线后仍可使用。本地桥接类账号需要桥接服务在线。', 'Credentials are replicated with encryption and can be used locally after the source goes offline. Local bridge accounts still require their bridge service.'))}</p>${(routeData.pool || []).map(source => `<span>${esc(source.label)} · Claude ${source.claudeAccounts} · Codex ${source.codexModes?.length ? source.codexModes.join(' / ') : '0'} · ${esc(source.online === false ? rt('已同步，来源离线', 'Synced, source offline') : rt('已同步', 'Synced'))}</span>`).join('')}`;
+      renderCodexAccountPool();
       $('#route-count').textContent = `(${routeData.accounts.length})`;
       $('#route-mode').value = routeData.mode;
       $('#route-connect').innerHTML = c.connected

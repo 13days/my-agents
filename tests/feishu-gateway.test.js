@@ -1016,3 +1016,21 @@ for (const simple of [false, true]) test(`form turns keep real Feishu reply targ
  assert.ok(f.calls[0].gatewayContext.includes('"messageId":"'+sent.messageId+'"'));
  assert.ok(f.sent.slice(before).some(message=>message.options.replyTo===sent.messageId));
 });
+
+test('Codex IM routes operate on the shared subscription pool and pin a manual choice to the conversation', async t => {
+  const f = await fixture(t); await f.pair();
+  f.panel.engines = () => [{ id: 'claude', label: 'Claude Code', capabilities: { accounts: true } }, { id: 'codex', label: 'Codex', capabilities: { accounts: true } }];
+  f.rows[0].engine = 'codex';
+  const accountCalls = [], pins = [], accounts = [{ id: 'sub-a', name: 'Subscription A', enabled: true }, { id: 'sub-b', name: 'Subscription B', enabled: true }];
+  Object.assign(f.panel, {
+    routes: engine => { accountCalls.push(['view', engine]); return { engine, mode: 'round-robin', accounts, pins: {} }; },
+    route: (input, engine) => { accountCalls.push(['choose', engine, input]); return {}; },
+    pinRoute: (id, account, engine) => pins.push([id, account, engine]),
+  });
+  await f.gateway.receive(f.msg('/sessions')); await f.gateway.receive(f.msg('/switch 1'));
+  await f.gateway.receive(f.msg('/route')); assert.match(JSON.stringify(f.sent.at(-1).content), /Codex 账号池/);
+  await f.gateway.receive(f.msg('/route 2'));
+  assert.ok(accountCalls.some(call => call[0] === 'choose' && call[1] === 'codex' && call[2].selected === 'sub-b'));
+  assert.equal(pins.at(-1)[1], 'sub-b'); assert.equal(pins.at(-1)[2], 'codex');
+  await f.gateway.receive(f.msg('/route pin off')); assert.equal(pins.at(-1)[1], '');
+});

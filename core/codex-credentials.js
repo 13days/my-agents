@@ -3,7 +3,11 @@ const { codexCredentials } = require('../engines/codex/proxy');
 const fingerprint = value => crypto.createHash('sha256').update(String(value || '')).digest('hex');
 function tokenClaims(auth) { try { return JSON.parse(Buffer.from(auth.tokens.access_token.split('.')[1], 'base64url').toString()); } catch { return {}; } }
 function accountId(auth, mode) {
-  return mode === 'api-key' ? 'api:' + fingerprint(auth.OPENAI_API_KEY) : 'chatgpt:' + fingerprint(auth.tokens?.account_id || tokenClaims(auth).sub || auth.tokens?.access_token);
+  if (mode === 'api-key') return 'api:' + fingerprint(auth.OPENAI_API_KEY);
+  let subject = tokenClaims(auth).sub || '';
+  if (!subject) { try { subject = JSON.parse(Buffer.from(auth.tokens.id_token.split('.')[1], 'base64url')).sub || ''; } catch {} }
+  const identity = [auth.tokens?.account_id || '', subject].join(':');
+  return 'chatgpt:' + fingerprint(identity === ':' ? auth.tokens?.access_token : identity);
 }
 function issued(auth) { return Math.max(Date.parse(auth?.last_refresh || '') || 0, (tokenClaims(auth).iat || 0) * 1000); }
 function expiresSoon(auth, now = Date.now()) { const exp = tokenClaims(auth).exp; return typeof exp === 'number' && exp * 1000 < now + 5 * 60 * 1000; }

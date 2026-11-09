@@ -28,8 +28,8 @@ function codexProviderConfig(proxyPort, { apiKey = false } = {}) {
 // Same, for Codex on a remote node: `base` is the node's relay URL plus the route prefix,
 // the relay token comes from MY_AGENTS_CODEX_TOKEN and never Codex's own (absent) login.
 const RELAY_TOKEN_ENV = 'MY_AGENTS_CODEX_TOKEN';
-function codexRelayConfig(base) {
-  return [`model_providers.panel={name="my-agents",base_url="${base}",wire_api="responses",env_key="${RELAY_TOKEN_ENV}",requires_openai_auth=false}`, 'model_provider="panel"'];
+function codexRelayConfig(base, { accountId = '' } = {}) {
+  return [`model_providers.panel={name="my-agents",base_url="${base}",wire_api="responses",env_key="${RELAY_TOKEN_ENV}",requires_openai_auth=false${accountId ? ',http_headers={"x-my-agents-codex-account"=' + JSON.stringify(accountId) + '}' : ''}}`, 'model_provider="panel"'];
 }
 
 // Headers that replace the relay token, from this machine's ~/.codex/auth.json.
@@ -121,15 +121,16 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
       res.writeHead(route ? 403 : 404, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ error: route ? '模型代理不接受浏览器跨域请求' : 'not found' }));
     }
+    const forcedAccount = String(req.headers['x-my-agents-codex-account'] || '');
     let swap = null, delegatedURL = null, selectedAccount = null;
     const pooled = relay?.token && sameSecret(req.headers.authorization || '', `Bearer ${relay.token}`) && !req.headers['x-my-agents-local-account'];
     if (relay?.token && sameSecret(req.headers.authorization || '', `Bearer ${relay.token}`)) {
       if (!req.headers['x-my-agents-local-account'] && relay.resolve) {
-        const selected = await relay.resolve(route.mode, String(req.headers['session-id'] || req.headers['thread-id'] || '')).catch(() => null);
+        const selected = await relay.resolve(route.mode, String(req.headers['session-id'] || req.headers['thread-id'] || ''), [], forcedAccount).catch(() => null);
         selectedAccount = selected;
         if (selected?.url) { delegatedURL = selected.url; swap = { authorization: `Bearer ${selected.token}`, 'x-my-agents-local-account': '1' }; }
       }
-      if (!delegatedURL) swap = selectedAccount?.headers || relay.credentials(route.mode);
+      if (!delegatedURL) swap = selectedAccount?.headers || (!pooled || !relay.resolve ? relay.credentials(route.mode) : null);
       if (!swap) {
         res.writeHead(401, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: { message: '共享账号池未登录或没有可用凭证，请在任一节点登录一次并同步', type: 'invalid_request_error' } }));
@@ -150,6 +151,7 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
       const headers = {};
       for (const [k, v] of Object.entries(req.headers)) if (!HOP.has(k.toLowerCase())) headers[k] = v;
       delete headers['x-my-agents-local-account'];
+      delete headers['x-my-agents-codex-account'];
       if (swap) Object.assign(headers, swap);
       headers['accept-encoding'] = 'identity';
       if (body.length) headers['content-length'] = body.length;
@@ -159,25 +161,28 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
       let saved = false;
       const save = (code, responseBody, stream, encoding, incomplete) => {
         if (saved) return; saved = true;
-        try { record(req.url, code, Date.now() - started, body, responseBody, stream, req.headers, encoding || '', route.mode === 'chatgpt' ? 'codex-chatgpt' : 'codex-api', route.mode === 'chatgpt' ? 'Codex 订阅' : 'Codex API Key', { ...info, incomplete: !!incomplete }); } catch {}
+        try { record(req.url, code, Date.now() - started, body, responseBody, stream, req.headers, encoding || '', selectedAccount?.accountId || (route.mode === 'chatgpt' ? 'codex-chatgpt' : 'codex-api'), selectedAccount?.label || (route.mode === 'chatgpt' ? 'Codex 订阅' : 'Codex API Key'), { ...info, incomplete: !!incomplete }); } catch {}
       };
       upstream = (target.protocol === 'https:' ? request.https : request.http).request({ ...upstreamNetwork, timeout: 10 * 60 * 1000, protocol: target.protocol, hostname: target.hostname, port: target.port || undefined, path: target.pathname + target.search, method: req.method, headers }, response => {
-        if (pooled && selectedAccount && [401, 403].includes(response.statusCode) && relay.resolve) {
+        if (pooled && selectedAccount && [401, 403, 429, 500, 502, 503, 504].includes(response.statusCode) && relay.resolve) {
+          relay.rejected?.(selectedAccount, response.statusCode, response.headers['retry-after']);
           excluded.push(selectedAccount.id);
           const rejected = []; response.on('data', chunk => rejected.push(chunk));
           response.on('end', async () => {
             save(response.statusCode, Buffer.concat(rejected), false, response.headers['content-encoding'], false);
             if (res.destroyed) return;
-            const next = await relay.resolve(route.mode, sessionId, excluded).catch(() => null);
+            const next = await relay.resolve(route.mode, sessionId, excluded, forcedAccount).catch(() => null);
             if (res.destroyed) return;
-            if (!next) { res.writeHead(response.statusCode, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { message: '共享账号认证失败：所有可用来源均返回 401/403，请在账号来源机器重新登录或更新 Token' } })); }
+            if (!next) { res.writeHead(response.statusCode, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { message: '共享 Codex 账号暂不可用：可用账号已尝试，请检查账号状态、额度或稍后重试' } })); }
             selectedAccount = next; delegatedURL = next.url || null;
             delete headers['x-my-agents-local-account'];
+      delete headers['x-my-agents-codex-account'];
             Object.assign(headers, next.url ? { authorization: `Bearer ${next.token}`, 'x-my-agents-local-account': '1' } : next.headers || relay.credentials(route.mode));
             saved = false; send();
           });
           return;
         }
+        if (response.statusCode >= 200 && response.statusCode < 300) relay?.accepted?.(selectedAccount, sessionId);
         const captured = [];
         const out = {};
         for (const [k, v] of Object.entries(response.headers)) if (!HOP.has(k.toLowerCase()) || k.toLowerCase() === 'content-length') out[k] = v;
