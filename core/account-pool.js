@@ -178,7 +178,8 @@ function createAccountPool({ accounts, codex, identity, peers, dir, secret, fall
       codexModes: ['chatgpt', 'api-key'].filter(mode => codexEntries(mode).some(entry => entry.source === source.id && codexCredentials(entry.auth, mode))),
     }));
   }
+  for (const source of origins()) vault.importCodex(source.codex, { origin: source.id });
   observe(); install();
-  return { catalog, codexStatus, resetCodex: () => { for (const entry of Object.values(vault.codexAccounts())) vault.preference('codex-health:' + entry.id, { cooldownUntil: 0, lastStatus: 0 }); return codexStatus(); }, setRouting, pinCodex, importCodex, configureCodex, accepted, rejected, exchange, exchangeWire, refreshWire, exchangeKey: () => ({ publicKey: transport.publicKey }), refresh, refreshAtLeader, resolveCodex, codexRoute, status, vault };
+  return { catalog, egress: excluded => { const candidate = [...sources].filter(([id, source]) => !excluded.includes(id) && source.catalog?.codex?.token).sort(([a], [b]) => a.localeCompare(b))[0]; return candidate ? { id: candidate[0], url: candidate[1].url, token: candidate[1].catalog.codex.token } : null; }, codexStatus, resetCodex: () => { for (const entry of Object.values(vault.codexAccounts())) vault.preference('codex-health:' + entry.id, { cooldownUntil: 0, lastStatus: 0 }); return codexStatus(); }, setRouting, pinCodex, importCodex, configureCodex, accepted, rejected, exchange, exchangeWire, refreshWire, exchangeKey: () => ({ publicKey: transport.publicKey }), refresh, refreshAtLeader, resolveCodex, codexRoute, status, vault };
 }
 module.exports = { createAccountPool };

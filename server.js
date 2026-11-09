@@ -1755,7 +1755,7 @@ const readCodexAuth = () => { try { return JSON.parse(fs.readFileSync(path.join(
 let accountPool;
 const codexProxy = createCodexProxy({
   record: recordExchange, reserveCapture: () => ({ id: captureStore.nextId(), startedAt: new Date().toISOString() }),
-  relay: { token: codexRelayToken, credentials: mode => codexCredentials(readCodexAuth(), mode), resolve: (mode, sessionId, excluded, forced) => accountPool.resolveCodex(mode, sessionId, excluded, forced), accepted: (route, id) => accountPool.accepted(route, id), rejected: (route, status, retryAfter) => accountPool.rejected(route, status, retryAfter) },
+  relay: { token: codexRelayToken, credentials: mode => codexCredentials(readCodexAuth(), mode), resolve: (mode, sessionId, excluded, forced) => accountPool.resolveCodex(mode, sessionId, excluded, forced), egress: excluded => accountPool.egress(excluded), accepted: (route, id) => accountPool.accepted(route, id), rejected: (route, status, retryAfter) => accountPool.rejected(route, status, retryAfter) },
 });
 const upstreams = createUpstreams();
 upstreams.add({ id: 'anthropic', engine: 'claude', handle: accountRouter.handle }, { isDefault: true });
@@ -1778,6 +1778,21 @@ function codexAuthMode() {
   } catch { return ''; }
 }
 const codexProfile = require('./engines/codex/profile').createCodexProfile({ home: CODEX_HOME, port: PROXY_PORT, apiKey: () => codexAuthMode() === 'apikey', format: () => require('./engines/codex/profile').codexProfileFormat(resolveCodex().path) });
+async function checkCodexPool(accountId) {
+  const account = accountId && accountPool.codexStatus().accounts.find(row => row.id === accountId && row.enabled);
+  if (accountId && !account) throw new Error('Codex 账号不存在或已停用');
+  const apiKey = account?.mode === 'api-key', version = String(resolveCodex().version || '').match(/\d+\.\d+\.\d+/)?.[0] || '0.167.0';
+  return new Promise((resolve, reject) => {
+    const request = http.get({ hostname: '127.0.0.1', port: PROXY_PORT, path: apiKey ? '/codex-openai/v1/models' : '/backend-api/codex/models?client_version=' + version, headers: { authorization: 'Bearer ' + codexRelayToken, originator: 'codex_cli_rs', ...(accountId ? { 'x-my-agents-codex-account': accountId } : {}) } }, response => {
+      const chunks = []; let size = 0;
+      response.on('data', chunk => { size += chunk.length; if (size > 4 * 1024 * 1024) request.destroy(new Error('模型列表过大')); else chunks.push(chunk); });
+      response.on('error', () => reject(new Error('账号连接检查中断')));
+      response.on('end', () => { clearTimeout(timer); if (response.statusCode !== 200) return reject(new Error('账号检查失败：HTTP ' + response.statusCode)); let count = 0; try { const body = JSON.parse(Buffer.concat(chunks)); count = (body.models || body.data || []).length; } catch {} resolve({ ok: true, status: 200, models: count }); });
+    });
+    const timer = setTimeout(() => request.destroy(new Error('账号连接检查超时')), 45000); timer.unref?.();
+    request.on('error', () => { clearTimeout(timer); reject(new Error('账号连接检查失败，请检查集群出网状态')); });
+  });
+}
 function combinedAccountSessions() {
   const claude = accountRouter.sessions(), codex = accountPool.codexStatus();
   return { ...claude, codexRouting: { mode: codex.mode, selected: codex.selected }, accounts: [...claude.accounts.map(a => ({ ...a, engine: 'claude' })), ...codex.accounts.map(a => ({ ...a, engine: 'codex' }))], routes: { ...claude.routes, ...codex.routes }, items: [...claude.items, ...codexProxy.sessions()] };
@@ -2138,6 +2153,7 @@ const server = http.createServer(async (req, res) => {
       let body; try { body = JSON.parse(await readBody(req) || '{}'); } catch { return sendJSON(res, 400, { error: 'JSON 格式无效' }); }
       if (parts[2] === 'accounts') {
         try {
+          if (req.method === 'POST' && parts[3] === 'check') return sendJSON(res, 200, await checkCodexPool(body.accountId || ''));
           if (req.method === 'POST' && parts.length === 3) accountPool.importCodex(body.auth || readCodexAuth(), body.name);
           else if (req.method === 'PUT' && parts[3] === 'routing') accountPool.setRouting(body);
           else if (req.method === 'PUT' && parts[3]) accountPool.configureCodex(decodeURIComponent(parts[3]), body);

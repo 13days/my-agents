@@ -177,3 +177,11 @@ test('session stickiness survives pool growth, with explicit pins and shared quo
   assert.equal(b.pool.codexStatus().accounts.find(row => row.id === first.accountId).lastStatus, 429);
   assert.ok(!JSON.stringify(b.pool.codexStatus()).includes('another-token'));
 });
+
+test('an upgrade retains a cached subscription when the native login changed while the panel was stopped', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'my-agents-codex-retain-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const old = createAccountVault({ dir, secret: 'secret', nodeId: 'machine' }); old.observe({ label: 'machine', claude: [], codex: auth() });
+  const router = createRouter({ dir, port: 54321 });
+  const pool = createAccountPool({ dir, secret: 'secret', identity: () => ({ id: 'machine', label: 'machine' }), accounts: router, peers: () => [], codex: { read: () => ({ tokens: { account_id: 'next-subscription', access_token: 'next-access' } }), catalog: () => ({ modes: [] }) } });
+  assert.equal(pool.codexStatus().accounts.length, 2);
+});

@@ -140,3 +140,23 @@ test('an explicitly empty shared pool does not silently use a disabled native lo
   const response = await fetch(p.url + '/backend-api/codex/responses', { method: 'POST', headers: { authorization: 'Bearer worker' }, body: '{}' });
   assert.equal(response.status, 401); assert.equal(p.sent.length, 0);
 });
+
+test('a machine without provider network access uses another egress while keeping shared credentials', async t => {
+  const owner = await proxyWith({ token: 'egress-token', credentials: () => null, resolve: async () => ({ id: 'shared:v1', accountId: 'shared', headers: codexCredentials(AUTH, 'chatgpt') }) });
+  let attempts = 0;
+  const brokenHTTPS = { request() { attempts++; const req = new PassThrough(); req.setTimeout = () => {}; req.on('finish', () => req.emit('error', new Error('network unreachable'))); return req; } };
+  const proxy = createCodexProxy({ request: { http, https: brokenHTTPS }, relay: { token: 'local-token', credentials: () => null,
+    resolve: async () => ({ id: 'shared:v1', accountId: 'shared', headers: codexCredentials(AUTH, 'chatgpt') }),
+    egress: excluded => excluded.includes('online-egress') ? null : ({ id: 'online-egress', url: owner.url, token: 'egress-token' }),
+  } });
+  const server = http.createServer(proxy.handle); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); owner.close(); });
+  for (let i = 0; i < 2; i++) {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/backend-api/codex/responses`, { method: 'POST', headers: { authorization: 'Bearer local-token' }, body: '{}' });
+    assert.equal(response.status, 200); await response.text();
+  }
+  assert.equal(attempts, 1, 'later requests use the healthy egress during the network cooldown');
+  assert.equal(owner.sent.length, 2);
+  assert.equal(owner.sent[0].headers.authorization, 'Bearer mac-access');
+  assert.equal(owner.sent[0].headers['x-my-agents-egress-hop'], undefined, 'internal routing markers never reach the provider');
+});

@@ -115,12 +115,14 @@ function extractResponses(reqText, resText, isStream) {
 // `relay`: { token, credentials(mode) → headers | null } for remote-node Codex (see above).
 function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), request = { http, https }, relay = null } = {}) {
   const live = new Map();
+  let directUnavailableUntil = 0;
   async function handle(req, res) {
     const route = routeFor(req.url);
     if (!route || req.headers.origin) {
       res.writeHead(route ? 403 : 404, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ error: route ? '模型代理不接受浏览器跨域请求' : 'not found' }));
     }
+    const relayedEgress = req.headers['x-my-agents-egress-hop'] === '1';
     const forcedAccount = String(req.headers['x-my-agents-codex-account'] || '');
     let swap = null, delegatedURL = null, selectedAccount = null;
     const pooled = relay?.token && sameSecret(req.headers.authorization || '', `Bearer ${relay.token}`) && !req.headers['x-my-agents-local-account'];
@@ -152,18 +154,33 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
       for (const [k, v] of Object.entries(req.headers)) if (!HOP.has(k.toLowerCase())) headers[k] = v;
       delete headers['x-my-agents-local-account'];
       delete headers['x-my-agents-codex-account'];
+      delete headers['x-my-agents-egress-hop'];
       if (swap) Object.assign(headers, swap);
       headers['accept-encoding'] = 'identity';
       if (body.length) headers['content-length'] = body.length;
-      const excluded = [];
+      const excluded = [], egressTried = []; let attemptCount = 0;
+      const useEgress = async () => {
+        if (!pooled || relayedEgress || !relay.egress || !selectedAccount?.accountId || res.destroyed) return false;
+        const next = await relay.egress(egressTried); if (!next || res.destroyed) return false;
+        egressTried.push(next.id); delegatedURL = next.url;
+        headers.authorization = `Bearer ${next.token}`;
+        delete headers['x-my-agents-local-account'];
+        headers['x-my-agents-codex-account'] = selectedAccount.accountId; headers['x-my-agents-egress-hop'] = '1';
+        return true;
+      };
       const send = () => {
       const target = new URL(delegatedURL ? delegatedURL + req.url : route.origin + req.url.slice(route.strip.length));
-      let saved = false;
+      const attemptInfo = attemptCount++ ? { ...reserveCapture(), sessionId, method: req.method, requestOrder: info.id, routing: { ...info.routing, attempt: attemptCount } } : info;
+      let saved = false, connectTimer;
       const save = (code, responseBody, stream, encoding, incomplete) => {
         if (saved) return; saved = true;
-        try { record(req.url, code, Date.now() - started, body, responseBody, stream, req.headers, encoding || '', selectedAccount?.accountId || (route.mode === 'chatgpt' ? 'codex-chatgpt' : 'codex-api'), selectedAccount?.label || (route.mode === 'chatgpt' ? 'Codex 订阅' : 'Codex API Key'), { ...info, incomplete: !!incomplete }); } catch {}
+        try { record(req.url, code, Date.now() - started, body, responseBody, stream, req.headers, encoding || '', selectedAccount?.accountId || (route.mode === 'chatgpt' ? 'codex-chatgpt' : 'codex-api'), selectedAccount?.label || (route.mode === 'chatgpt' ? 'Codex 订阅' : 'Codex API Key'), { ...attemptInfo, incomplete: !!incomplete }); } catch {}
       };
       upstream = (target.protocol === 'https:' ? request.https : request.http).request({ ...upstreamNetwork, timeout: 10 * 60 * 1000, protocol: target.protocol, hostname: target.hostname, port: target.port || undefined, path: target.pathname + target.search, method: req.method, headers }, response => {
+        clearTimeout(connectTimer);
+        if (delegatedURL && pooled && !relayedEgress && response.statusCode === 502 && egressTried.length) {
+          response.resume(); response.on('end', async () => { if (await useEgress()) send(); else if (!res.destroyed) { res.writeHead(502, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: '可用出网节点均连接失败，请检查网络' })); } }); return;
+        }
         if (pooled && selectedAccount && [401, 403, 429, 500, 502, 503, 504].includes(response.statusCode) && relay.resolve) {
           relay.rejected?.(selectedAccount, response.statusCode, response.headers['retry-after']);
           excluded.push(selectedAccount.id);
@@ -177,12 +194,13 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
             selectedAccount = next; delegatedURL = next.url || null;
             delete headers['x-my-agents-local-account'];
       delete headers['x-my-agents-codex-account'];
+      delete headers['x-my-agents-egress-hop'];
             Object.assign(headers, next.url ? { authorization: `Bearer ${next.token}`, 'x-my-agents-local-account': '1' } : next.headers || relay.credentials(route.mode));
-            saved = false; send();
+            saved = false; if (!delegatedURL && directUnavailableUntil > Date.now()) await useEgress(); send();
           });
           return;
         }
-        if (response.statusCode >= 200 && response.statusCode < 300) relay?.accepted?.(selectedAccount, sessionId);
+        if (response.statusCode >= 200 && response.statusCode < 300) relay?.accepted?.(relayedEgress && selectedAccount ? { ...selectedAccount, explicit: false } : selectedAccount, sessionId);
         const captured = [];
         const out = {};
         for (const [k, v] of Object.entries(response.headers)) if (!HOP.has(k.toLowerCase()) || k.toLowerCase() === 'content-length') out[k] = v;
@@ -194,13 +212,18 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
         response.on('error', () => res.destroy());
       });
       upstream.setTimeout(10 * 60 * 1000, () => upstream.destroy(new Error('upstream timeout')));
-      upstream.on('error', e => {
+      connectTimer = setTimeout(() => upstream.destroy(new Error('upstream connect timeout')), 12000); connectTimer.unref?.();
+      upstream.on('socket', socket => { const event = target.protocol === 'https:' ? 'secureConnect' : 'connect'; if (!socket.connecting && (target.protocol !== 'https:' || socket.encrypted && !socket.secureConnecting)) clearTimeout(connectTimer); else socket.once(event, () => clearTimeout(connectTimer)); });
+      upstream.on('error', async e => {
+        clearTimeout(connectTimer);
         save(502, Buffer.from(JSON.stringify({ error: e.message })), false, '', true);
+        if (!res.headersSent && !delegatedURL) directUnavailableUntil = Date.now() + 5 * 60 * 1000;
+        if (!res.headersSent && await useEgress()) return send();
         if (!res.headersSent) { res.writeHead(502, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: '上游连接失败或超时' })); } else res.destroy();
       });
       upstream.end(body);
       };
-      send();
+      if (directUnavailableUntil > Date.now()) useEgress().then(() => { if (!res.destroyed) send(); }); else send();
     });
     res.on('close', () => { if (!res.writableFinished) upstream?.destroy(); });
   }
