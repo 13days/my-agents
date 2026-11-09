@@ -13,6 +13,7 @@ Renaming or moving the source directory does not move or delete user data. Never
 | Shared agent skills | `AGENTS_HOME`, default `~/.agents` |
 | Captured requests | `CLAUDE_DIR/panel-captures.jsonl` |
 | Proxy accounts, preferences and session labels | `CLAUDE_DIR/panel-proxy.json`, `panel-config.json`, `panel-sessions.json` |
+| Replicated account credentials | `DATA_DIR/panel-account-vault.enc`; keep `panel-cluster.json` (or standalone `panel-token`) to decrypt it |
 | Feishu credentials, bindings, messages and contact labels | `CLAUDE_DIR/panel-feishu*.json*` |
 
 The neutral `panel-*` filenames, browser preference keys and Codex provider ID `panel` intentionally remain stable. Existing sessions require the original provider identity to resume. Native `CLAUDE.md`, `AGENTS.md`, `.claude` and `.codex` are engine conventions and retain their names. Exports use `my-agents-bundle`; old `claude-panel-bundle` imports remain accepted. Old gateway context markers are filtered from both engines' histories.

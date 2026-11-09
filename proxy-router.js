@@ -402,6 +402,6 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
     if (!accountsOf().some(a => a.id === selected && a.enabled)) selected = '';
     return save({ mode, selected, accounts: accountsOf().map(({ token, env, delegateAccount, ...a }) => a) });
   }
-  return { sharedCatalog: () => ({ token: config.localToken, accounts: config.accounts.filter(a => a.enabled && a.authType !== 'passthrough').map(({ id, name, modelMap }) => ({ id, name, modelMap })) }), setShared: accounts => { shared = accounts; }, status, save, route, importSettings, setup, handle, clientEnv, modelEnvForSession, models, sessions, setSessionRoute, reset: () => { health.clear(); return status(); } };
+  return { exportAccounts: () => JSON.parse(JSON.stringify(config.accounts)), sharedCatalog: () => ({ token: config.localToken, accounts: config.accounts.filter(a => a.enabled && a.authType !== 'passthrough').map(({ id, name, modelMap }) => ({ id, name, modelMap })) }), setShared: accounts => { shared = accounts; }, status, save, route, importSettings, setup, handle, clientEnv, modelEnvForSession, models, sessions, setSessionRoute, reset: () => { health.clear(); return status(); } };
 }
 module.exports = { createRouter, parseEnvInput };

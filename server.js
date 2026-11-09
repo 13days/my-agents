@@ -1755,7 +1755,7 @@ const readCodexAuth = () => { try { return JSON.parse(fs.readFileSync(path.join(
 let accountPool;
 const codexProxy = createCodexProxy({
   record: recordExchange, reserveCapture: () => ({ id: captureStore.nextId(), startedAt: new Date().toISOString() }),
-  relay: { token: codexRelayToken, credentials: mode => codexCredentials(readCodexAuth(), mode), resolve: async (mode, sessionId, excluded) => { await accountPool?.refresh(); return accountPool?.codexRoute(mode, sessionId, excluded); } },
+  relay: { token: codexRelayToken, credentials: mode => codexCredentials(readCodexAuth(), mode), resolve: (mode, sessionId, excluded) => accountPool.resolveCodex(mode, sessionId, excluded) },
 });
 const upstreams = createUpstreams();
 upstreams.add({ id: 'anthropic', engine: 'claude', handle: accountRouter.handle }, { isDefault: true });
@@ -2520,7 +2520,7 @@ const runtimeRouting = {
     codex: Object.assign(async () => {
       await accountPool?.refresh();
       const mode = codexAuthMode() === 'apikey' ? 'api-key' : 'chatgpt';
-      if (!accountPool?.codexRoute(mode)) return null;
+      if (!accountPool) return null;
       return { MY_AGENTS_CODEX_BASE: mode === 'api-key' ? '/codex-openai/v1' : '/backend-api/codex', [RELAY_TOKEN_ENV]: codexRelayToken };
     }, { accounts: false }),
   },
@@ -2538,14 +2538,27 @@ async function attachClusterRuntime(id, peer) {
   try { return await pending; } finally { clusterRuntimePending.delete(id); }
 }
 let clusterNetwork = null;
-accountPool = require('./core/account-pool').createAccountPool({ accounts: accountRouter,
-  identity: () => ({ id: machineId(), label: clusterConfig?.members?.find(item => item.id === machineId())?.label || '本机' }),
-  codex: { catalog: () => ({ token: codexRelayToken, modes: ['chatgpt', 'api-key'].filter(mode => codexCredentials(readCodexAuth(), mode)) }) },
-  peers: () => (clusterNetwork?.connected() || []).map(id => ({ id, label: clusterConfig.members.find(item => item.id === id)?.label || id, peer: clusterNetwork.peer(id) })),
-});
-const poolTimer = setInterval(() => accountPool.refresh().catch(error => console.warn('账号池刷新失败：', error.message)), 5000); poolTimer.unref();
 let clusterConfig = null;
 try { clusterConfig = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'panel-cluster.json'), 'utf8')); } catch {}
+if (!HISTORY_WORKER) accountPool = require('./core/account-pool').createAccountPool({ accounts: accountRouter, dir: DATA_DIR, secret: clusterConfig?.token || auth.token, fallbackSecret: auth.token,
+  identity: () => ({ id: machineId(), label: clusterConfig?.members?.find(item => item.id === machineId())?.label || '本机' }),
+  codex: { read: readCodexAuth, catalog: () => ({ token: codexRelayToken, modes: ['chatgpt', 'api-key'].filter(mode => codexCredentials(readCodexAuth(), mode)) }),
+    updated: (previous, fresh) => {
+      const current = readCodexAuth();
+      if (!current?.tokens?.refresh_token || current.tokens.refresh_token !== previous.tokens?.refresh_token) return;
+      const file = path.join(CODEX_HOME, 'auth.json'), temporary = file + '.' + crypto.randomUUID() + '.tmp';
+      try { fs.writeFileSync(temporary, JSON.stringify(fresh, null, 2) + '\n', { mode: 0o600, flag: 'wx' }); fs.renameSync(temporary, file); }
+      finally { fs.rmSync(temporary, { force: true }); }
+    } },
+  peers: () => (clusterNetwork?.connected() || []).filter(id => !clusterConfig.members.find(item => item.id === id)?.witness).map(id => ({ id, label: clusterConfig.members.find(item => item.id === id)?.label || id, peer: clusterNetwork.peer(id) })),
+  coordination: {
+    canRefresh: () => !clusterConfig?.clusterId || !!cluster?.canStart(),
+    required: () => clusterConfig?.members ? Math.floor(clusterConfig.members.filter(item => !item.witness).length / 2) + 1 : 1,
+    refresh: input => { const leader = cluster?.status().leader, peer = leader && clusterNetwork?.peer(leader); if (!peer) throw new Error('当前没有可用的账号刷新主节点'); return peer.call('accounts.refresh', input, { timeout: 60000 }); },
+  },
+});
+const poolTimer = HISTORY_WORKER ? null : setInterval(() => accountPool.refresh().catch(() => console.warn('共享账号池同步失败，请检查集群连接')), 5000); poolTimer?.unref();
+
 if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token && Array.isArray(clusterConfig.members)) {
   clusterNetwork = require('./node/cluster-peer').createClusterNetwork({ token: clusterConfig.token, selfId: clusterConfig.nodeId, members: clusterConfig.members, onPeer: async (id, peer) => {
     const self = clusterConfig.members.find(item => item.id === clusterConfig.nodeId);
@@ -2556,6 +2569,9 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
   } });
   cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: feishuGateway, canTransfer: () => manager.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });
   clusterNetwork.handle('accounts.catalog', () => accountPool.catalog());
+  clusterNetwork.handle('accounts.key', () => accountPool.exchangeKey());
+  clusterNetwork.handle('accounts.exchange', (source, packet) => { if (clusterConfig.members.find(item => item.id === source)?.witness) throw new Error('见证节点不参与凭证同步'); return accountPool.exchangeWire(packet); });
+  clusterNetwork.handle('accounts.refresh', (_, input) => accountPool.refreshWire(input));
   clusterNetwork.handle('workspaces.save', async (_, input) => { if (!cluster.canStart()) throw new Error('当前节点没有主节点租约，请刷新后重试'); return workspaceStore.save(input); });
   clusterNetwork.handle('conversations.put', (_, record) => { if (!cluster.canStart()) throw new Error('当前节点没有共享状态写入租约'); conversations.merge(record); return { ok: true }; });
   clusterNetwork.handle('gateway.invoke', async (_, { method, input }) => {

@@ -38,7 +38,7 @@ test('the relay token is swapped for this machine\'s Codex login; other callers 
   assert.equal((await post('/backend-api/codex/responses', 'Bearer relay-secret')).status, 200);
   assert.equal(p.sent[0].headers.authorization, 'Bearer mac-access');
   assert.equal(p.sent[0].headers['chatgpt-account-id'], 'acct-1');
-  assert.ok(!JSON.stringify(p.sent[0].headers).includes('never-sent'), 'the refresh token never leaves auth.json');
+  assert.ok(!JSON.stringify(p.sent[0].headers).includes('never-sent'), 'the refresh token is never sent to a model endpoint');
 
   assert.equal((await post('/codex-openai/v1/responses', 'Bearer relay-secret')).status, 200);
   assert.equal(p.sent[1].headers.authorization, 'Bearer sk-mac');
@@ -115,4 +115,13 @@ test('expired CLI access tokens are excluded from account sharing without changi
   auth.tokens.access_token = jwt(Math.floor(Date.now() / 1000) + 3600);
   assert.ok(codexCredentials(auth, 'chatgpt').authorization);
   assert.equal(auth.tokens.refresh_token, 'owner-only');
+});
+
+test('a node without its own Codex login uses replicated credentials directly', async t => {
+  const p = await proxyWith({ token: 'worker-token', credentials: () => null, resolve: async () => ({ id: 'shared-account', headers: { authorization: 'Bearer replicated-access', 'chatgpt-account-id': 'same-shared-account' } }) });
+  t.after(p.close);
+  const response = await fetch(p.url + '/backend-api/codex/responses', { method: 'POST', headers: { authorization: 'Bearer worker-token' }, body: '{"model":"gpt"}' });
+  assert.equal(response.status, 200); await response.text();
+  assert.equal(p.sent[0].headers.authorization, 'Bearer replicated-access');
+  assert.equal(p.sent[0].headers['chatgpt-account-id'], 'same-shared-account');
 });

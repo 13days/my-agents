@@ -129,10 +129,10 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
         selectedAccount = selected;
         if (selected?.url) { delegatedURL = selected.url; swap = { authorization: `Bearer ${selected.token}`, 'x-my-agents-local-account': '1' }; }
       }
-      if (!delegatedURL) swap = relay.credentials(route.mode);
+      if (!delegatedURL) swap = selectedAccount?.headers || relay.credentials(route.mode);
       if (!swap) {
         res.writeHead(401, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ error: { message: '面板所在机器上的 Codex 未登录，无法代远端节点请求', type: 'invalid_request_error' } }));
+        return res.end(JSON.stringify({ error: { message: '共享账号池未登录或没有可用凭证，请在任一节点登录一次并同步', type: 'invalid_request_error' } }));
       }
     }
     const info = reserveCapture();
@@ -173,7 +173,7 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
             if (!next) { res.writeHead(response.statusCode, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { message: '共享账号认证失败：所有可用来源均返回 401/403，请在账号来源机器重新登录或更新 Token' } })); }
             selectedAccount = next; delegatedURL = next.url || null;
             delete headers['x-my-agents-local-account'];
-            Object.assign(headers, next.url ? { authorization: `Bearer ${next.token}`, 'x-my-agents-local-account': '1' } : relay.credentials(route.mode));
+            Object.assign(headers, next.url ? { authorization: `Bearer ${next.token}`, 'x-my-agents-local-account': '1' } : next.headers || relay.credentials(route.mode));
             saved = false; send();
           });
           return;
