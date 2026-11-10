@@ -808,7 +808,7 @@ function listSessions() {
     map.set(id, { id, title: latest.title || head.title || id.slice(0, 8), firstTitle: head.title, promptAt: latest.at, project: head.cwd, count: 0, first: mt, last: mt });
   }
   for (const s of codexSessions.list()) {
-    if (!map.has(s.id)) map.set(s.id, { id: s.id, engine: 'codex', title: s.title, firstTitle: s.firstTitle, promptAt: s.promptAt, project: s.project, count: s.count, first: s.first, last: s.last });
+    if (!map.has(s.id)) map.set(s.id, { id: s.id, engine: 'codex', native: true, title: s.title, firstTitle: s.firstTitle, promptAt: s.promptAt, project: s.project, count: s.count, first: s.first, last: s.last });
   }
   // A panel session exists as soon as its first input is accepted, even while
   // the CLI is still starting and has not created its transcript yet.
@@ -817,9 +817,11 @@ function listSessions() {
   }
   return [...map.values()].filter(s => !sessionMetadata[s.id]?.deleted).map(s => {
     const meta = sessionMetadata[s.id] || {}, manual = isManualTitle(meta, s.firstTitle);
+    const labels = idToFile.has(s.id) ? require('./core/transcript-labels').transcriptLabels(idToFile.get(s.id)) : {};
+    const native = idToFile.has(s.id) || s.native === true;
     const pendingInput = manager.busy(s.id);
     const automatic = meta.autoTitle && (pendingInput || meta.autoTitleAt >= (s.promptAt || 0)) ? meta.autoTitle : s.promptAt ? s.title : meta.title || s.title;
-    return { ...s, ...(meta.worktree ? { worktree: meta.worktree } : {}), ...(meta.node ? { node: meta.node } : {}), machineId: meta.machineId || (meta.node && meta.node !== 'local' ? meta.node : machineId()), engine: s.engine || 'claude', title: manual ? meta.title : automatic || meta.title || s.id, titleSource: manual ? 'manual' : 'auto', last: Math.max(s.last, meta.lastAt || 0) };
+    return { ...s, ...labels, native, latestPrompt: s.title, project: labels.cwd || s.project, running: manager.busy(s.id) || !!accountRouter.sessions().items.find(item => item.id === s.id)?.running, ...(meta.worktree ? { worktree: meta.worktree } : {}), ...(meta.node ? { node: meta.node } : {}), machineId: meta.machineId || (meta.node && meta.node !== 'local' ? meta.node : machineId()), engine: s.engine || 'claude', title: manual ? meta.title : labels.sessionName || automatic || meta.title || s.id, titleSource: manual ? 'manual' : 'auto', last: Math.max(s.last, meta.lastAt || 0) };
   }).sort((a, b) => b.last - a.last);
 }
 
@@ -1856,15 +1858,20 @@ const executionMachines = () => {
 };
 const workspaceStore = require('./core/workspaces').createWorkspaces({ dir: DATA_DIR, selfId: machineId, machines: executionMachines, hostFor: id => registry.node(id === machineId() ? 'local' : id)?.host, leaderId: () => cluster?.status().leader || '' });
 const conversations = require('./core/conversations').createConversations({ dir: DATA_DIR, publish: record => { const leader = cluster?.status().leader; if (leader && leader !== machineId()) return clusterNetwork?.call(leader, 'conversations.put', record, { timeout: 5000 }); } });
+const sessionDirectory = require('./core/session-directory').createSessionDirectory({
+  local: listSessions, selfId: machineId,
+  peers: () => registry.nodes().filter(node => node.id !== 'local' && node.peer).map(node => ({ id: node.id, peer: clusterNetwork?.peer(node.id) || node.peer })),
+});
 async function conversationHistory(id, sourceMachine) {
   const saved = conversations.get(id), meta = sessionStore.read()[id] || saved || {};
-  const source = sourceMachine || meta.machineId || meta.node || machineId();
+  const source = sourceMachine || meta.machineId || meta.node || sessionDirectory.find(id)?.machineId || machineId();
   let result;
   if (source === machineId() || source === 'local') result = sessionMessages(id);
   else {
     const peer = clusterNetwork?.peer(source) || registry.node(source)?.peer;
     if (peer) { try { result = await peer.call('history.messages', { id }, { timeout: 5000 }); } catch {} }
   }
+  if (result && !result.checkpoint) { const item = sessionDirectory.find(id); if (item?.machineId === source && item.project) result = { ...result, project: item.project }; }
   return result || (saved ? { id, project: saved.project, engine: saved.engine, machineId: saved.machineId, messages: saved.messages || [], checkpoint: true } : null);
 }
 
@@ -1935,7 +1942,8 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
     validateExecution: ({ machineId: id, engine }) => { const adapter = registry.adapter(engine, id === machineId() ? 'local' : id); if (!adapter || !adapter.detect?.()?.path) throw new Error('所选机器未安装或未检测到该引擎，请安装 CLI 后重试'); },
     sessionExists: async binding => { const node = binding.machineId === machineId() ? 'local' : binding.machineId || binding.node || 'local'; try { return await registry.adapter(binding.engine, node)?.owns(binding.id); } catch { return false; } },
     resolveSession: resolveSessionReference,
-    sessions: listSessions,
+    sessions: () => sessionDirectory.snapshot(),
+    sessionCatalog: options => sessionDirectory.list(options),
     projects: knownProjects,
     nodeProjects: id => registry.node(id)?.info.projects || [],
     cluster: { status: () => cluster?.status() || { enabled: false, nodeId: 'local', role: 'leader', leader: 'local' }, transfer: target => cluster?.transfer(target) || Promise.reject(new Error('未配置集群')) },
@@ -2448,15 +2456,17 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'GET' && parts.length === 2) {
         res.setHeader('Cache-Control', 'no-store');
-        const items = listSessions().map(s => ({
+        const directory = await sessionDirectory.list({ query: url.searchParams.get('q') || '' });
+        const items = directory.sessions.map(s => ({
           name: (s.title || s.id).slice(0, 80),
           key: s.id,
-          description: `${path.basename(s.project || '') || '?'} · ${s.count ? s.count + ' × · ' : ''}${s.last ? new Date(s.last).toISOString().slice(0, 10) : '?'}`,
+          description: `${s.machineId} · ${path.basename(s.repository || s.project || '') || '?'}${s.gitBranch ? ' · ' + s.gitBranch : ''}${s.workspaceLabel ? ' · ' + s.workspaceLabel : ''} · ${s.last ? new Date(s.last).toISOString().slice(0, 16).replace('T',' ') : '?'}${s.latestPrompt ? ' · ' + s.latestPrompt.slice(0, 100) : ''}`,
+          machineId: s.machineId, cwd: s.project, running: s.running, gitBranch: s.gitBranch, sessionName: s.sessionName,
           origin: 'user',
           titleSource: s.titleSource,
           engine: s.engine,
         }));
-        return sendJSON(res, 200, { items });
+        return sendJSON(res, 200, { items, unavailable: directory.unavailable });
       }
       if (req.method === 'GET' && parts.length === 4 && parts[3] === 'messages') {
         res.setHeader('Cache-Control', 'no-store');
@@ -2466,9 +2476,9 @@ const server = http.createServer(async (req, res) => {
         let revision = '';
         if (fp) { const st = fs.statSync(fp); revision = `${st.mtimeMs}:${st.size}`; }
         if (revision && url.searchParams.get('since') === revision) return sendJSON(res, 200, { unchanged: true, revision });
-        const remote = sessionStore.read()[id] || conversations.get(id);
+        const remote = sessionStore.read()[id] || conversations.get(id) || sessionDirectory.find(id);
         const r = remote?.machineId && remote.machineId !== machineId() ? await conversationHistory(id, remote.machineId) : sessionMessages(id, { before: url.searchParams.has('before') ? url.searchParams.get('before') : undefined, limit: Math.max(1, Number(url.searchParams.get('limit')) || 80) });
-        return r ? sendJSON(res, 200, { ...r, machineId: remote?.machineId || remote?.node || machineId(), worktree: sessionStore.read()[id]?.worktree || null, revision }) : sendJSON(res, 404, { error: T(lang, 'errNotFound') });
+        return r ? sendJSON(res, 200, { ...r, project: sessionDirectory.find(id)?.project || r.project, machineId: remote?.machineId || remote?.node || machineId(), worktree: sessionStore.read()[id]?.worktree || null, revision }) : sendJSON(res, 404, { error: T(lang, 'errNotFound') });
       }
       if (req.method === 'GET' && parts.length === 4 && parts[3] === 'replay') {
         const r = sessionReplay(decodeURIComponent(parts[2]));

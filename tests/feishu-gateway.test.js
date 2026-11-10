@@ -1073,3 +1073,14 @@ test('a verified repair restores one orphan card and saves a backup without subm
  await f.gateway.action({messageId:'om_legacy_failed',chatId:'oc_private',chatType:'p2p',operator:{openId:'ou_owner'},action:{value:{owner:'ou_owner',key:contextKey(f.msg('')),action:'history',id:original}}});
  assert.equal(reads.at(-1).id,target.id);assert.equal(f.calls.length,0);
 });
+
+test('Feishu session search refreshes the cluster directory and searches native terminal labels', async t => {
+  const f = await fixture(t); await f.pair(); let options;
+  f.panel.sessionCatalog = async input => { options = input; return { sessions: [{ id: 'terminal-session-1234', title: 'project-plugin-recommendations', project: '/repo/.claude/worktrees/isolated-task', repository: '/repo', gitBranch: 'worktree-isolated-task', machineId: 'mac', latestPrompt: '需要新建表吗', native: true }], unavailable: [] }; };
+  await f.gateway.receive(f.msg('/sessions isolated-task'));
+  assert.deepEqual(options, { refresh: true, query: 'isolated-task' });
+  const text = JSON.stringify(f.sent.at(-1).content); assert.match(text, /project-plugin-recommendations/); assert.match(text, /worktree-isolated-task/); assert.match(text, /需要新建表吗/);
+  const key = contextKey(f.msg(''));
+  await f.gateway.action({ messageId: f.sent.at(-1).messageId, chatId: 'oc_private', operator: { openId: 'ou_owner' }, action: { value: { owner: 'ou_owner', key, action: 'sessions_search' }, form_value: { query: '新建表' } } });
+  assert.equal(options.query, '新建表'); assert.equal(f.calls.length, 0, 'searching never submits work');
+});

@@ -231,13 +231,14 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   async function sessionsCard(msg, query = '', requestedPage = 0) {
     if (!detailed(msg)) return managementNotice(msg);
     query = clip(String(query || ''), 80);
-    const key = contextKey(msg), all = panel.sessions().filter(item => !query || `${item.title} ${item.project}`.toLowerCase().includes(query.toLowerCase()));
+    const directory = panel.sessionCatalog ? await panel.sessionCatalog({ refresh: true, query }) : { sessions: require('./core/session-directory').searchSessions(panel.sessions(), query), unavailable: [] };
+    const key = contextKey(msg), all = directory.sessions;
     const page = pageOf(requestedPage, all.length, cards.SESSION_PAGE_SIZE), rows = all.slice(page * cards.SESSION_PAGE_SIZE, (page + 1) * cards.SESSION_PAGE_SIZE);
     state.listings[key] = all.map(item => item.id); persist();
     let previews = [];
     try { previews = panel.sessionPreviews ? await panel.sessionPreviews(rows) : []; } catch (error) { rememberError(error); }
     const byId = new Map(previews.map(preview => [preview.id, preview]));
-    const result = await send(msg, { card: cards.sessionList({ engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), rows: rows.map(item => ({ ...item, ...byId.get(item.id), running: panel.running(item.id) })), total: all.length, page, query, selected: state.bindings[key]?.id }) });
+    const result = await send(msg, { card: cards.sessionList({ engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), rows: rows.map(item => ({ ...item, ...byId.get(item.id), running: item.running || panel.running(item.id) })), unavailable: directory.unavailable, total: all.length, page, query, selected: state.bindings[key]?.id }) });
     rememberCard(result, msg);
     if (result?.messageId) { state.cards[result.messageId].listing = { page, query }; persist(); }
   }
@@ -660,8 +661,8 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       bind(key, { id: crypto.randomUUID(), cwd, engine: newEngine }); return currentCard(msg, state.bindings[key]);
     }
     if (command === 'switch') {
-      const rows = panel.sessions(), ids = state.listings[key] || [];
-      const matches = /^\d+$/.test(arg) ? rows.filter(item => item.id === ids[Number(arg) - 1]) : rows.filter(item => arg && (item.id.startsWith(arg) || item.title === arg));
+      const rows = panel.sessionCatalog ? (await panel.sessionCatalog({ refresh: true })).sessions : panel.sessions(), ids = state.listings[key] || [];
+      const matches = /^\d+$/.test(arg) ? rows.filter(item => item.id === ids[Number(arg) - 1]) : arg ? require('./core/session-directory').searchSessions(rows, arg) : [];
       if (matches.length !== 1) { await sessionsCard(msg, /^\d+$/.test(arg) ? '' : arg); return; }
       bind(key, bindingFor(matches[0])); return currentCard(msg, state.bindings[key]);
     }
@@ -711,7 +712,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   async function action(evt) {
     const rawValue = evt.action?.value;
     let value = rawValue?.action === 'set_model' ? { ...rawValue, model: evt.action.option } : rawValue;
-    if (value?.action === 'new_submit') value = { ...value, fields: evt.action?.form_value || evt.raw?.action?.form_value || evt.raw?.event?.action?.form_value || {} };
+    if (['new_submit','sessions_search'].includes(value?.action)) value = { ...value, fields: evt.action?.form_value || evt.raw?.action?.form_value || evt.raw?.event?.action?.form_value || {} };
     const msg = { messageId: evt.messageId, senderId: evt.operator?.openId, chatId: evt.chatId, chatType: evt.chatType || inbox.chatType(config.appId, evt.chatId) || state.cards[evt.messageId]?.chatType || 'group', content: '' };
     if (!value || typeof value !== 'object' || value.owner !== msg.senderId || !allowed(msg) || (!detailed(msg) && value.action !== 'new_submit')) return;
     if (value.key) { try { const [owner, chat, thread] = JSON.parse(value.key); if ((owner !== msg.senderId && !(owner === '*' && msg.chatType !== 'p2p')) || chat !== msg.chatId || typeof thread !== 'string') return; const saved = state.cards[evt.messageId]; if (saved?.key && saved.key !== value.key) return; if (thread !== 'main') msg.threadId = thread; } catch { return; } }
@@ -730,6 +731,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (value.action === 'engine') return engineCard(msg);
       if (value.action === 'use_engine') { if (!catalog().has(value.engine)) throw new Error('引擎无效'); return useEngine(msg, value.engine); }
       if (value.action === 'sessions') return sessionsCard(msg, String(value.query || ''), value.page);
+      if (value.action === 'sessions_search') return sessionsCard(msg, String(value.fields?.query || ''), 0);
       if (value.action === 'projects') return projectsCard(msg, value.page, value.engine, typeof value.node === 'string' ? value.node : null);
       if (value.action === 'nodes') return nodesCard(msg);
       if (value.node === panel.machineId?.()) value = { ...value, node: 'local' };
