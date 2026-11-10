@@ -794,7 +794,7 @@ function renderList({ revealCurrent = false } = {}) {
     .filter(it => matchOrigin(it))
     .filter(it => state.type !== 'sessions' || matchesSessionEngine(it))
     .filter(it => state.type !== 'inspector' || matchesCaptureFilters(it))
-    .filter(it => !kw || it.name.toLowerCase().includes(kw) || (it.description || '').toLowerCase().includes(kw));
+    .filter(it => !kw || (state.type === 'sessions' ? kw.trim().split(/\s+/).every(word => [it.name, it.description, it.key, it.cwd, it.gitBranch].filter(Boolean).join(' ').toLowerCase().includes(word)) : it.name.toLowerCase().includes(kw) || (it.description || '').toLowerCase().includes(kw)));
   const pageKey = JSON.stringify([state.type, state.resourceEngine, state.scope, state.origin, kw, sessionEngine, state.inspectorEngine, state.inspectorSession, state.inspectorPurpose]);
   const samePage = listPage.key === pageKey;
   if (!samePage) listPage = { key: pageKey, index: 0 };
