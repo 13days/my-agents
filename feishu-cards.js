@@ -214,6 +214,7 @@ function task({ binding, title, view, elapsed, nodeLabel = '', model = '默认�
   if (binding.worktree) elements.push(muted(`独立工作区 · ${escape(binding.worktree.branch)}`));
   const actions = [button('执行机器', action(context, { action: 'nodes' })), button('查看会话', action(context, { action: 'view', id: binding.id })), button('会话列表', action(context, { action: 'sessions' })), button('查看 / 切换引擎', action(context, { action: 'engine' }))];
   actions.push(button('查看 / 切换模型', action(context, { action: 'models' })));
+  if (view.accepted && view.done && failed) actions.push(button('继续任务', action(context, { action: 'continue_task', id: binding.id }), 'primary'));
   if (!view.done) actions.push(button('停止任务', action(context, { action: 'stop', id: binding.id, ...(context.taskMessageId ? { taskMessageId: context.taskMessageId } : {}) }), 'danger'));
   elements.push(buttons(actions));
   return card(view.phase, elements, { subtitle: clip(title, 90), template, summary: `${view.phase} · ${clip(view.text || title, 90)}` });

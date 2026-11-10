@@ -469,15 +469,6 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       return showNewForm(msg, draft, errorText(error));
     }
   }
-  async function retrySubmittedDraft(msg, binding, reason) {
-    const draft = binding?.draftId && state.drafts[binding.draftId];
-    if (!draft || draft.status !== 'submitted') return;
-    draft.status = 'editing'; draft.revision++; draft.sessionId = crypto.randomUUID();
-    if (state.bindings[draft.key]?.id === binding.id) {
-      if (draft.previousBinding) bind(draft.key, { ...draft.previousBinding }); else delete state.bindings[draft.key];
-    }
-    persist(); await showNewForm(msg, draft, reason || '首轮执行失败，请修改设置后重新提交；上次执行结果请先核对');
-  }
   async function run(msg, prompt, mode, proposed = null) {
     const key = scope(msg);
     let binding = proposed || state.bindings[key];
@@ -501,9 +492,9 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       images.push({ mimeType, data: buffer.toString('base64') });
     }
     if (!prompt && !images.length) throw new Error('请发送文字或图片');
-    const id = msg.turnId || messageUUID(msg.messageId), view = { text: '', tools: new Map(), reasoning: new Map(), permissions: new Map(), phase: mode === 'queue' ? '已排队' : '正在处理', done: false };
+    const id = msg.turnId || messageUUID(msg.messageId), view = { text: '', tools: new Map(), reasoning: new Map(), permissions: new Map(), phase: mode === 'queue' ? '已排队' : '正在处理', done: false, accepted: false };
     if (!detailed(msg)) {
-      const reply = createSimpleReply({ channel, msg: { ...msg, threadId: threadOf(msg) }, messageId: id, footer: () => `${nodeLabel(nodeOf(binding))} · ${catalog().label(engineOf(binding))} · ${catalog().switchHint(engineOf(binding))} 切换引擎 · 模型：${modelLabel(binding)} · /model 切换模型`, onError: rememberError, onFinish: result => result.failed && proposed ? retrySubmittedDraft(msg, proposed, result.text) : undefined, onClose: () => monitors.delete(reply.close) });
+      const reply = createSimpleReply({ channel, msg: { ...msg, threadId: threadOf(msg) }, messageId: id, footer: () => `${nodeLabel(nodeOf(binding))} · ${catalog().label(engineOf(binding))} · ${catalog().switchHint(engineOf(binding))} 切换引擎 · 模型：${modelLabel(binding)} · /model 切换模型`, onError: rememberError, onClose: () => monitors.delete(reply.close) });
       monitors.add(reply.close);
       try {
         await reply.start();
@@ -518,12 +509,14 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     const sent = await send(msg, { card: progress() }); rememberCard(sent, msg, binding);
     const transport = channel;
     const saveTask = card => {
+      if (state.cards[sent.messageId]) state.cards[sent.messageId].canContinue = view.accepted && view.done && ['失败', '连接已结束'].includes(view.phase);
       state.taskCards[sent.messageId] = { appId: config.appId, sessionId: binding.id, done: view.done, card, updatedAt: now(), owner: msg.senderId, chatId: msg.chatId, chatType: msg.chatType };
       persist();
     };
     saveTask(progress());
     try { await submit(binding, { prompt, images, messageId: id, mode, gatewayContext: deliveryContext(msg), ...(proposed ? { allowFailover: false } : {}) }); }
     catch (e) { view.phase = '失败'; view.text = errorText(e); view.done = true; saveTask(progress()); if (await transport.updateCard(sent.messageId, progress()).then(() => true, () => false)) { delete state.taskCards[sent.messageId]; persist(); e.reported = true; } throw e; }
+    view.accepted = true;
     let timer, heartbeat, unsub, updating, shuttingDown = false, dirty = false, busy = false, closed = false, updateFailures = 0;
     const finish = () => { if (closed) return; closed = true; clearTimeout(timer); clearInterval(heartbeat); unsub?.(); monitors.delete(shutdownMonitor); };
     const flush = async () => {
@@ -544,7 +537,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       finally { busy = false; updating = null; }
       if (shuttingDown) return;
       if (dirty) { timer = setTimeout(flush, view.done ? 0 : 1000); return; }
-      if (view.done && !closed) { if (proposed && view.phase === '失败') await retrySubmittedDraft(msg, proposed, view.text); if (view.text.length > cards.REPLY_PREVIEW) { try { await sendLong(msg, view.text); } catch (e) { rememberError(e); } } finish(); }
+      if (view.done && !closed) { if (view.text.length > cards.REPLY_PREVIEW) { try { await sendLong(msg, view.text); } catch (e) { rememberError(e); } } finish(); }
     };
     const schedule = immediate => { clearTimeout(timer); if (busy) { dirty = true; return; } timer = setTimeout(flush, immediate ? 0 : 1200); };
     const shutdownMonitor = async () => {
@@ -723,7 +716,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     try {
       if (value.node === panel.machineId?.()) value = { ...value, node: 'local' };
       const origin = state.cards[msg.messageId];
-      if (['use_node','use_engine','set_model','stop','permission'].includes(value.action) && origin?.sessionId && state.bindings[key]?.id !== origin.sessionId) throw new Error('会话已切换，请发送 /current 获取最新操作卡片');
+      if (['use_node','use_engine','set_model','stop','permission','continue_task'].includes(value.action) && origin?.sessionId && state.bindings[key]?.id !== origin.sessionId) throw new Error('会话已切换，请发送 /current 获取最新操作卡片');
       if (value.action === 'new_submit') return submitNewForm(msg, key, value);
       if (value.action === 'new_form') return panel.workspaces ? newForm(msg, '', catalog().fallback(value.engine, defaultEngine()), value) : projectsCard(msg, 0, value.engine);
       if (value.action === 'models') return await modelsCard(msg, '', value.refresh === true);
@@ -754,6 +747,17 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (!item && value.action === 'history' && state.bindings[key]?.id === targetId) return send(msg, { text: '这段会话暂无已保存的对话，发送问题开始后可再查看。' });
       if (!item) return recoverSessionCard(msg,key,targetId);
       if (['stop','permission'].includes(value.action) && value.taskMessageId && panel.activeMessageId && panel.activeMessageId(item.id) !== value.taskMessageId) throw new Error('这张卡片对应的任务已结束，请发送 /current 查看当前任务');
+      if (value.action === 'continue_task') {
+        if (!origin?.canContinue || referenceId(origin.sessionId) !== targetId) throw new Error('此任务已续接或不需要继续，请查看当前会话');
+        if (panel.running?.(item.id)) throw new Error('该会话仍有任务运行，请等待结束后继续');
+        // Claim under the conversation lock, before starting another turn. A
+        // runtime failure belongs to this session; never reopen its /new draft.
+        origin.canContinue = false; persist();
+        bind(key, bindingFor(item));
+        try {
+          return await run({ ...msg, turnId: crypto.randomUUID() }, '继续完成上一轮中断的任务。先查看已有对话、工具结果和当前工作状态，核对已经完成的操作；不要重复执行已经成功的修改或外部操作，从尚未完成的步骤继续。如果缺少必要上下文或执行条件，请说明原因。', 'steer');
+        } catch (error) { origin.canContinue = true; persist(); throw error; }
+      }
       if (value.action === 'permission') { await panel.permission(item.id, value.requestId, value.behavior); return send(msg, { text: value.behavior === 'allow' ? '已允许本次工具调用。' : '已拒绝本次工具调用。' }); }
       if (value.action === 'stop') { await panel.stop(item.id); return send(msg, { text: '已发送停止请求。' }); }
       if (value.action === 'user_messages') {

@@ -980,16 +980,33 @@ test('an engine startup error returns an editable form instead of replacing the 
   f.panel.submit=submit;
 });
 
-test('a first-turn provider failure offers the saved form again without automatically replaying the query',async t=>{
+test('runtime failure keeps the submitted session and continues it once without reopening /new',async t=>{
   const f=await fixture(t);await f.pair();await f.gateway.receive(f.msg('/new'));enableFormFixture(f);
   const read=()=>JSON.parse(fs.readFileSync(path.join(f.dir,'panel-feishu-state.json'))),key=contextKey(f.msg('')),old=read().bindings[key].id;
-  await f.gateway.receive(f.msg('/new Keep this query'));const sent=f.sent.at(-1),value=formSubmitValue(sent);let input;
+  await f.gateway.receive(f.msg('/new Keep this query'));const form=f.sent.at(-1),value=formSubmitValue(form);let input;
+  const submit=f.panel.submit,watch=f.panel.watch;
   f.panel.submit=async data=>{input=data;f.calls.push(data);return{sessionId:data.sessionId}};
   f.panel.watch=(_id,listener)=>{listener('error',{messageId:input.messageId,error:'provider rejected the model'});return()=>{}};
-  await f.gateway.action({messageId:sent.messageId,chatId:'oc_private',operator:{openId:'ou_owner'},action:{value,form_value:formFields('Keep this query')}});
-  for(let i=0;i<30&&!JSON.stringify(f.sent.at(-1).content).includes('provider rejected the model');i++)await new Promise(r=>setTimeout(r,10));
-  assert.match(JSON.stringify(f.sent.at(-1).content),/provider rejected the model/);
-  assert.equal(read().bindings[key].id,old);assert.equal(f.calls.length,1);assert.match(JSON.stringify(f.sent.at(-1).content),/Keep this query/);
+  await f.gateway.action({messageId:form.messageId,chatId:'oc_private',operator:{openId:'ou_owner'},action:{value,form_value:formFields('Keep this query')}});
+  for(let i=0;i<50&&!f.updated.some(x=>JSON.stringify(x.card).includes('continue_task'));i++)await new Promise(r=>setTimeout(r,10));
+  const failed=f.updated.find(x=>JSON.stringify(x.card).includes('continue_task'));
+  assert.ok(failed);assert.match(JSON.stringify(failed.card),/provider rejected the model/);
+  assert.notEqual(read().bindings[key].id,old);assert.equal(read().bindings[key].id,input.sessionId);
+  assert.equal(read().drafts[value.draftId].status,'submitted');assert.equal(f.calls.length,1);
+  assert.equal(f.sent.filter(x=>x.content.card?.body?.elements.some(e=>e.tag==='form')).at(-1).messageId,form.messageId);
+  const find=node=>{if(!node||typeof node!=='object')return null;if(node.action==='continue_task')return node;for(const v of Object.values(node)){const result=find(v);if(result)return result;}return null};
+  const resume=find(failed.card),evt={messageId:failed.id,chatId:'oc_private',operator:{openId:'ou_owner'},action:{value:resume}};
+  // Another user cannot resume this task; duplicate clicks cannot replay it.
+  await f.gateway.action({...evt,operator:{openId:'ou_other'}});assert.equal(f.calls.length,1);
+  f.panel.submit=async()=>{throw Error('execution node is offline')};
+  await f.gateway.action(evt);assert.equal(read().cards[failed.id].canContinue,true);
+  assert.equal(read().drafts[value.draftId].status,'submitted');assert.equal(read().bindings[key].id,input.sessionId);
+  assert.equal(f.sent.filter(x=>x.content.card?.body?.elements.some(e=>e.tag==='form')).at(-1).messageId,form.messageId);
+  f.panel.submit=submit;f.panel.watch=watch;
+  await f.gateway.action(evt);await f.gateway.action(evt);
+  assert.equal(f.calls.length,2);assert.equal(f.calls[1].sessionId,f.calls[0].sessionId);
+  assert.equal(f.calls[1].cwd,f.calls[0].cwd);assert.equal(f.calls[1].machineId,f.calls[0].machineId);
+  assert.notEqual(f.calls[1].messageId,f.calls[0].messageId);assert.match(f.calls[1].prompt,/不要重复执行/);
 });
 
 test('a first engine shortcut keeps its query and uses the configured remote default machine',async t=>{
