@@ -12,8 +12,12 @@ const clean = headers => Object.fromEntries(Object.entries(headers || {}).filter
 const errorBody = message => JSON.stringify({ type: 'error', error: { type: 'api_error', message } });
 
 // Hub side: only ever forwards to `target` (the panel proxy), whatever path the node asks for.
+const servedPeers = new WeakMap();
 function serveRelay({ peer, target }) {
   const base = new URL(target);
+  const previous = servedPeers.get(peer);
+  if (previous) { if (previous !== base.href) throw new Error('同一个节点连接不能绑定多个代理目标'); return; }
+  servedPeers.set(peer, base.href);
   const active = new Map();
   peer.on('relay.abort', ({ rid }) => { active.get(rid)?.destroy(); active.delete(rid); });
   peer.handle('relay.request', ({ rid, method, path, headers, body }) => {

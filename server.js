@@ -2670,10 +2670,12 @@ const nodeHub = require('./node/hub').createNodeHub({ registry, token: auth?.tok
 
 const clusterRuntimePending = new Map();
 async function attachClusterRuntime(id, peer) {
-  if (registry.node(id)) return;
-  if (clusterRuntimePending.has(id)) return clusterRuntimePending.get(id);
   const member = clusterConfig?.members.find(item => item.id === id);
   if (member?.witness) return;
+  // Account relays use the cluster peer even when SSH already supplies its engines.
+  require('./node/relay').serveRelay({ peer, target: runtimeRouting.target });
+  if (registry.node(id)) return;
+  if (clusterRuntimePending.has(id)) return clusterRuntimePending.get(id);
   const pending = (async () => { for (let attempt = 0; attempt < 3; attempt++) { if (registry.node(id)) return registry.node(id); try { return await require('./node/remote').attachRemoteNode({ peer, registry, transport: 'cluster', pin: { id, label: member?.label || id }, routing: runtimeRouting }); } catch (error) { if (attempt === 2) throw error; await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1))); } } })();
   clusterRuntimePending.set(id, pending);
   try { return await pending; } finally { clusterRuntimePending.delete(id); }
