@@ -169,6 +169,43 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
     const votes = 1 + (await Promise.all(peers().map(syncPeer))).filter(Boolean).length;
     if (coordination && votes < coordination.required()) throw new Error('共享账号更新尚未同步到多数节点，暂不继续刷新登录');
   }
+  // The elected coordinator owns rotation, but may need another full node's egress.
+  async function renewWire(source, { publicKey, sealed }) {
+    const request = transport.open(sealed, publicKey);
+    if (!coordination?.authorizeRenew?.(source, request.term)) throw new Error('只有当前主节点可以委托账号刷新');
+    const lease = vault.lease(request.id);
+    if (!lease || lease.holder !== source || lease.until <= now()) throw new Error('账号刷新委托租约无效');
+    const pending = refreshing.get(request.id) || (async () => {
+      const entry = codexEntries('chatgpt').find(item => item.key === request.id);
+      if (!entry) throw new Error('共享账号不存在');
+      if (fingerprint(entry.auth.tokens.access_token).slice(0, 16) !== request.expected) return { snapshot: vault.export() };
+      const fresh = await renew(entry.auth);
+      // Save on the egress node before replying: a lost reply must not lose a rotated grant.
+      vault.rotate(entry.key, fresh, entry.auth); await codex.updated?.(entry.auth, fresh); install();
+      return { snapshot: vault.export() };
+    })().finally(() => refreshing.delete(request.id));
+    refreshing.set(request.id, pending);
+    return { publicKey: transport.publicKey, sealed: transport.seal(await pending, publicKey) };
+  }
+  async function renewWithEgress(entry) {
+    let failure;
+    try { return await renew(entry.auth); } catch (error) { failure = error; }
+    if (!coordination || failure.status === 400 || failure.status === 401) throw failure;
+    const connected = peers().slice().sort((a, b) => Number(b.id === entry.source) - Number(a.id === entry.source));
+    for (const { id, peer } of connected) {
+      if (!coordination.canRefresh()) throw new Error('账号刷新主节点已切换，请稍后重试');
+      try {
+        const key = await peer.call('accounts.key', {}, { timeout: 3000 });
+        const input = { id: entry.key, expected: fingerprint(entry.auth.tokens.access_token).slice(0, 16), term: coordination.term() };
+        const result = await peer.call('accounts.renew', { publicKey: transport.publicKey, sealed: transport.seal(input, key.publicKey) }, { timeout: 20000 });
+        vault.merge(transport.open(result.sealed, result.publicKey).snapshot);
+        const fresh = vault.credential(entry.key, entry.auth);
+        if (fresh.tokens.access_token === entry.auth.tokens.access_token) throw new Error('出网节点未返回更新后的登录');
+        return fresh;
+      } catch (error) { failure = error; }
+    }
+    throw failure;
+  }
   async function refreshAtLeader({ id, expected = '', force = false }) {
     if (coordination && !coordination.canRefresh()) throw new Error('当前节点没有账号刷新租约');
     if (refreshing.has(id)) return refreshing.get(id);
@@ -185,7 +222,7 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
       await replicateQuorum();
       if (coordination && !coordination.canRefresh()) throw new Error('账号刷新主节点已切换，请稍后重试');
       try {
-        const auth = await (isClaude ? renewClaude : renew)(entry.auth);
+        const auth = await (isClaude ? renewClaude(entry.auth) : renewWithEgress(entry));
         // Persist the rotated refresh token even if leadership changed during
         // the HTTP exchange. Dropping it would lose the grant entirely.
         vault.rotate(id, auth, entry.auth);
@@ -208,7 +245,7 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
     // An auth rejection may mean revocation before JWT expiry. Refresh once
     // for that token generation; retries never loop indefinitely.
     if (mode === 'chatgpt' && excluded.length) {
-      const rejected = codexEntries(mode).find(entry => excluded.includes(routeFor(entry, mode).id) && excluded.filter(id => id.startsWith(entry.key + ':')).length < 2);
+      const rejected = codexEntries(mode).find(entry => [401, 403].includes(vault.preference('codex-health:' + entry.key)?.lastStatus) && excluded.includes(routeFor(entry, mode).id) && excluded.filter(id => id.startsWith(entry.key + ':')).length < 2);
       if (rejected?.auth.tokens.refresh_token) { try { await renewEntry(rejected, true); } catch {} }
     }
     let selected = codexRoute(mode, sessionId, excluded, forced, options);
@@ -232,6 +269,6 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
   observe(); install();
   accounts.setPreparation?.(prepareClaude);
   accounts.setRoutingObserver?.(input => { if (input.selected || input.mode!=='manual') setClaudeRouting(input); });
-  return { setClaudeRouting, observeNative: (source, input) => { for(const auth of (Array.isArray(input.claude)?input.claude:[input.claude]))if(auth)vault.importClaude(auth,{origin:source}); for(const auth of (Array.isArray(input.codex)?input.codex:[input.codex]))if(auth)vault.importCodex(auth,{origin:source}); install(); }, claudeStatus, importClaude, configureClaude, prepareClaude, catalog, egress: excluded => { const candidate = [...sources].filter(([id, source]) => !excluded.includes(id) && source.catalog?.codex?.token).sort(([a], [b]) => a.localeCompare(b))[0]; return candidate ? { id: candidate[0], url: candidate[1].url, token: candidate[1].catalog.codex.token } : null; }, codexStatus, resetCodex: () => { for (const entry of Object.values(vault.codexAccounts())) vault.preference('codex-health:' + entry.id, { cooldownUntil: 0, lastStatus: 0 }); return codexStatus(); }, setRouting, pinCodex, importCodex, configureCodex, accepted, rejected, exchange, exchangeWire, refreshWire, exchangeKey: () => ({ publicKey: transport.publicKey }), refresh, refreshAtLeader, resolveCodex, codexRoute, status, vault };
+  return { setClaudeRouting, observeNative: (source, input) => { for(const auth of (Array.isArray(input.claude)?input.claude:[input.claude]))if(auth)vault.importClaude(auth,{origin:source}); for(const auth of (Array.isArray(input.codex)?input.codex:[input.codex]))if(auth)vault.importCodex(auth,{origin:source}); install(); }, claudeStatus, importClaude, configureClaude, prepareClaude, catalog, egress: excluded => { const candidate = [...sources].filter(([id, source]) => !excluded.includes(id) && source.catalog?.codex?.token).sort(([a], [b]) => a.localeCompare(b))[0]; return candidate ? { id: candidate[0], url: candidate[1].url, token: candidate[1].catalog.codex.token } : null; }, codexStatus, resetCodex: () => { for (const entry of Object.values(vault.codexAccounts())) vault.preference('codex-health:' + entry.id, { cooldownUntil: 0, lastStatus: 0 }); return codexStatus(); }, setRouting, pinCodex, importCodex, configureCodex, accepted, rejected, exchange, exchangeWire, refreshWire, renewWire, exchangeKey: () => ({ publicKey: transport.publicKey }), refresh, refreshAtLeader, resolveCodex, codexRoute, status, vault };
 }
 module.exports = { createAccountPool };

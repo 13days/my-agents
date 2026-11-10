@@ -2692,6 +2692,8 @@ if (!HISTORY_WORKER) accountPool = require('./core/account-pool').createAccountP
   peers: () => (clusterNetwork?.connected() || []).filter(id => !clusterConfig.members.find(item => item.id === id)?.witness).map(id => ({ id, label: clusterConfig.members.find(item => item.id === id)?.label || id, peer: clusterNetwork.peer(id) })),
   coordination: {
     canRefresh: () => !clusterConfig?.clusterId || !!cluster?.canStart(),
+    term: () => cluster?.status().term || 0,
+    authorizeRenew: (source, term) => { const info = cluster?.status(); return !!info?.hasQuorum && info.leader === source && info.term === term; },
     required: () => clusterConfig?.members ? Math.floor(clusterConfig.members.filter(item => !item.witness).length / 2) + 1 : 1,
     refresh: input => { const leader = cluster?.status().leader, peer = leader && clusterNetwork?.peer(leader); if (!peer) throw new Error('当前没有可用的账号刷新主节点'); return peer.call('accounts.refresh', input, { timeout: 60000 }); },
   },
@@ -2718,6 +2720,7 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
   clusterNetwork.handle('accounts.key', () => accountPool.exchangeKey());
   clusterNetwork.handle('accounts.exchange', (source, packet) => { if (clusterConfig.members.find(item => item.id === source)?.witness) throw new Error('见证节点不参与凭证同步'); return accountPool.exchangeWire(packet); });
   clusterNetwork.handle('accounts.refresh', (_, input) => accountPool.refreshWire(input));
+  clusterNetwork.handle('accounts.renew', (source, packet) => accountPool.renewWire(source, packet));
   clusterNetwork.handle('workspaces.save', async (_, input) => { if (!cluster.canStart()) throw new Error('当前节点没有主节点租约，请刷新后重试'); return workspaceStore.save(input); });
   clusterNetwork.handle('conversations.put', (_, record) => { if (!cluster.canStart()) throw new Error('当前节点没有共享状态写入租约'); conversations.merge(record); return { ok: true }; });
   clusterNetwork.handle('gateway.invoke', async (_, { method, input }) => {

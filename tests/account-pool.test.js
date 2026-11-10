@@ -21,6 +21,7 @@ function fixture(t) {
         if (method === 'accounts.key') return node.pool.exchangeKey();
         if (method === 'accounts.exchange') return node.pool.exchangeWire(input);
         if (method === 'accounts.refresh') return node.pool.refreshWire(input);
+        if (method === 'accounts.renew') return node.pool.renewWire(id, input);
         throw Error('unknown method');
       } } })) : [],
       relayClient: () => ({ url: async () => 'http://127.0.0.1:54322' }), ...extras,
@@ -284,4 +285,35 @@ test('different loopback accounts survive sharing through the same node relay an
   assert.equal(shared[0].url, shared[1].url, 'both accounts use the same authenticated RPC relay');
   assert.equal(worker.router.status().selected, 'cluster:mac:codex-bridge');
   assert.equal(shared.find(a => a.id === worker.router.status().selected).enabled, true);
+});
+
+
+test('OAuth rotation uses authenticated peer egress when the elected leader cannot reach authentication', async t => {
+  const f = fixture(t), old = auth('backend-expired-access'), fresh = { ...auth('renewed-access', 'rotated-grant'), last_refresh: new Date().toISOString() };
+  let remoteCalls = 0, authorized = true;
+  const coordinator = { canRefresh: () => true, required: () => 2, term: () => 7 };
+  const leader = f.add('leader', old, { coordination: coordinator, renew: async () => { throw Object.assign(new Error('egress blocked'), { status: 403 }); } });
+  const worker = f.add('worker', null, { coordination: { canRefresh: () => false, required: () => 2, authorizeRenew: (source, term) => authorized && source === 'leader' && term === 7 }, renew: async value => { remoteCalls++; assert.equal(value.tokens.refresh_token, old.tokens.refresh_token); return fresh; } });
+  await leader.pool.refresh();
+  const before = leader.pool.codexRoute('chatgpt', 'bridge');
+  leader.pool.rejected(before, 401);
+  const selected = await leader.pool.resolveCodex('chatgpt', 'bridge', [before.id]);
+  assert.equal(remoteCalls, 1); assert.equal(selected.headers.authorization, 'Bearer renewed-access');
+  assert.equal(worker.pool.codexRoute('chatgpt').headers.authorization, selected.headers.authorization);
+  assert.equal(createAccountPool(worker.options).codexRoute('chatgpt').headers.authorization, selected.headers.authorization, 'egress node persists rotation before returning it');
+  assert.ok(!JSON.stringify(leader.pool.codexStatus()).includes('rotated-grant'));
+  authorized = false;
+  leader.pool.rejected(selected, 401);
+  const again = await leader.pool.resolveCodex('chatgpt', 'bridge', [selected.id]);
+  assert.equal(remoteCalls, 1, 'unauthorized delegates cannot consume the refresh grant');
+});
+
+
+test('transient upstream errors do not rotate otherwise valid OAuth grants', async t => {
+  const f = fixture(t); let renewals = 0;
+  const node = f.add('mac', auth(jwt(Math.floor(Date.now()/1000), Math.floor(Date.now()/1000)+7200)), { renew: async value => { renewals++; return value; } });
+  const route = node.pool.codexRoute('chatgpt', 'transient');
+  node.pool.rejected(route, 502);
+  await node.pool.resolveCodex('chatgpt', 'transient', [route.id]);
+  assert.equal(renewals, 0);
 });

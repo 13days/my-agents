@@ -19,7 +19,7 @@ async function renewCodex(auth, { fetchImpl = fetch, now = Date.now } = {}) {
   let response;
   try {
     response = await fetchImpl('https://auth.openai.com/oauth/token', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(45000),
+      method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(12000),
       body: JSON.stringify({ grant_type: 'refresh_token', client_id: provenance?.client_id || 'app_EMoamEEZ73f0CkXaXp7hrann', refresh_token: tokens.refresh_token }),
     });
   } catch { throw new Error('共享 Codex 登录刷新连接失败；保留原凭证，请稍后重试'); }
