@@ -19,7 +19,7 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
   function install() {
     accounts.requirePool?.(Object.keys(vault.claudeAccounts()).length>0);
     for (const source of origins()) vault.importCodex(source.codex, { origin: source.id });
-    const seen = new Set(accounts.exportAccounts().filter(a => a.enabled).map(a => fingerprint(a.url + ':' + a.authType + ':' + a.token)));
+    const seen = new Set(accounts.exportAccounts().filter(a => a.enabled).map(a => fingerprint(JSON.stringify([a.url, a.authType, a.token, a.delegateAccount || '']))));
     const shared = origins().sort((a, b) => a.id.localeCompare(b.id)).filter(source => source.id !== identity().id).flatMap(source => (source.claude || []).map(account => {
       const bridge = loopback(account.url), live = sources.get(source.id);
       return {
@@ -28,7 +28,7 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
         ...(bridge ? { enabled: account.enabled && !!live, url: live?.url || account.url, authType: 'bearer', token: live?.catalog?.claude?.token || '', delegateAccount: account.id, env: {}, unavailableReason: live ? '' : '账号依赖来源机器上的本地桥接服务；请连接该服务或在目标机器部署桥接' } : {}),
       };
     }));
-    accounts.setShared([...claudeEntries().map(entry => ({ id:entry.key, name:entry.label, url:'https://api.anthropic.com', token:entry.auth.claudeAiOauth.accessToken, authType:'oauth', modelMap:{}, env:{}, enabled:claudeCredentials.available(entry.auth,now()), managed:true, shared:true, mode:'subscription', sourceNode:entry.source, replicated:true })), ...shared.filter(account => { const key = fingerprint(account.url + ':' + account.authType + ':' + account.token); if (seen.has(key)) return false; if (account.enabled) seen.add(key); return true; })]);
+    accounts.setShared([...claudeEntries().map(entry => ({ id:entry.key, name:entry.label, url:'https://api.anthropic.com', token:entry.auth.claudeAiOauth.accessToken, authType:'oauth', modelMap:{}, env:{}, enabled:claudeCredentials.available(entry.auth,now()), managed:true, shared:true, mode:'subscription', sourceNode:entry.source, replicated:true })), ...shared.filter(account => { const key = fingerprint(JSON.stringify([account.url, account.authType, account.token, account.delegateAccount || ''])); if (seen.has(key)) return false; if (account.enabled) seen.add(key); return true; })]);
     const claudeRouting = vault.preference('claude-routing');
     if (claudeRouting) accounts.applyPoolRouting?.({...claudeRouting,selected:claudeRouting.selected?.startsWith('cluster:'+identity().id+':') ? claudeRouting.selected.slice(('cluster:'+identity().id+':').length) : claudeRouting.selected});
     for (const localClaude of claude.readAll?.() || [claude.read()]) {

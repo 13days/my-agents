@@ -270,3 +270,18 @@ test('subscription-only routes never use API accounts, including explicit select
   node.pool.configureCodex(subscription.id, { enabled: false });
   assert.equal(await node.pool.resolveCodex('chatgpt', 'bridge', [], '', options), null);
 });
+
+test('different loopback accounts survive sharing through the same node relay and keep their selected route', async t => {
+  const f = fixture(t), owner = f.add('mac'), worker = f.add('sgdev');
+  owner.router.save({ mode: 'manual', selected: 'codex-bridge', accounts: [
+    { id: 'trae-bridge', name: 'TRAE', url: 'http://127.0.0.1:8790', token: 'trae-secret', authType: 'bearer', enabled: true, modelMap: {} },
+    { id: 'codex-bridge', name: 'Codex subscription', url: 'http://localhost:4321/codex-subscription', token: 'bridge-secret', authType: 'bearer', enabled: true, modelMap: { '*': 'gpt-test' } },
+  ] });
+  await worker.pool.refresh();
+  const shared = worker.router.status().accounts;
+  assert.equal(shared.length, 2);
+  assert.deepEqual(shared.map(a => a.id).sort(), ['cluster:mac:codex-bridge', 'cluster:mac:trae-bridge']);
+  assert.equal(shared[0].url, shared[1].url, 'both accounts use the same authenticated RPC relay');
+  assert.equal(worker.router.status().selected, 'cluster:mac:codex-bridge');
+  assert.equal(shared.find(a => a.id === worker.router.status().selected).enabled, true);
+});
