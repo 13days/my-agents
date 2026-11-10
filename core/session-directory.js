@@ -45,4 +45,7 @@ function createSessionDirectory({ local, selfId, peers, ttl = 3000, timeout = 80
   }
   return { list, snapshot, find: id => snapshot().find(row => row.id === id) };
 }
-module.exports = { createSessionDirectory, searchSessions };
+function liveSessionMetadata(meta, item) {
+  return item?.native && !item.sourceUnavailable && meta.machineId === item.machineId && item.project ? { ...meta, project: item.project } : meta;
+}
+module.exports = { createSessionDirectory, searchSessions, liveSessionMetadata };

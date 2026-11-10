@@ -1876,7 +1876,7 @@ async function conversationHistory(id, sourceMachine) {
 }
 
 const resolveSessionReference = require('./core/session-reference').createSessionResolver({
-  metadata: id => ({ ...conversations.get(id), ...sessionStore.read()[id] }),
+  metadata: id => require('./core/session-directory').liveSessionMetadata({ ...conversations.get(id), ...sessionStore.read()[id] }, sessionDirectory.find(id)),
   selfId: machineId,
   nodes: () => registry.nodes().map(node => ({ id: node.id, engines: [...node.engines.keys()] })),
   owns: (node, engine, id) => {

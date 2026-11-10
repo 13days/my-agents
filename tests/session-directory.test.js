@@ -35,3 +35,13 @@ test('native Claude session name, branch and working directory refresh after tra
   fs.appendFileSync(file, JSON.stringify({ type: 'agent-name', agentName: 'project-plugin-recommendations' })+'\n'+JSON.stringify({ type: 'assistant', cwd: '/repo/.claude/worktrees/isolated-task', gitBranch: 'worktree-isolated-task' })+'\n');
   assert.deepEqual(transcriptLabels(file), { sessionName: 'project-plugin-recommendations', cwd: '/repo/.claude/worktrees/isolated-task', gitBranch: 'worktree-isolated-task' });
 });
+
+
+test('handoff follows the native worktree directory without changing recorded machine ownership', () => {
+  const { liveSessionMetadata } = require('../core/session-directory');
+  const meta = { machineId: 'mac', project: '/repo', engine: 'claude' };
+  const item = { machineId: 'mac', project: '/repo/.claude/worktrees/task', native: true };
+  assert.equal(liveSessionMetadata(meta, item).project, item.project);
+  assert.equal(liveSessionMetadata(meta, { ...item, machineId: 'other' }), meta);
+  assert.equal(liveSessionMetadata(meta, { ...item, sourceUnavailable: true }), meta);
+});
