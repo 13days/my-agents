@@ -22,7 +22,7 @@ Open the panel on your laptop, run tasks on a development server, and check the 
 | Unified sessions | Browse native CLI history, continue conversations, inspect timestamps, durations, tool calls and reasoning summaries exposed by the CLI |
 | IM task forms | `/new your question` opens one form for machine, project, engine, model, isolated workspace and first prompt |
 | Remote execution | Connect development machines over SSH or WebSocket; map a project's actual path separately on each machine |
-| Shared account pools | Combine multiple Codex subscriptions across trusted cluster panels, with account selection, rotation and failover |
+| Shared account pools | Separate Claude Code and Codex pools for subscriptions and proxies, with automatic sign-in discovery, shared routing and failover |
 | Concurrent development | Give tasks separate Git worktrees and branches |
 | Request inspection | Inspect requests, responses, usage and failures to distinguish account, model and network issues |
 | IM availability | Keep a majority of persistent cluster panels online so another member can take over IM reception |

@@ -1888,6 +1888,15 @@ proxyServer.on('error', e => {
 if (!HISTORY_WORKER) proxyServer.listen(PROXY_PORT, '127.0.0.1');
 
 
+function saveClaudeProxy({ id, input, add = false }) {
+  const state=accountRouter.status();
+  let rows=state.accounts;
+  if (add) rows=[...rows,{...input,id:crypto.randomUUID(),name:input.name || 'Claude '+new URL(input.url).hostname,modelMap:input.modelMap || {},authType:input.authType || 'bearer'}];
+  else rows=input.deleted ? rows.filter(row=>row.id!==id) : rows.map(row=>row.id===id ? {...row,...input} : row);
+  const selected=rows.some(row=>row.id===state.selected&&row.enabled) ? state.selected : rows.find(row=>row.enabled)?.id || '';
+  return accountRouter.save({...state,accounts:rows,selected});
+}
+
 const clusterLeadership = { canStart: () => !cluster || cluster.canStart() };
 const macRuntime = require('./mac-runtime').createMacRuntime({ dir: DATA_DIR, claudeDir: CLAUDE_DIR, serverPath: path.join(__dirname, 'server.js'), port: PORT, proxyPort: PROXY_PORT, claudeInfo: HISTORY_WORKER ? undefined : resolveClaude() });
 const feishuGateway = require('./feishu-gateway').createFeishuGateway({
@@ -2025,6 +2034,10 @@ const server = http.createServer(async (req, res) => {
           return sendJSON(res, 404, { error: '联系人操作不存在' });
         } catch (error) { return sendJSON(res, 400, { error: error.message }); }
       }
+      if (req.method === 'POST' && parts.length === 3 && parts[2] === 'repair-card') {
+        try { return sendJSON(res,200,await sharedGateway('repairCard',JSON.parse(await readBody(req,64*1024)))); }
+        catch(error){return sendJSON(res,400,{error:error.message});}
+      }
       if (req.method === 'POST' && parts.length === 3 && parts[2] === 'reply') {
         try { return sendJSON(res, 200, await feishuGateway.sendReply(JSON.parse(await readBody(req)))); }
         catch (e) { return sendJSON(res, 400, { error: e.message }); }
@@ -2143,10 +2156,56 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // One management contract, separate account pools and routing for each engine.
+    if (type === 'accounts' && ['claude','codex'].includes(parts[2])) {
+      res.setHeader('Cache-Control','no-store');
+      const engine = parts[2], operation = parts[3];
+      const status = () => engine === 'codex' ? accountPool.codexStatus() : accountPool.claudeStatus();
+      try {
+        if (req.method === 'GET' && parts.length === 3) {
+          if (url.searchParams.get('refresh')==='1') { await syncRuntimeLogins();await accountPool.refresh(); }
+          return sendJSON(res,200,status());
+        }
+        await accountPool.refresh();
+        if (!String(req.headers['content-type'] || '').startsWith('application/json')) return sendJSON(res,415,{error:'需要 application/json'});
+        const input = JSON.parse(await readBody(req,256*1024) || '{}');
+        if (req.method === 'POST' && operation === 'check') {
+          if (engine === 'codex') { const checked = await checkCodexPool(input.accountId); return sendJSON(res,200,{ok:checked.ok,models:checked.models}); }
+          await accountPool.prepareClaude();
+          const result = await accountRouter.models({accountId:input.accountId,refresh:true});
+          if (!result.models.length) throw new Error('账号未返回可用模型，请检查登录、代理地址或上游权限');
+          return sendJSON(res,200,{ok:true,models:result.models.length});
+        }
+        if (req.method === 'POST' && operation === 'proxy') {
+          if (engine === 'codex') accountPool.importCodex({OPENAI_API_KEY:input.token,base_url:input.url},input.name);
+          else saveClaudeProxy({ input:{...input,enabled:true}, add:true });
+        } else if (req.method === 'POST' && !operation) {
+          if (engine === 'codex') accountPool.importCodex(input.auth || readCodexAuth(),input.name);
+          else accountPool.importClaude(input.auth,input.name);
+        } else if (req.method === 'PUT' && operation === 'routing') {
+          if (engine === 'codex') accountPool.setRouting(input);
+          else accountPool.setClaudeRouting(input);
+        } else if (['PUT','DELETE'].includes(req.method) && operation) {
+          const id = decodeURIComponent(operation), patch = req.method === 'DELETE' ? {deleted:true} : input;
+          if (engine === 'codex') accountPool.configureCodex(id,patch);
+          else if (id.startsWith('claude-sub:')) {
+            accountPool.configureClaude(id,patch);
+            const state=accountRouter.status(); if (state.selected===id && (patch.deleted || patch.enabled===false)) accountRouter.save({...state,mode:'failover',selected:state.accounts.find(a=>a.id!==id&&a.enabled)?.id || ''});
+          } else {
+            const account=accountRouter.status().accounts.find(row=>row.id===id);
+            if (!account) throw new Error('Claude 账号不存在');
+            if (account.shared && account.sourceNode) await clusterNetwork.call(account.sourceNode,'accounts.configureProxy',{id:id.split(':').slice(2).join(':'),input:patch},{timeout:5000});
+            else saveClaudeProxy({id,input:patch});
+          }
+        } else return sendJSON(res,405,{error:'method not allowed'});
+        await accountPool.refresh(); return sendJSON(res,200,status());
+      } catch (error) { return sendJSON(res,400,{error:error instanceof SyntaxError ? 'JSON 格式无效' : error.message}); }
+    }
+
     // Account credentials are only available through same-origin JSON management requests.
     if (type === 'proxy') {
       res.setHeader('Cache-Control', 'no-store');
-      if (req.method === 'GET' && parts.length === 2) { await accountPool?.refresh(); return sendJSON(res, 200, { ...accountRouter.status(), pool: accountPool?.status() || [] }); }
+      if (req.method === 'GET' && parts.length === 2) return sendJSON(res, 200, { ...accountRouter.status(), pool: accountPool?.status() || [] });
       if (req.method === 'GET' && parts[2] === 'sessions') return sendJSON(res, 200, combinedAccountSessions());
       if (req.method === 'GET' && parts[2] === 'models' && parts.length === 3) {
         try { if (url.searchParams.get('engine') === 'codex') return sendJSON(res, 200, await codexPoolModels({ accountId: url.searchParams.get('accountId') || '', sessionId: url.searchParams.get('sessionId') || '', refresh: url.searchParams.get('refresh') === '1' })); return sendJSON(res, 200, await accountRouter.models({ accountId: url.searchParams.get('accountId') || '', sessionId: url.searchParams.get('sessionId') || '', refresh: url.searchParams.get('refresh') === '1' })); }
@@ -2196,7 +2255,8 @@ const server = http.createServer(async (req, res) => {
     if (type === 'account-usage' && req.method === 'GET') {
       const byAccount = new Map();
       for (const r of captureStore.list()) {
-        if (r.engine === 'codex') continue; // Codex 用量在 Codex 卡片单独展示
+        const requestedEngine=url.searchParams.get('engine')==='codex' ? 'codex' : 'claude';
+        if ((r.engine || 'claude') !== requestedEngine) continue;
         const id = r.upstreamId || 'unknown';
         const row = byAccount.get(id) || { id, name: r.upstreamName || (id === 'unknown' ? '未标记账号' : id), requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0, costKnown: true, lastUsedAt: '' };
         row.requests++;
@@ -2591,7 +2651,8 @@ async function attachClusterRuntime(id, peer) {
 let clusterNetwork = null;
 let clusterConfig = null;
 try { clusterConfig = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'panel-cluster.json'), 'utf8')); } catch {}
-if (!HISTORY_WORKER) accountPool = require('./core/account-pool').createAccountPool({ accounts: accountRouter, dir: DATA_DIR, secret: clusterConfig?.token || auth.token, fallbackSecret: auth.token,
+const claudeLogin = require('./core/claude-credentials').createClaudeLogin({ dir: process.env.CLAUDE_CONFIG_DIR || CLAUDE_DIR });
+if (!HISTORY_WORKER) accountPool = require('./core/account-pool').createAccountPool({ claude: claudeLogin, accounts: accountRouter, dir: DATA_DIR, secret: clusterConfig?.token || auth.token, fallbackSecret: auth.token,
   identity: () => ({ id: machineId(), label: clusterConfig?.members?.find(item => item.id === machineId())?.label || '本机' }),
   codex: { read: readCodexAuth, catalog: () => ({ token: codexRelayToken, modes: ['chatgpt', 'api-key'].filter(mode => codexCredentials(readCodexAuth(), mode)) }),
     updated: (previous, fresh) => {
@@ -2608,7 +2669,13 @@ if (!HISTORY_WORKER) accountPool = require('./core/account-pool').createAccountP
     refresh: input => { const leader = cluster?.status().leader, peer = leader && clusterNetwork?.peer(leader); if (!peer) throw new Error('当前没有可用的账号刷新主节点'); return peer.call('accounts.refresh', input, { timeout: 60000 }); },
   },
 });
-const poolTimer = HISTORY_WORKER ? null : setInterval(() => accountPool.refresh().catch(() => console.warn('共享账号池同步失败，请检查集群连接')), 5000); poolTimer?.unref();
+const runtimeAccountTransport=require('./core/account-transport').createAccountTransport('my-agents/runtime-native-accounts/v1');
+async function syncRuntimeLogins() {
+  await Promise.all(registry.nodes().filter(node=>node.id!=='local'&&node.info.transport!=='cluster'&&node.info.nativeAccounts).map(async node=>{
+    try { const packet=await node.peer.call('accounts.native',{publicKey:runtimeAccountTransport.publicKey},{timeout:3000});accountPool.observeNative(node.id,runtimeAccountTransport.open(packet.sealed,packet.publicKey)); } catch {}
+  }));
+}
+const poolTimer = HISTORY_WORKER ? null : setInterval(() => syncRuntimeLogins().then(()=>accountPool.refresh()).catch(() => console.warn('共享账号池同步失败，请检查集群连接')), 5000); poolTimer?.unref();
 
 if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token && Array.isArray(clusterConfig.members)) {
   clusterNetwork = require('./node/cluster-peer').createClusterNetwork({ token: clusterConfig.token, selfId: clusterConfig.nodeId, members: clusterConfig.members, onPeer: async (id, peer) => {
@@ -2619,6 +2686,7 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
     setImmediate(() => attachClusterRuntime(id, peer).catch(error => console.warn('集群执行连接：' + error.message)));
   } });
   cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: feishuGateway, canTransfer: () => manager.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });
+  clusterNetwork.handle('accounts.configureProxy', (_, input) => saveClaudeProxy(input));
   clusterNetwork.handle('accounts.catalog', () => accountPool.catalog());
   clusterNetwork.handle('accounts.key', () => accountPool.exchangeKey());
   clusterNetwork.handle('accounts.exchange', (source, packet) => { if (clusterConfig.members.find(item => item.id === source)?.witness) throw new Error('见证节点不参与凭证同步'); return accountPool.exchangeWire(packet); });
@@ -2627,7 +2695,7 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
   clusterNetwork.handle('conversations.put', (_, record) => { if (!cluster.canStart()) throw new Error('当前节点没有共享状态写入租约'); conversations.merge(record); return { ok: true }; });
   clusterNetwork.handle('gateway.invoke', async (_, { method, input }) => {
     if (!cluster.canStart()) throw new Error('当前节点没有 IM 主节点租约');
-    if (!['status', 'configure', 'messages', 'refreshContacts', 'labelContact', 'newPairing', 'start', 'revealSecret'].includes(method)) throw new Error('未知网关操作');
+    if (!['status', 'configure', 'messages', 'refreshContacts', 'labelContact', 'newPairing', 'start', 'revealSecret', 'repairCard'].includes(method)) throw new Error('未知网关操作');
     return feishuGateway[method](input);
   });
 } else cluster = require('./core/cluster').createStandalone(feishuGateway);

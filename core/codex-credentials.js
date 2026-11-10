@@ -3,7 +3,7 @@ const { codexCredentials } = require('../engines/codex/proxy');
 const fingerprint = value => crypto.createHash('sha256').update(String(value || '')).digest('hex');
 function tokenClaims(auth) { try { return JSON.parse(Buffer.from(auth.tokens.access_token.split('.')[1], 'base64url').toString()); } catch { return {}; } }
 function accountId(auth, mode) {
-  if (mode === 'api-key') return 'api:' + fingerprint(auth.OPENAI_API_KEY);
+  if (mode === 'api-key') return 'api:' + fingerprint(auth.base_url ? auth.base_url + ':' + auth.OPENAI_API_KEY : auth.OPENAI_API_KEY);
   let subject = tokenClaims(auth).sub || '';
   if (!subject) { try { subject = JSON.parse(Buffer.from(auth.tokens.id_token.split('.')[1], 'base64url')).sub || ''; } catch {} }
   const identity = [auth.tokens?.account_id || '', subject].join(':');

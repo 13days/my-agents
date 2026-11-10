@@ -52,7 +52,7 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
   let config = { mode: 'manual', selected: '', accounts: [], localToken: crypto.randomBytes(32).toString('hex') };
   if (fs.existsSync(file)) config = { ...config, ...JSON.parse(fs.readFileSync(file, 'utf8')) };
   if (!config.sessionRoutes || typeof config.sessionRoutes !== 'object' || Array.isArray(config.sessionRoutes)) config.sessionRoutes = {};
-  let shared = [];
+  let shared = [], prepare = null, routeObserver = null, poolRequired = false;
   const accountsOf = () => [...config.accounts, ...shared];
   const health = new Map();
   const live = new Map(); // sessionId -> { accountId, accountName, inflight, lastAt, lastStatus, model, pinned }
@@ -116,6 +116,7 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
       if (!old || old.url !== a.url || old.token !== a.token || old.authType !== a.authType) health.delete(a.id);
     }
     config = next;
+    routeObserver?.({mode:config.mode,selected:config.selected});
     if (settingsChange?.changed) {
       try { atomicJSON(path.join(claudeDir, 'settings.json'), settingsChange.settings); }
       catch (e) { throw new Error('账号已保存，但 Claude 环境变量写入失败：' + e.code); }
@@ -198,11 +199,13 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
       size += c.length;
       if (size > 32 * 1024 * 1024) { res.writeHead(413); res.end(); req.destroy(); } else chunks.push(c);
     });
-    req.on('end', () => {
+    req.on('end', async () => {
+      try { await prepare?.(); } catch { res.writeHead(503, {'content-type':'application/json'}); return res.end(JSON.stringify({error:'账号池暂不可用，请稍后重试'})); }
       if (res.destroyed) return;
       const body = Buffer.concat(chunks), started = Date.now();
       const snapshot = { ...config, mode: config.mode === 'manual' && !config.selected && shared.length ? 'failover' : config.mode, accounts: accountsOf() };
       const isOAuth = /^\/(?:v1|api)\/oauth\//.test(req.url);
+      if (poolRequired && !snapshot.accounts.length && !isOAuth) { res.writeHead(401,{'content-type':'application/json'});return res.end(JSON.stringify({error:'Claude 账号池中没有启用的账号，请登录或启用账号'})); }
       const enabled = snapshot.accounts.filter(a => a.enabled);
       let sessionId = '', model = '';
       try { const parsed = JSON.parse(body.toString()); sessionId = sessionIdOf(parsed); model = typeof parsed.model === 'string' ? parsed.model : ''; } catch {}
@@ -275,14 +278,17 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
           delete headers['x-api-key'];
           if (account.authType === 'api-key') headers['x-api-key'] = account.token;
           else headers.authorization = 'Bearer ' + account.token;
-          if (headers['anthropic-beta']) {
+          if (account.authType === 'oauth') headers['anthropic-beta'] = [...new Set([...(headers['anthropic-beta'] || '').split(',').filter(Boolean), 'oauth-2025-04-20'])].join(',');
+          if (account.authType !== 'oauth' && headers['anthropic-beta']) {
             headers['anthropic-beta'] = headers['anthropic-beta'].split(',').filter(b => !b.trim().startsWith('oauth-')).join(',');
             if (!headers['anthropic-beta']) delete headers['anthropic-beta'];
           }
         } else if (headers.authorization === 'Bearer ' + snapshot.localToken || headers['x-api-key'] === snapshot.localToken) {
           return fail(401, '透传账号需要客户端的真实凭证，不能使用本地代理 Token');
         }
-        const requestPath = target.pathname.replace(/\/$/, '') + (req.url.startsWith('/') ? req.url : '/' + req.url);
+        const basePath=target.pathname.replace(/\/$/, '');
+        const incoming=req.url.startsWith('/') ? req.url : '/' + req.url;
+        const requestPath = basePath + (basePath.endsWith('/v1') && incoming.startsWith('/v1/') ? incoming.slice(3) : incoming);
         let moved = false;
         const cool = status => {
           const seconds = status === 429 || status === 402 ? 60 : status === 401 || status === 403 ? 300 : 15;
@@ -332,7 +338,8 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
     });
   }
   function clientEnv() {
-    if (!accountsOf().some(a => a.enabled && a.authType !== 'passthrough')) return null;
+    if (config.mode==='manual' && accountsOf().find(a=>a.id===config.selected&&a.enabled)?.authType==='passthrough') return null;
+    if (!poolRequired && !accountsOf().some(a=>a.authType!=='passthrough')) return null;
     return { ANTHROPIC_BASE_URL: localURL, ANTHROPIC_AUTH_TOKEN: config.localToken, ANTHROPIC_API_KEY: '' };
   }
   async function modelEnvForSession(sessionId) {
@@ -352,6 +359,7 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
           const url = account.url.replace(/\/$/, '') + (new URL(account.url).pathname.endsWith('/v1') ? '/models' : '/v1/models');
           const headers = { 'anthropic-version': '2023-06-01', ...(account.delegateAccount ? { 'x-my-agents-account': account.delegateAccount } : {}) };
           if (account.authType === 'api-key') headers['x-api-key'] = account.token; else headers.authorization = `Bearer ${account.token}`;
+          if (account.authType === 'oauth') headers['anthropic-beta'] = 'oauth-2025-04-20';
           const startedAt = Date.now(), info = { ...reserveCapture(), sessionId, method: 'GET', routing: { mode: config.mode, reason: pinned ? 'session_pin' : 'model_discovery', attempt: 1, requestedModel: '', actualModel: '' } };
           let response, text;
           try { response = await fetch(url, { headers, signal: AbortSignal.timeout(3000) }); text = await response.text(); }
@@ -402,6 +410,6 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
     if (!accountsOf().some(a => a.id === selected && a.enabled)) selected = '';
     return save({ mode, selected, accounts: accountsOf().map(({ token, env, delegateAccount, ...a }) => a) });
   }
-  return { exportAccounts: () => JSON.parse(JSON.stringify(config.accounts)), sharedCatalog: () => ({ token: config.localToken, accounts: config.accounts.filter(a => a.enabled && a.authType !== 'passthrough').map(({ id, name, modelMap }) => ({ id, name, modelMap })) }), setShared: accounts => { shared = accounts; }, status, save, route, importSettings, setup, handle, clientEnv, modelEnvForSession, models, sessions, setSessionRoute, reset: () => { health.clear(); return status(); } };
+  return { requirePool: value => { poolRequired=!!value; }, setRoutingObserver: fn => { routeObserver = fn; }, applyPoolRouting: input => { if (config.mode === input.mode && config.selected === input.selected) return; config={...config,mode:input.mode,selected:input.selected};atomicJSON(file,config); }, setPreparation: fn => { prepare = fn; }, exportAccounts: () => JSON.parse(JSON.stringify(config.accounts)), sharedCatalog: () => ({ token: config.localToken, accounts: config.accounts.filter(a => a.enabled && a.authType !== 'passthrough').map(({ id, name, modelMap }) => ({ id, name, modelMap })) }), setShared: accounts => { for (const account of accounts) {const old=shared.find(row=>row.id===account.id);if(old&&old.token!==account.token)health.delete(account.id);} shared = accounts; }, status, save, route, importSettings, setup, handle, clientEnv, modelEnvForSession, models, sessions, setSessionRoute, reset: () => { health.clear(); return status(); } };
 }
 module.exports = { createRouter, parseEnvInput };

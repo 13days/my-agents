@@ -1,8 +1,9 @@
 const { createRelayClient } = require('../node/relay');
 const { createAccountVault } = require('./account-vault');
+const claudeCredentials = require('./claude-credentials');
 const { fingerprint, accountId, issued, expiresSoon, renewCodex, codexCredentials } = require('./codex-credentials');
 
-function createAccountPool({ accounts, codex, identity, peers, dir, secret, fallbackSecret, coordination = null, relayClient = createRelayClient, renew = renewCodex, now = Date.now }) {
+function createAccountPool({ accounts, codex, claude = { read: () => null }, renewClaude = claudeCredentials.renewClaude, identity, peers, dir, secret, fallbackSecret, coordination = null, relayClient = createRelayClient, renew = renewCodex, now = Date.now }) {
   const vault = createAccountVault({ dir, secret, fallbackSecret, nodeId: identity().id, now });
   const transport = require('./account-transport').createAccountTransport(secret);
   const sources = new Map(), refreshing = new Map();
@@ -10,10 +11,12 @@ function createAccountPool({ accounts, codex, identity, peers, dir, secret, fall
   const catalog = () => ({ claude: accounts.sharedCatalog(), codex: codex.catalog() });
   function observe() {
     vault.observe({ label: identity().label, claude: accounts.exportAccounts(), codex: codex.read() });
+    const auth = claude.read(); if (auth) vault.importClaude(auth);
   }
   const origins = () => Object.entries(vault.origins()).map(([id, row]) => ({ id, ...row.payload }));
   const loopback = url => { try { const host = new URL(url).hostname; return ['localhost', '[::1]', '[::]', '0.0.0.0'].includes(host) || host.endsWith('.localhost') || /^127\./.test(host) || host.startsWith('[::ffff:127.'); } catch { return true; } };
   function install() {
+    accounts.requirePool?.(Object.keys(vault.claudeAccounts()).length>0);
     for (const source of origins()) vault.importCodex(source.codex, { origin: source.id });
     const seen = new Set(accounts.exportAccounts().filter(a => a.enabled).map(a => fingerprint(a.url + ':' + a.authType + ':' + a.token)));
     const shared = origins().sort((a, b) => a.id.localeCompare(b.id)).filter(source => source.id !== identity().id).flatMap(source => (source.claude || []).map(account => {
@@ -24,7 +27,11 @@ function createAccountPool({ accounts, codex, identity, peers, dir, secret, fall
         ...(bridge ? { enabled: account.enabled && !!live, url: live?.url || account.url, authType: 'bearer', token: live?.catalog?.claude?.token || '', delegateAccount: account.id, env: {}, unavailableReason: live ? '' : '账号依赖来源机器上的本地桥接服务；请连接该服务或在目标机器部署桥接' } : {}),
       };
     }));
-    accounts.setShared(shared.filter(account => { const key = fingerprint(account.url + ':' + account.authType + ':' + account.token); if (seen.has(key)) return false; if (account.enabled) seen.add(key); return true; }));
+    accounts.setShared([...claudeEntries().map(entry => ({ id:entry.key, name:entry.label, url:'https://api.anthropic.com', token:entry.auth.claudeAiOauth.accessToken, authType:'oauth', modelMap:{}, env:{}, enabled:claudeCredentials.available(entry.auth,now()), managed:true, shared:true, mode:'subscription', sourceNode:entry.source, replicated:true })), ...shared.filter(account => { const key = fingerprint(account.url + ':' + account.authType + ':' + account.token); if (seen.has(key)) return false; if (account.enabled) seen.add(key); return true; })]);
+    const claudeRouting = vault.preference('claude-routing');
+    if (claudeRouting) accounts.applyPoolRouting?.({...claudeRouting,selected:claudeRouting.selected?.startsWith('cluster:'+identity().id+':') ? claudeRouting.selected.slice(('cluster:'+identity().id+':').length) : claudeRouting.selected});
+    const localClaude = claude.read();
+    if (localClaude) { const id = claudeCredentials.claudeAccountId(localClaude), fresh = vault.credential(id,localClaude); if (fresh !== localClaude && vault.matchesPrevious(id,localClaude)) claude.updated?.(localClaude,fresh); }
     const localAuth = codex.read();
     if (localAuth?.tokens?.access_token) { const id = accountId(localAuth, 'chatgpt'), fresh = vault.credential(id, localAuth); if (fresh !== localAuth && vault.matchesPrevious(id, localAuth)) codex.updated?.(localAuth, fresh); }
   }
@@ -61,8 +68,32 @@ function createAccountPool({ accounts, codex, identity, peers, dir, secret, fall
     })().finally(() => { updating = null; });
     return updating;
   }
-  function codexEntries(mode) {
-    return Object.values(vault.codexAccounts()).filter(row => !row.deleted && row.enabled && row.mode === mode).map(row => ({ key: row.id, source: row.origin, label: row.name, auth: vault.credential(row.id, row.auth) })).sort((a, b) => a.key.localeCompare(b.key));
+  function claudeEntries() {
+    return Object.values(vault.claudeAccounts()).filter(row => !row.deleted && row.enabled).map(row => ({ key:row.id, source:row.origin, label:row.name, auth:vault.credential(row.id,row.auth) }));
+  }
+  function setClaudeRouting(input) {
+    if (!['manual','failover','round-robin'].includes(input.mode)) throw new Error('Claude 路由模式无效');
+    const selected=input.selected || '', account=claudeStatus().accounts.find(row=>row.id===selected);
+    if (selected && (!account || !account.enabled) || input.mode==='manual' && !selected) throw new Error('请选择启用的 Claude 账号');
+    vault.preference('claude-routing',{mode:input.mode,selected:account && !account.managed && !account.shared ? 'cluster:'+identity().id+':'+selected : selected});
+    install();
+  }
+  function claudeStatus() {
+    const status=accounts.status();
+    return { ...status, mode:status.mode==='manual'&&!status.selected&&status.accounts.length ? 'failover' : status.mode, accounts: [...accounts.status().accounts.filter(row => !row.managed), ...Object.values(vault.claudeAccounts()).filter(row => !row.deleted).map(row => {
+      const auth = vault.credential(row.id,row.auth);
+      return { id:row.id, name:row.name, origin:row.origin, enabled:row.enabled, mode:'subscription', managed:true, available:claudeCredentials.available(auth,now()), renewable:!!auth.claudeAiOauth.refreshToken, expiresAt:auth.claudeAiOauth.expiresAt ? new Date(auth.claudeAiOauth.expiresAt).toISOString() : '' };
+    })] };
+  }
+  function importClaude(auth, name) { vault.importClaude(auth || claude.read(), { name, explicit:true }); install(); return claudeStatus(); }
+  function configureClaude(id, input) { vault.configureClaude(id,{name:input.name,enabled:input.enabled,deleted:input.deleted}); install(); return claudeStatus(); }
+  async function prepareClaude() {
+    observe(); install();
+    await Promise.all(claudeEntries().filter(entry => claudeCredentials.expiresSoon(entry.auth,now()) && entry.auth.claudeAiOauth.refreshToken).map(entry => renewEntry(entry,false).catch(() => {})));
+    install();
+  }
+  function codexEntries(mode, mixed = false) {
+    return Object.values(vault.codexAccounts()).filter(row => !row.deleted && row.enabled && (mixed || row.mode === mode)).map(row => ({ key: row.id, source: row.origin, label: row.name, mode:row.mode, auth: vault.credential(row.id, row.auth) })).sort((a, b) => a.key.localeCompare(b.key));
   }
   const routing = () => vault.preference('codex-routing') || { mode: 'round-robin', selected: '' };
   function setRouting(input) {
@@ -76,10 +107,10 @@ function createAccountPool({ accounts, codex, identity, peers, dir, secret, fall
     if (id && !Object.values(vault.codexAccounts()).some(row => row.id === id && row.enabled && !row.deleted)) throw new Error('Codex 账号不存在或已停用');
     vault.preference('codex-pin:' + sessionId, id ? { accountId: id, manual: true } : { accountId: '', manual: true, followGlobal: true });
   }
-  const routeFor = (entry, mode) => ({ id: entry.key + ':' + fingerprint(entry.auth.tokens?.access_token || entry.auth.OPENAI_API_KEY).slice(0, 16), accountId: entry.key, sourceNode: entry.source, label: entry.label, mode: routing().mode, headers: codexCredentials(entry.auth, mode) });
+  const routeFor = (entry, mode) => ({ id: entry.key + ':' + fingerprint(entry.auth.tokens?.access_token || entry.auth.OPENAI_API_KEY).slice(0, 16), accountId: entry.key, sourceNode: entry.source, label: entry.label, mode: routing().mode, authMode:entry.mode, upstream:entry.mode === 'api-key' ? entry.auth.base_url || 'https://api.openai.com/v1' : 'https://chatgpt.com/backend-api/codex', headers: codexCredentials(entry.auth, entry.mode || mode) });
   function codexRoute(mode, sessionId = '', excluded = [], forced = '') {
     const config = routing(), pin = sessionId && vault.preference('codex-pin:' + sessionId);
-    let candidates = codexEntries(mode).map(entry => routeFor(entry, mode)).filter(route => route.headers && !excluded.includes(route.id) && (vault.preference('codex-health:' + route.accountId)?.cooldownUntil || 0) <= now());
+    let candidates = codexEntries(mode, true).map(entry => routeFor(entry, mode)).filter(route => route.headers && !excluded.includes(route.id) && (vault.preference('codex-health:' + route.accountId)?.cooldownUntil || 0) <= now());
     const explicit = pin?.followGlobal ? '' : pin?.manual ? pin.accountId : forced;
     if (explicit) candidates = candidates.filter(route => route.accountId === explicit).map(route => ({ ...route, explicit: true }));
     if (!candidates.length) return null;
@@ -105,16 +136,30 @@ function createAccountPool({ accounts, codex, identity, peers, dir, secret, fall
     return { ...routing(), routes: Object.fromEntries(Object.entries(vault.preferences()).filter(([key]) => key.startsWith('codex-pin:')).map(([key, row]) => [key.slice(10), row.value?.accountId || ''])), accounts: Object.values(vault.codexAccounts()).filter(row => !row.deleted).map(row => {
       const auth = vault.credential(row.id, row.auth), health = vault.preference('codex-health:' + row.id) || {};
       let expiresAt = ''; try { const exp = JSON.parse(Buffer.from(auth.tokens.access_token.split('.')[1], 'base64url')).exp; if (exp) expiresAt = new Date(exp * 1000).toISOString(); } catch {}
-      return { id: row.id, name: row.name, origin: row.origin, enabled: row.enabled, mode: row.mode, available: !!codexCredentials(auth, row.mode), renewable: !!auth.tokens?.refresh_token, expiresAt, lastRefresh: auth.last_refresh || '', ...health };
+      return { id: row.id, name: row.name, origin: row.origin, enabled: row.enabled, mode: row.mode, url:auth.base_url || (row.mode === 'api-key' ? 'https://api.openai.com/v1' : ''), available: !!codexCredentials(auth, row.mode), renewable: !!auth.tokens?.refresh_token, expiresAt, lastRefresh: auth.last_refresh || '', ...health };
     }) };
   }
   function importCodex(auth, name) {
     if (!auth || typeof auth !== 'object' || Array.isArray(auth) || Buffer.byteLength(JSON.stringify(auth)) > 100000 || (!auth.tokens?.access_token && !auth.OPENAI_API_KEY)) throw new Error('请选择有效的 Codex auth.json 登录文件');
     if (name !== undefined && (typeof name !== 'string' || name.length > 100)) throw new Error('账号名称最多 100 个字');
+    if (auth.base_url) {
+      let target; try { target = new URL(auth.base_url); } catch { throw new Error('代理地址无效'); }
+      if (!['http:','https:'].includes(target.protocol) || target.username || target.password || target.search || target.hash) throw new Error('代理地址应为无凭证、无查询参数的 HTTP(S) 地址');
+      auth = { ...auth, base_url:target.href.replace(/\/$/,'') };
+    }
+    if (auth.OPENAI_API_KEY && (typeof auth.OPENAI_API_KEY !== 'string' || /[\r\n]/.test(auth.OPENAI_API_KEY))) throw new Error('代理 Token 无效');
     vault.importCodex(auth, { name, explicit: true }); install(); return codexStatus();
   }
   function configureCodex(id, input) {
-    vault.configureCodex(id, input); if ((input.deleted || input.enabled === false) && routing().selected === id) setRouting({ mode: 'round-robin', selected: '' }); return codexStatus();
+    const patch = {name:input.name,enabled:input.enabled,deleted:input.deleted};
+    if (input.url !== undefined || input.token !== undefined) {
+      const row=vault.codexAccounts()[id]; if (!row || row.mode!=='api-key') throw new Error('只有代理 / API 账号可以修改地址与 Token');
+      const token=input.token || row.auth.OPENAI_API_KEY;
+      let url;try{url=new URL(input.url || row.auth.base_url || 'https://api.openai.com/v1');}catch{throw new Error('代理地址无效');}
+      if (!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash||typeof token!=='string'||!token||/[\r\n]/.test(token))throw new Error('代理地址或 Token 无效');
+      patch.proxyAuth={...row.auth,OPENAI_API_KEY:token,base_url:url.href.replace(/\/$/,'')};
+    }
+    vault.configureCodex(id, patch); if ((input.deleted || input.enabled === false) && routing().selected === id) setRouting({ mode: 'round-robin', selected: '' }); return codexStatus();
   }
   async function replicateQuorum() {
     const votes = 1 + (await Promise.all(peers().map(syncPeer))).filter(Boolean).length;
@@ -125,21 +170,22 @@ function createAccountPool({ accounts, codex, identity, peers, dir, secret, fall
     if (refreshing.has(id)) return refreshing.get(id);
     const pending = (async () => {
       observe();
-      const entry = codexEntries('chatgpt').find(item => item.key === id);
+      const isClaude = id.startsWith('claude-sub:');
+      const entry = (isClaude ? claudeEntries() : codexEntries('chatgpt')).find(item => item.key === id);
       if (!entry) throw new Error('共享账号不存在');
-      const currentHash = fingerprint(entry.auth.tokens.access_token).slice(0, 16);
-      if (expected && expected !== currentHash || !force && !expiresSoon(entry.auth, now())) return { snapshot: vault.export() };
+      const currentHash = fingerprint(isClaude ? entry.auth.claudeAiOauth.accessToken : entry.auth.tokens.access_token).slice(0, 16);
+      if (expected && expected !== currentHash || !force && !(isClaude ? claudeCredentials.expiresSoon(entry.auth, now()) : expiresSoon(entry.auth, now()))) return { snapshot: vault.export() };
       const lease = vault.lease(id);
       if (lease?.until > now() && lease.holder !== identity().id) throw new Error('其他节点正在刷新此共享登录，请稍后重试');
       vault.claim(id, now() + 60000);
       await replicateQuorum();
       if (coordination && !coordination.canRefresh()) throw new Error('账号刷新主节点已切换，请稍后重试');
       try {
-        const auth = await renew(entry.auth);
+        const auth = await (isClaude ? renewClaude : renew)(entry.auth);
         // Persist the rotated refresh token even if leadership changed during
         // the HTTP exchange. Dropping it would lose the grant entirely.
         vault.rotate(id, auth, entry.auth);
-        await codex.updated?.(entry.auth, auth);
+        if (isClaude) await claude.updated?.(entry.auth, auth); else await codex.updated?.(entry.auth, auth);
         await replicateQuorum();
         return { snapshot: vault.export() };
       } finally { vault.claim(id, 0); await Promise.all(peers().map(syncPeer)); install(); }
@@ -147,7 +193,7 @@ function createAccountPool({ accounts, codex, identity, peers, dir, secret, fall
     refreshing.set(id, pending); return pending;
   }
   async function renewEntry(entry, force) {
-    const request = { id: entry.key, expected: fingerprint(entry.auth.tokens.access_token).slice(0, 16), force };
+    const request = { id: entry.key, expected: fingerprint(entry.auth.claudeAiOauth?.accessToken || entry.auth.tokens?.access_token).slice(0, 16), force };
     let response;
     if (!coordination || coordination.canRefresh()) response = await refreshAtLeader(request);
     else { const packet = await coordination.refresh({ ...request, publicKey: transport.publicKey }); response = transport.open(packet.sealed, packet.publicKey); }
@@ -162,8 +208,8 @@ function createAccountPool({ accounts, codex, identity, peers, dir, secret, fall
       if (rejected?.auth.tokens.refresh_token) { try { await renewEntry(rejected, true); } catch {} }
     }
     let selected = codexRoute(mode, sessionId, excluded, forced);
-    if (mode !== 'chatgpt') return selected;
-    const entry = selected ? codexEntries(mode).find(item => item.key === selected.accountId) : codexEntries(mode).find(item => (!forced || item.key === forced) && item.auth.tokens.refresh_token && !excluded.some(id => id.startsWith(item.key + ':')));
+    if (selected && selected.authMode !== 'chatgpt') return selected;
+    const entry = selected ? codexEntries('chatgpt').find(item => item.key === selected.accountId) : codexEntries('chatgpt').find(item => (!forced || item.key === forced) && item.auth.tokens.refresh_token && !excluded.some(id => id.startsWith(item.key + ':')));
     if (entry && (!selected || expiresSoon(entry.auth, now()))) {
       try { await renewEntry(entry, false); selected = codexRoute(mode, sessionId, excluded, forced); }
       catch (error) { if (!selected) throw error; }
@@ -173,13 +219,15 @@ function createAccountPool({ accounts, codex, identity, peers, dir, secret, fall
   function status() {
     const online = new Set([identity().id, ...peers().map(peer => peer.id)]);
     return origins().map(source => ({ id: source.id, label: source.label || source.id, local: source.id === identity().id, online: online.has(source.id), replicated: true,
-      claudeAccounts: (source.claude || []).filter(a => a.enabled).length,
+      claudeAccounts: (source.claude || []).filter(a => a.enabled).length + Object.values(vault.claudeAccounts()).filter(a=>!a.deleted&&a.enabled&&a.origin===source.id).length,
       bridgeAccounts: (source.claude || []).filter(a => a.enabled && loopback(a.url)).length,
       codexModes: ['chatgpt', 'api-key'].filter(mode => codexEntries(mode).some(entry => entry.source === source.id && codexCredentials(entry.auth, mode))),
     }));
   }
   for (const source of origins()) vault.importCodex(source.codex, { origin: source.id });
   observe(); install();
-  return { catalog, egress: excluded => { const candidate = [...sources].filter(([id, source]) => !excluded.includes(id) && source.catalog?.codex?.token).sort(([a], [b]) => a.localeCompare(b))[0]; return candidate ? { id: candidate[0], url: candidate[1].url, token: candidate[1].catalog.codex.token } : null; }, codexStatus, resetCodex: () => { for (const entry of Object.values(vault.codexAccounts())) vault.preference('codex-health:' + entry.id, { cooldownUntil: 0, lastStatus: 0 }); return codexStatus(); }, setRouting, pinCodex, importCodex, configureCodex, accepted, rejected, exchange, exchangeWire, refreshWire, exchangeKey: () => ({ publicKey: transport.publicKey }), refresh, refreshAtLeader, resolveCodex, codexRoute, status, vault };
+  accounts.setPreparation?.(prepareClaude);
+  accounts.setRoutingObserver?.(input => { if (input.selected || input.mode!=='manual') setClaudeRouting(input); });
+  return { setClaudeRouting, observeNative: (source, input) => { if (input.claude) vault.importClaude(input.claude,{origin:source}); if (input.codex) vault.importCodex(input.codex,{origin:source}); install(); }, claudeStatus, importClaude, configureClaude, prepareClaude, catalog, egress: excluded => { const candidate = [...sources].filter(([id, source]) => !excluded.includes(id) && source.catalog?.codex?.token).sort(([a], [b]) => a.localeCompare(b))[0]; return candidate ? { id: candidate[0], url: candidate[1].url, token: candidate[1].catalog.codex.token } : null; }, codexStatus, resetCodex: () => { for (const entry of Object.values(vault.codexAccounts())) vault.preference('codex-health:' + entry.id, { cooldownUntil: 0, lastStatus: 0 }); return codexStatus(); }, setRouting, pinCodex, importCodex, configureCodex, accepted, rejected, exchange, exchangeWire, refreshWire, exchangeKey: () => ({ publicKey: transport.publicKey }), refresh, refreshAtLeader, resolveCodex, codexRoute, status, vault };
 }
 module.exports = { createAccountPool };

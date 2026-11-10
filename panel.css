@@ -1035,3 +1035,14 @@ body[data-nav-collapsed="true"] .resource-engine-switch button { padding: 5px 1p
 .codex-pool-account p { margin:0 0 6px; }
 .codex-pool-account .node-actions { flex-wrap:wrap; justify-content:flex-end; }
 @media(max-width:900px) { .codex-pool-account { align-items:flex-start; flex-direction:column; } .codex-pool-account .node-actions { justify-content:flex-start; } }
+
+/* Engine account pools share controls but stay inside their engine panel. */
+.engine-account-pool { margin: 20px 0; }
+.account-pool-login { margin: 18px 0; padding: 14px 16px; border-left: 2px solid var(--accent); background: rgba(255,255,255,.025); border-radius: 6px; }
+.account-pool-login p { margin: 8px 0 0; color: var(--muted); line-height: 1.7; }
+.account-pool-login code { color: var(--accent); white-space: nowrap; }
+.pool-proxy-dialog { width: min(560px,calc(100vw - 32px)); color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 14px; padding: 24px; }
+.pool-proxy-dialog::backdrop { background: #0009; }
+.pool-proxy-dialog label { display: grid; gap: 8px; margin: 16px 0; }
+.pool-proxy-dialog input { box-sizing: border-box; width: 100%; padding: 10px 12px; color: inherit; background: transparent; border: 1px solid var(--border); border-radius: 6px; }
+.pool-proxy-dialog [data-error] { color: #e88; }

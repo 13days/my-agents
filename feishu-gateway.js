@@ -50,10 +50,10 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   const configFile = path.join(dir, 'panel-feishu.json'), stateFile = path.join(dir, 'panel-feishu-state.json');
   const inbox = createFeishuInbox(dir);
   const defaults = { allowAllUsers: false, allowAllGroups: false, enabled: false, appId: '', appSecret: '', domain: 'feishu', allowedUserIds: [], disabledUserIds: [], allowedChatIds: [], defaultProject: '', defaultMachine: '', defaultEngine: 'claude', worktree: true, model: '', keepAwake: false };
-  const emptyState = () => ({ bindings: {}, engineBindings: {}, cards: {}, taskCards: {}, sessionModels: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} });
+  const emptyState = () => ({ bindings: {}, engineBindings: {}, cards: {}, sessionRefs: {}, taskCards: {}, sessionModels: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} });
   let config = defaults, state = emptyState(), phase = 'disabled', lastError = '', channel = null, connecting = null, pairing = null;
   function reloadFiles() {
-    try { config = { ...defaults, ...load(configFile, {}) }; state = { ...emptyState(), ...load(stateFile, {}) }; state.taskCards ||= {}; state.sessionModels ||= {}; state.drafts ||= {}; }
+    try { config = { ...defaults, ...load(configFile, {}) }; state = { ...emptyState(), ...load(stateFile, {}) }; state.taskCards ||= {}; state.sessionRefs ||= {}; state.sessionModels ||= {}; state.drafts ||= {}; }
     catch (e) { lastError = e.message; phase = 'error'; }
   }
   reloadFiles();
@@ -119,8 +119,40 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   async function sendLong(msg, text) {
     return send(msg, { markdown: text || '没有可显示的内容' });
   }
-  function rememberCard(result, msg, binding) {
-    if (result?.messageId) { state.cards[result.messageId] = { ...(binding ? { sessionId: binding.id, cwd: binding.cwd, machineId: binding.machineId, engine: binding.engine, node: binding.node, workspaceId: binding.workspaceId, worktree: binding.worktree } : {}), owner: msg.senderId, chatId: msg.chatId, chatType: msg.chatType, key: contextKey(msg), threadId: threadOf(msg) }; persist(); }
+  function rememberSession(binding) {
+    state.sessionRefs[binding.id] = { ...state.sessionRefs[binding.id], id:binding.id, cwd:binding.cwd, machineId:binding.machineId, node:binding.node, engine:binding.engine, workspaceId:binding.workspaceId, worktree:binding.worktree, started:!!binding.started || !!state.sessionRefs[binding.id]?.started };
+  }
+  function rememberCard(result, msg, binding, extra = {}) {
+    if (binding) rememberSession(binding);
+    if (result?.messageId) { state.cards[result.messageId] = { ...(binding ? { sessionId: binding.id, cwd: binding.cwd, machineId: binding.machineId, engine: binding.engine, node: binding.node, workspaceId: binding.workspaceId, worktree: binding.worktree } : {}), owner: msg.senderId, chatId: msg.chatId, chatType: msg.chatType, key: contextKey(msg), threadId: threadOf(msg), ...extra }; persist(); }
+  }
+  function referenceId(id) {
+    const seen=new Set();
+    while (state.sessionRefs[id]?.alias) { if(seen.has(id))throw new Error('会话引用存在循环，请检查历史绑定');seen.add(id);id=state.sessionRefs[id].alias; }
+    return id;
+  }
+  async function recoverSessionCard(msg, key, missing) {
+    const candidates=[state.bindings[key],...Object.values(state.engineBindings[key] || {}),...Object.values(state.cards).filter(card=>card.key===key&&card.sessionId).reverse().map(card=>({...card,id:card.sessionId}))];
+    const rows=[],seen=new Set([missing]);
+    for(const ref of candidates) {
+      if(!ref?.id)continue;const id=referenceId(ref.id);if(seen.has(id))continue;seen.add(id);
+      const existing=session(id);if(!existing)continue;
+      rows.push({...existing,...(state.sessionRefs[id] || {}),project:existing.project || ref.cwd});if(rows.length===5)break;
+    }
+    const result=await send(msg,{card:cards.sessionRecovery({engines:catalog(),owner:msg.senderId,key,rows,missing})});rememberCard(result,msg);return result;
+  }
+  async function repairCard(input) {
+    if(!/^[\w-]{8,100}$/.test(input.messageId || '') || !/^[a-zA-Z0-9-]{8,100}$/.test(input.originalSessionId || ''))throw new Error('旧卡片引用无效');
+    const msg={messageId:input.messageId,senderId:input.senderId,chatId:input.chatId,chatType:input.chatType,threadId:input.threadId || '',content:''};
+    if(!['group','p2p'].includes(msg.chatType)||!allowed(msg))throw new Error('此位置没有授权');
+    const item=panel.resolveSession ? await panel.resolveSession(input.targetSessionId) : session(input.targetSessionId);
+    if(!item)throw new Error('目标历史会话不可用');
+    const binding=bindingFor({...item,started:true});
+    if(panel.sessionExists && !await panel.sessionExists(binding))throw new Error('原执行机器尚未确认目标历史，请恢复连接后重试');
+    const backup=path.join(dir,'backups','card-reference-'+now()+'-'+crypto.randomUUID());fs.mkdirSync(backup,{recursive:true,mode:0o700});fs.copyFileSync(stateFile,path.join(backup,'panel-feishu-state.json'));fs.chmodSync(path.join(backup,'panel-feishu-state.json'),0o600);
+    rememberCard({messageId:msg.messageId},msg,binding,{originalSessionId:input.originalSessionId,repairedAt:now()});
+    state.sessionRefs[input.originalSessionId]={id:input.originalSessionId,alias:binding.id};persist();
+    return {ok:true,messageId:msg.messageId,sessionId:binding.id,machineId:binding.machineId,backup};
   }
   function session(id) { return panel.sessions().find(item => item.id === id); }
   function engineOf(binding) { return catalog().fallback(binding.engine || session(binding.id)?.engine || panel.engine?.(binding.id), 'claude'); }
@@ -357,10 +389,12 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (binding.engine !== engine) { binding.engine = engine; persist(); }
     if (panel.machineId?.() && panel.machineId() !== 'local' && !binding.machineId) throw new Error('此旧会话尚未记录执行机器，请发送 /node 选择机器和项目，再继续。系统不会把旧目录默认用于当前主节点');
     const previousId = binding.id;
+    rememberSession(binding);persist();
     const node = nodeOf(binding);
     const result = await panel.submit({ sessionId: binding.sourceSessionId || binding.id, switchMachine: !!binding.sourceSessionId, cwd: binding.cwd, workspaceId: binding.workspaceId, worktree: (binding.worktreeEnabled ?? config.worktree) && !session(binding.id), model: selectedModel(binding), machineId: binding.machineId, engine, ...(node !== 'local' ? { node } : {}), ...input });
     if (result?.sessionId && result.sessionId !== binding.id) {
       binding.id = result.sessionId;
+      state.sessionRefs[previousId] = {...state.sessionRefs[previousId],alias:binding.id};
       if (Object.hasOwn(state.sessionModels, previousId)) { state.sessionModels[binding.id] = state.sessionModels[previousId]; delete state.sessionModels[previousId]; }
       for (const card of Object.values(state.cards)) if (card.sessionId === previousId) { card.originalSessionId ||= previousId; card.sessionId = binding.id; }
     }
@@ -375,6 +409,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (!list.includes(result.cwd)) list.push(result.cwd);
     }
     if (result?.worktree) binding.worktree = result.worktree;
+    rememberSession(binding);
     for (const [key, saved] of Object.entries(state.engineBindings)) if (saved[engine]?.id === previousId || state.bindings[key] === binding) rememberEngine(key, binding);
     persist();
   }
@@ -706,14 +741,16 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
         bind(key, { id: crypto.randomUUID(), cwd: value.cwd, engine: catalog().fallback(value.engine, defaultEngine()), ...(node !== 'local' ? { node } : {}) }); return currentCard(msg, state.bindings[key]);
       }
       const original = state.cards[msg.messageId];
-      const targetId = original?.originalSessionId === value.id ? original.sessionId : value.id;
+      const repaired = original?.repairedAt && ['view','history','switch','user_messages'].includes(value.action);
+      const migrated = original?.originalSessionId && original.originalSessionId === value.id;
+      const targetId = referenceId(repaired || migrated ? original.sessionId : value.id);
       const remembered = original?.sessionId === targetId ? { ...original, id: targetId, project: original.cwd } : null;
       const cached = [state.bindings[key], ...Object.values(state.engineBindings[key] || {})].find(item => item?.id === targetId);
-      const hint = value.session?.id === targetId ? value.session : remembered || cached;
+      const hint = value.session?.id === targetId ? value.session : remembered || cached || state.sessionRefs[targetId];
       const resolved = panel.resolveSession ? await panel.resolveSession(targetId, hint || {}) : null;
       const item = resolved ? { ...session(targetId), ...resolved, started: true } : session(targetId) || (hint ? { ...hint, id: targetId, project: hint.project || hint.cwd, title: '原会话' } : null);
       if (!item && value.action === 'history' && state.bindings[key]?.id === targetId) return send(msg, { text: '这段会话暂无已保存的对话，发送问题开始后可再查看。' });
-      if (!item) throw new Error('当前未能定位此会话，请检查原执行机器连接，或发送 /sessions 刷新；历史不会因此被删除');
+      if (!item) return recoverSessionCard(msg,key,targetId);
       if (['stop','permission'].includes(value.action) && value.taskMessageId && panel.activeMessageId && panel.activeMessageId(item.id) !== value.taskMessageId) throw new Error('这张卡片对应的任务已结束，请发送 /current 查看当前任务');
       if (value.action === 'permission') { await panel.permission(item.id, value.requestId, value.behavior); return send(msg, { text: value.behavior === 'allow' ? '已允许本次工具调用。' : '已拒绝本次工具调用。' }); }
       if (value.action === 'stop') { await panel.stop(item.id); return send(msg, { text: '已发送停止请求。' }); }
@@ -804,7 +841,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (next.defaultProject) { if (panel.resolveDirectory) next.defaultProject = await panel.resolveDirectory(next.defaultMachine, next.defaultProject); else { next.defaultProject = fs.realpathSync(next.defaultProject); if (!fs.statSync(next.defaultProject).isDirectory()) throw new Error('默认项目必须是文件夹'); } }
     }
     if (next.model && !/^[\w.\/:\[\]-]{1,100}$/.test(next.model)) throw new Error('模型名称无效');
-    if (next.appId !== config.appId || next.domain !== config.domain) { next.cardCallbacksReady = input.cardCallbacksReady || false; next.allowAllUsers = input.allowAllUsers || false; next.allowAllGroups = input.allowAllGroups || false; next.allowedUserIds = input.allowedUserIds || []; next.disabledUserIds = input.disabledUserIds || []; pairing = null; state = { bindings: {}, engineBindings: {}, cards: {}, taskCards: {}, sessionModels: {}, listings: {}, receipts: [], projects: [], nodeProjects: {}, drafts: {} }; persist(); }
+    if (next.appId !== config.appId || next.domain !== config.domain) { next.cardCallbacksReady = input.cardCallbacksReady || false; next.allowAllUsers = input.allowAllUsers || false; next.allowAllGroups = input.allowAllGroups || false; next.allowedUserIds = input.allowedUserIds || []; next.disabledUserIds = input.disabledUserIds || []; pairing = null; state = { bindings: {}, engineBindings: {}, cards: {}, sessionRefs: {}, taskCards: {}, sessionModels: {}, listings: {}, receipts: [], projects: [], nodeProjects: {}, drafts: {} }; persist(); }
     const reconnect = next.enabled !== config.enabled || next.appId !== config.appId || next.appSecret !== config.appSecret || next.domain !== config.domain;
     if (reconnect) await stop();
     config = next; atomic(configFile, config); applyRuntime();
@@ -832,7 +869,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     return { execution: { selfId: panel.machineId?.() || 'local', machines: panel.machines?.() || [] }, capabilities: { contactNames: true }, config: { ...safe, hasSecret: !!appSecret }, phase: actualPhase, lastError, sdkAvailable, bot: channel?.botIdentity?.name || '', connection, runtime: runtime.status(), bindings: Object.values(state.bindings).length, inbox: inbox.contacts(config.appId) };
   }
   return {
-    start, stop, configure, status, receive, action, sendReply, labelContact, refreshContacts,
+    start, stop, configure, status, receive, action, repairCard, sendReply, labelContact, refreshContacts,
     bootstrapRuntime: applyRuntime,
     async reload() { await stop(); reloadFiles(); applyRuntime(); return status(); },
     revealSecret: () => config.appSecret,

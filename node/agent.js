@@ -13,7 +13,7 @@ const VERSION = require('../package.json').version;
 // Notifications (node → hub): session.event, session.idle, session.ready,
 // session.failed, session.accepted, session.closed. Each carries the session
 // state so the hub can answer currentId / busy synchronously.
-function serveNode({ peer, host, engines, id = os.hostname(), label = id, beforeOpen = () => {}, history = null }) {
+function serveNode({ peer, host, engines, id = os.hostname(), label = id, beforeOpen = () => {}, history = null, nativeLogins = null }) {
   const byId = new Map(engines.map(engine => [engine.id, engine]));
   const sessions = new Map();
   const engineOf = name => { const engine = byId.get(name); if (!engine) throw Object.assign(new Error(`节点上没有引擎：${name}`), { status: 400 }); return engine; };
@@ -22,7 +22,7 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id, before
   const state = session => ({ currentId: session?.currentId || '', pendingCount: session?.pendingCount || 0, busy: !!session?.busy });
 
   peer.handle('hello', () => ({
-    id, label, platform: host.platform, version: VERSION, home: host.homeDir(), worktrees: typeof host.createWorktree === 'function',
+    nativeAccounts:!!nativeLogins, id, label, platform: host.platform, version: VERSION, home: host.homeDir(), worktrees: typeof host.createWorktree === 'function',
     engines: engines.map(engine => {
       let cli = null;
       try { const info = engine.detect?.(); if (info) cli = { path: info.path, version: info.version }; } catch {}
@@ -30,6 +30,10 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id, before
     }),
     projects: typeof host.projects === 'function' ? host.projects() : [],
   }));
+  if (nativeLogins) {
+    const transport=require('../core/account-transport').createAccountTransport('my-agents/runtime-native-accounts/v1');
+    peer.handle('accounts.native', ({publicKey}) => ({publicKey:transport.publicKey,sealed:transport.seal(nativeLogins(),publicKey)}));
+  }
   peer.handle('engine.owns', async ({ engine, id: sessionId }) => !!await engineOf(engine).owns(sessionId));
   if (history) {
     peer.handle('history.messages', ({ id }) => history.messages(id));

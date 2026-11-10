@@ -56,9 +56,11 @@ function run(argv, { engines = localEngines(), stderr = process.stderr } = {}) {
   const host = createLocalHost();
   const id = args.id || os.hostname().split('.')[0], label = args.label || id;
 
+  const claudeLogin=require('../core/claude-credentials').createClaudeLogin({dir:process.env.CLAUDE_CONFIG_DIR || process.env.CLAUDE_DIR || path.join(os.homedir(),'.claude')});
+  const nativeLogins=()=>{ let codex=null;try{codex=JSON.parse(fs.readFileSync(path.join(process.env.CODEX_HOME || path.join(os.homedir(),'.codex'),'auth.json'),'utf8'));}catch{} return {claude:claudeLogin.read(),codex}; };
   if (args.stdio) {
     const peer = createPeer(streamTransport(process.stdin, process.stdout));
-    serveNode({ peer, host, engines, id, label });
+    serveNode({ peer, host, engines, id, label, nativeLogins });
     peer.onClose(() => process.exit(0));
     log(`已通过 stdio 就绪（${id}）`);
     return peer;
@@ -73,7 +75,7 @@ function run(argv, { engines = localEngines(), stderr = process.stderr } = {}) {
       delay = 1000;
       log(`已连接 Hub：${args.hub}（节点 ${id}）`);
       const peer = createPeer(wsTransport(socket));
-      serveNode({ peer, host, engines, id, label });
+      serveNode({ peer, host, engines, id, label, nativeLogins });
     });
     socket.on('unexpected-response', (_, res) => { log(`Hub 拒绝连接：HTTP ${res.statusCode}${res.statusCode === 401 ? '（令牌无效）' : ''}`); });
     socket.on('error', e => log(`连接失败：${e.message}`));

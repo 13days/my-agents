@@ -160,3 +160,24 @@ test('a machine without provider network access uses another egress while keepin
   assert.equal(owner.sent[0].headers.authorization, 'Bearer mac-access');
   assert.equal(owner.sent[0].headers['x-my-agents-egress-hop'], undefined, 'internal routing markers never reach the provider');
 });
+
+test('a custom Codex proxy receives Responses and model paths rather than ChatGPT backend paths', async t => {
+  const p=await proxyWith({token:'pool',resolve:async()=>({id:'proxy-account',accountId:'proxy-account',authMode:'api-key',upstream:'https://gateway.example.test/v1',headers:{authorization:'Bearer gateway-key'}})});
+  t.after(()=>p.close());
+  const response=await fetch(p.url+'/backend-api/codex/models?client_version=0.167.0',{headers:{authorization:'Bearer pool','chatgpt-account-id':'must-not-leak'}});
+  assert.equal(response.status,200);await response.text();
+  assert.equal(p.sent[0].hostname,'gateway.example.test');assert.equal(p.sent[0].path,'/v1/models');
+  assert.equal(p.sent[0].headers.authorization,'Bearer gateway-key');assert.equal(p.sent[0].headers['chatgpt-account-id'],undefined);
+});
+
+test('runtime native sign-ins are exchanged in encrypted envelopes on the authenticated RPC channel', async t => {
+  const [left,right]=pairTransports(),hub=createPeer(left),node=createPeer(right);
+  t.after(()=>{hub.close();node.close();});
+  const login={claude:{claudeAiOauth:{accessToken:'private-claude',refreshToken:'private-refresh'}},codex:AUTH};
+  serveNode({peer:node,host:{platform:'linux',homeDir:()=>'/tmp'},engines:[],id:'worker',nativeLogins:()=>login});
+  assert.equal((await hub.call('hello',{})).nativeAccounts,true);
+  const transport=require('../core/account-transport').createAccountTransport('my-agents/runtime-native-accounts/v1');
+  const packet=await hub.call('accounts.native',{publicKey:transport.publicKey});
+  assert.equal(JSON.stringify(packet).includes('private-refresh'),false);
+  assert.deepEqual(transport.open(packet.sealed,packet.publicKey),login);
+});

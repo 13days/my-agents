@@ -81,6 +81,16 @@ function sessionUserMessages({ item, data, listPage = 0, query = '', ...context 
   elements.push(collapse('项目路径与会话 ID', [markdown(`${escape(item.project)}\n\`${item.id}\``, true)]), buttons(navigation), muted('这里只展示用户发送的消息；长消息显示摘要，邮箱已隐藏。完整原文保留在本机面板。'));
   return card('会话用户消息', elements);
 }
+function sessionRecovery({rows, missing, ...context}) {
+  const elements=[markdown('这张旧卡片的会话 ID 暂时无法对应到历史，可能在任务启动前就已失败。原有会话不会被删除，也不会自动改绑到最近新建的任务。')];
+  if(rows.length)elements.push(markdown('以下是同一话题中可确认的会话，请先查看历史，核对后再继续：'));
+  for(const item of rows) {
+    const scoped={...context,session:sessionReference(item)};
+    elements.push(markdown(`**${escape(clip(previewText(item.title) || '历史会话',80))}**\n${escape(item.machineId || item.node || '机器未记录')} · ${catalogOf(context).label(item.engine || 'claude')} · ${escape(item.project)}`),buttons([button('查看历史',action(scoped,{action:'history',id:item.id})),button('继续此会话',action(scoped,{action:'switch',id:item.id}),'primary')]));
+  }
+  elements.push(buttons([button('全部会话',action(context,{action:'sessions'}))]),collapse('旧卡片引用',[markdown(`\`${escape(missing)}\``,true)]));
+  return card('恢复旧会话',elements,{template:'orange',summary:'原有历史保留，请核对会话后接续'});
+}
 function projectList({ rows, total, page, defaultProject, engine = 'claude', node = 'local', nodeLabel = '本机', ...context }) {
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE)), engines = catalogOf(context), remote = node !== 'local';
   const at = remote ? { node } : {};
@@ -225,4 +235,4 @@ function routes({ status, codex, pinned, notice = '', now = Date.now(), ...conte
   elements.push(buttons(controls), muted('/route 序号或名称 切换账号；/route auto 故障转移；/route rr 轮询；/route reset 清除冷却；/route pin 序号|off 固定当前会话；/route codex direct|proxy'));
   return card('代理路由', elements, { subtitle: '切换立即生效，无需经过模型', template: accounts.some(a => a.enabled && (a.cooldownUntil || 0) > now) ? 'orange' : 'grey', summary: `路由：${MODE_NAMES[mode] || mode}` });
 }
-module.exports = { PAGE_SIZE, SESSION_PAGE_SIZE, REPLY_PREVIEW, card, markdown, button, buttons, collapse, sessionList, sessionUserMessages, projectList, nodePicker, enginePicker, modelPicker, currentSession, task, routes, MODE_NAMES };
+module.exports = { PAGE_SIZE, SESSION_PAGE_SIZE, REPLY_PREVIEW, card, markdown, button, buttons, collapse, sessionRecovery, sessionList, sessionUserMessages, projectList, nodePicker, enginePicker, modelPicker, currentSession, task, routes, MODE_NAMES };

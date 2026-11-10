@@ -185,3 +185,61 @@ test('an upgrade retains a cached subscription when the native login changed whi
   const pool = createAccountPool({ dir, secret: 'secret', identity: () => ({ id: 'machine', label: 'machine' }), accounts: router, peers: () => [], codex: { read: () => ({ tokens: { account_id: 'next-subscription', access_token: 'next-access' } }), catalog: () => ({ modes: [] }) } });
   assert.equal(pool.codexStatus().accounts.length, 2);
 });
+
+test('Claude subscriptions are discovered on sign-in, remain pooled after another login and replicate without the origin', async t => {
+  const f=fixture(t);let native={accountUuid:'claude-user-a',claudeAiOauth:{accessToken:'claude-token-a',refreshToken:'claude-refresh-a',expiresAt:Date.now()+3600000}};
+  const a=f.add('a',null,{claude:{read:()=>native}}),b=f.add('b');
+  assert.equal(a.pool.claudeStatus().accounts.length,1);
+  native={accountUuid:'claude-user-b',claudeAiOauth:{accessToken:'claude-token-b',refreshToken:'claude-refresh-b',expiresAt:Date.now()+3600000}};
+  await a.pool.refresh();await b.pool.refresh();
+  assert.equal(b.pool.claudeStatus().accounts.length,2);
+  f.disconnect();await b.pool.refresh();
+  const loaded=createAccountPool(b.options);
+  assert.equal(loaded.claudeStatus().accounts.filter(x=>x.available).length,2);
+  assert.equal(JSON.stringify(loaded.claudeStatus()).includes('claude-token'),false);
+  assert.equal(JSON.stringify(loaded.codexStatus()).includes('claude-user'),false);
+});
+
+test('Claude proxy and subscription entries share routing, while explicit removal and disable survive auto discovery', async t => {
+  const f=fixture(t),native={accountUuid:'subscriber',claudeAiOauth:{accessToken:'subscription-secret',refreshToken:'refresh-secret',expiresAt:Date.now()+3600000}};
+  const a=f.add('a',null,{claude:{read:()=>native}}),b=f.add('b');
+  a.router.save({mode:'manual',selected:'proxy-a',accounts:[{id:'proxy-a',name:'Claude proxy',url:'https://example.test',token:'proxy-secret',authType:'bearer',enabled:true}]});
+  const subscription=a.pool.claudeStatus().accounts.find(x=>x.managed);
+  a.pool.setClaudeRouting({mode:'manual',selected:subscription.id});await b.pool.refresh();
+  assert.equal(b.pool.claudeStatus().selected,subscription.id);
+  assert.equal(b.pool.claudeStatus().accounts.length,2);
+  assert.equal(b.pool.codexStatus().accounts.length,0);
+  a.pool.configureClaude(subscription.id,{enabled:false});await a.pool.refresh();await b.pool.refresh();
+  assert.equal(b.pool.claudeStatus().accounts.find(x=>x.id===subscription.id).enabled,false);
+  a.pool.configureClaude(subscription.id,{deleted:true});await a.pool.refresh();await b.pool.refresh();
+  assert.equal(b.pool.claudeStatus().accounts.some(x=>x.id===subscription.id),false);
+  a.pool.importClaude(native);await b.pool.refresh();
+  assert.equal(b.pool.claudeStatus().accounts.find(x=>x.id===subscription.id).enabled,true);
+});
+
+test('Claude refresh uses the leader lease, rotates once and preserves native account identity', async t => {
+  const f=fixture(t);let native={accountUuid:'expired-user',claudeAiOauth:{accessToken:'expired-claude',refreshToken:'refresh-old',expiresAt:Date.now()-1000}},count=0;
+  const fresh={...native,claudeAiOauth:{accessToken:'fresh-claude',refreshToken:'refresh-new',expiresAt:Date.now()+3600000}};
+  const a=f.add('a',null,{claude:{read:()=>native,updated:(_old,value)=>{native=value;}},renewClaude:async()=>{count++;await new Promise(r=>setTimeout(r,10));return fresh;},coordination:{canRefresh:()=>true,required:()=>2}});
+  const b=f.add('b',null,{coordination:{canRefresh:()=>false,required:()=>2,refresh:input=>a.pool.refreshWire(input)}});
+  await b.pool.refresh();await Promise.all([b.pool.prepareClaude(),b.pool.prepareClaude()]);
+  assert.equal(count,1);assert.equal(native.claudeAiOauth.refreshToken,'refresh-new');
+  assert.equal(b.pool.claudeStatus().accounts.length,1);assert.equal(b.pool.claudeStatus().accounts[0].available,true);
+  assert.equal(b.router.status().accounts[0].authType,'oauth');
+  assert.equal(fs.readFileSync(b.pool.vault.file,'utf8').includes('fresh-claude'),false);
+});
+
+test('Codex subscriptions and custom Responses proxies are selectable in one independent pool', async t => {
+  const f=fixture(t),a=f.add('a',auth());
+  a.pool.importCodex({OPENAI_API_KEY:'gateway-secret',base_url:'https://gateway.example.test/v1'},'Codex proxy');
+  const proxy=a.pool.codexStatus().accounts.find(x=>x.mode==='api-key');
+  a.pool.setRouting({mode:'manual',selected:proxy.id});
+  let route=await a.pool.resolveCodex('chatgpt','session');
+  assert.equal(route.accountId,proxy.id);assert.equal(route.headers.authorization,'Bearer gateway-secret');assert.equal(route.upstream,'https://gateway.example.test/v1');
+  a.pool.configureCodex(proxy.id,{url:'https://new.example.test/v1',token:'replacement-key'});
+  route=await a.pool.resolveCodex('chatgpt','session');
+  assert.equal(route.accountId,proxy.id);assert.equal(route.headers.authorization,'Bearer replacement-key');assert.equal(route.upstream,'https://new.example.test/v1');
+  assert.equal(a.pool.claudeStatus().accounts.length,0);
+  assert.equal(JSON.stringify(a.pool.codexStatus()).includes('replacement-key'),false);
+  assert.throws(()=>a.pool.importCodex({OPENAI_API_KEY:'key',base_url:'https://user:password@example.test/v1'}),/代理地址/);
+});

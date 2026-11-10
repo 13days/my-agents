@@ -33,7 +33,7 @@ function createClaudeEngine({ accounts = null, transcripts, timeoutMs = Number(p
       const info = resolveClaude({ env });
       const base = { ...env };
       // A routed session must reach the panel proxy, not a cloud provider configured in the shell.
-      if (clientEnv.ANTHROPIC_BASE_URL) for (const key of PROVIDER_SWITCHES) delete base[key];
+      if (clientEnv.ANTHROPIC_BASE_URL) { delete base.CLAUDE_CODE_OAUTH_TOKEN; for (const key of PROVIDER_SWITCHES) delete base[key]; }
       const session = openClaudeSession({
         host, cli: info.path, env: claudeEnvironment({ ...base, ...clientEnv, PWD: cwd }, info), cwd, sessionId, resume, model,
         settingsEnv: clientEnv.ANTHROPIC_BASE_URL ? { ...clientEnv, ...Object.fromEntries(PROVIDER_SWITCHES.map(key => [key, ''])) } : null,

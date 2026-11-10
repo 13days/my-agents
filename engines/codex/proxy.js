@@ -169,7 +169,11 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
         return true;
       };
       const send = () => {
-      const target = new URL(delegatedURL ? delegatedURL + req.url : route.origin + req.url.slice(route.strip.length));
+      const upstreamURL = selectedAccount?.upstream;
+      const tail = new URL(req.url, 'http://localhost');
+      if (selectedAccount?.authMode === 'api-key') { delete headers['chatgpt-account-id']; tail.searchParams.delete('client_version'); }
+      const directURL = upstreamURL ? upstreamURL.replace(/\/$/,'') + '/' + tail.pathname.slice(route.prefix.length) + tail.search : route.origin + req.url.slice(route.strip.length);
+      const target = new URL(delegatedURL ? delegatedURL + req.url : directURL);
       const attemptInfo = attemptCount++ ? { ...reserveCapture(), sessionId, method: req.method, requestOrder: info.id, routing: { ...info.routing, attempt: attemptCount } } : info;
       let saved = false, connectTimer;
       const save = (code, responseBody, stream, encoding, incomplete) => {
@@ -191,7 +195,7 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
             const next = await relay.resolve(route.mode, sessionId, excluded, forcedAccount).catch(() => null);
             if (res.destroyed) return;
             if (!next) { res.writeHead(response.statusCode, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { message: '共享 Codex 账号暂不可用：可用账号已尝试，请检查账号状态、额度或稍后重试' } })); }
-            selectedAccount = next; delegatedURL = next.url || null;
+            selectedAccount = next; delegatedURL = next.url || null; delete headers['chatgpt-account-id'];
             delete headers['x-my-agents-local-account'];
       delete headers['x-my-agents-codex-account'];
       delete headers['x-my-agents-egress-hop'];

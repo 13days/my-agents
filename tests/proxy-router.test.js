@@ -331,3 +331,27 @@ test('an unconfigured panel fails over rejected shared accounts instead of requi
   assert.equal((await f.send()).status, 200);
   assert.deepEqual(f.captures.map(row => row[1]), [401, 200]);
 });
+
+test('Claude subscription routes preserve native OAuth beta headers while replacing only credentials', async t => {
+  const f=await fixture(t,[(req,res)=>{
+    assert.equal(req.headers.authorization,'Bearer subscription-token');assert.equal(req.headers['x-api-key'],undefined);
+    assert.match(req.headers['anthropic-beta'],/oauth-2025-04-20/);assert.match(req.headers['anthropic-beta'],/other-beta/);
+    res.end('{"ok":true}');
+  }]);
+  f.router.setShared([{...f.accounts[0],id:'claude-sub:test',authType:'oauth',token:'subscription-token',shared:true,managed:true}]);
+  const response=await f.send(undefined,{headers:{'anthropic-beta':'other-beta,oauth-2025-04-20'}});
+  assert.equal(response.status,200);assert.deepEqual(await response.json(),{ok:true});
+  assert.equal(JSON.stringify(f.router.status()).includes('subscription-token'),false);
+});
+
+test('an explicitly emptied subscription pool never falls back to a disabled native credential', async t=>{
+ const f=await fixture(t,[]);f.router.requirePool(true);
+ assert.ok(f.router.clientEnv()?.ANTHROPIC_AUTH_TOKEN);
+ const response=await f.send();assert.equal(response.status,401);assert.match(await response.text(),/账号池/);
+});
+
+test('Anthropic proxy base URLs ending in /v1 do not duplicate the version segment',async t=>{
+ const f=await fixture(t,[(req,res)=>{assert.equal(req.url,'/v1/messages');res.end('{"ok":true}');}]);
+ f.accounts[0].url+='/v1';f.router.save({mode:'manual',selected:'a0',accounts:f.accounts});
+ const response=await f.send();assert.equal(response.status,200);await response.text();
+});

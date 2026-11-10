@@ -1053,3 +1053,23 @@ test('an old remote card continues its own session after /new selects another ex
   assert.equal(f.calls.at(-1).sessionId, old.id); assert.equal(f.calls.at(-1).machineId, 'mac'); assert.equal(f.calls.at(-1).cwd, old.cwd);
   assert.ok(lookups.some(item => item.id === old.id));
 });
+
+test('a never-started legacy card offers same-topic histories without changing the current binding', async t=>{
+ const f=await fixture(t);await f.pair();await f.gateway.receive(f.msg('/sessions'));await f.gateway.receive(f.msg('/switch 1'));
+ const key=contextKey(f.msg('')),before=JSON.parse(fs.readFileSync(path.join(f.dir,'panel-feishu-state.json'))).bindings[key].id;
+ f.panel.resolveSession=async()=>null;
+ await f.gateway.action({messageId:'legacy-orphan',chatId:'oc_private',chatType:'p2p',operator:{openId:'ou_owner'},action:{value:{owner:'ou_owner',key,action:'view',id:'33333333-3333-4333-8333-333333333333'}}});
+ const card=f.sent.at(-1).content.card;
+ assert.equal(card.header.title.content,'恢复旧会话');assert.match(JSON.stringify(card),new RegExp(before));
+ assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir,'panel-feishu-state.json'))).bindings[key].id,before);
+ assert.equal(f.calls.length,0);
+});
+
+test('a verified repair restores one orphan card and saves a backup without submitting any task', async t=>{
+ const f=await fixture(t);await f.pair();const original='33333333-3333-4333-8333-333333333333',target=f.rows[0];
+ const result=await f.gateway.repairCard({messageId:'om_legacy_failed',originalSessionId:original,targetSessionId:target.id,senderId:'ou_owner',chatId:'oc_private',chatType:'p2p'});
+ assert.equal(result.sessionId,target.id);assert.ok(fs.existsSync(path.join(result.backup,'panel-feishu-state.json')));assert.equal(f.calls.length,0);
+ const reads=[];f.panel.history=async(id,machineId)=>{reads.push({id,machineId});return[{role:'assistant',text:'Original history remains'}];};
+ await f.gateway.action({messageId:'om_legacy_failed',chatId:'oc_private',chatType:'p2p',operator:{openId:'ou_owner'},action:{value:{owner:'ou_owner',key:contextKey(f.msg('')),action:'history',id:original}}});
+ assert.equal(reads.at(-1).id,target.id);assert.equal(f.calls.length,0);
+});
