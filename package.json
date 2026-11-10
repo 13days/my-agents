@@ -71,6 +71,7 @@
     "http/",
     "docs/architecture-v2.md",
     "docs/user-guide.md",
+    "docs/codex-subscription-proxy.md",
     "docs/cluster-setup.md",
     "docs/agent-install.md"
   ],

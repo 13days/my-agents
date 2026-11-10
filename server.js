@@ -1757,6 +1757,26 @@ const codexProxy = createCodexProxy({
   record: recordExchange, reserveCapture: () => ({ id: captureStore.nextId(), startedAt: new Date().toISOString() }),
   relay: { token: codexRelayToken, credentials: mode => codexCredentials(readCodexAuth(), mode), resolve: (mode, sessionId, excluded, forced) => accountPool.resolveCodex(mode, sessionId, excluded, forced), egress: excluded => accountPool.egress(excluded), accepted: (route, id) => accountPool.accepted(route, id), rejected: (route, status, retryAfter) => accountPool.rejected(route, status, retryAfter) },
 });
+// A separate Claude-compatible endpoint uses only subscription entries.
+const { createCodexBridge, equal: bridgeSecretEqual } = require('./core/codex-bridge');
+const bridgeTokenFile = path.join(DATA_DIR, 'codex-bridge-token');
+let bridgeToken = '';
+if (!HISTORY_WORKER) {
+  try { bridgeToken = fs.readFileSync(bridgeTokenFile, 'utf8').trim(); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; bridgeToken = crypto.randomBytes(32).toString('hex'); fs.writeFileSync(bridgeTokenFile, bridgeToken, { flag: 'wx', mode: 0o600 }); }
+}
+const subscriptionProxy = createCodexProxy({
+  record: recordExchange, reserveCapture: () => ({ id: captureStore.nextId(), startedAt: new Date().toISOString() }),
+  relay: { token: codexRelayToken, resolve: (mode, sessionId, excluded, forced) => accountPool.resolveCodex(mode, sessionId, excluded, forced, { subscriptionOnly: true }), egress: excluded => accountPool.egress(excluded), accepted: (route, id) => accountPool.accepted(route, id), rejected: (route, status, retryAfter) => accountPool.rejected(route, status, retryAfter) },
+});
+async function subscriptionModels() {
+  await accountPool.refresh();
+  const selected = accountPool.codexRoute('chatgpt', '', [], '', { subscriptionOnly: true });
+  const accountId = selected?.accountId || accountPool.codexStatus().accounts.find(a => a.enabled && a.mode === 'chatgpt')?.id;
+  if (!accountId) throw new Error('没有可用 Codex 订阅账号，请先登录或重新授权');
+  return codexPoolModels({ accountId });
+}
+const codexBridge = createCodexBridge({ token: bridgeToken, port: PROXY_PORT, relayToken: codexRelayToken, models: subscriptionModels, version: () => String(resolveCodex().version || '').match(/\d+\.\d+\.\d+/)?.[0] || '0.167.0' });
 const upstreams = createUpstreams();
 upstreams.add({ id: 'anthropic', engine: 'claude', handle: accountRouter.handle }, { isDefault: true });
 upstreams.add({
@@ -1767,6 +1787,11 @@ upstreams.add({
     if (finished === 'response.completed') rec.incomplete = false; // 上游收到终止事件后才断开连接，不算中断
   },
 });
+upstreams.add({ id: 'codex-subscription-relay', engine: 'codex', match: url => url.startsWith('/codex-subscription/internal/'), handle(req, res) {
+  if (!bridgeSecretEqual(req.headers.authorization, 'Bearer ' + codexRelayToken)) { res.writeHead(401); return res.end(); }
+  req.url = req.url.replace('/codex-subscription/internal/', '/backend-api/codex/');
+  return subscriptionProxy.handle(req, res);
+} });
 const proxyServer = http.createServer(upstreams.handle);
 // Panel-started Codex runs go through the capture proxy unless disabled.
 const codexCaptureEnabled = () => process.env.CCP_CODEX_CAPTURE !== '0' && readPanelConfig().codexCapture !== false;
@@ -1795,7 +1820,7 @@ async function checkCodexPool(accountId) {
 }
 function combinedAccountSessions() {
   const claude = accountRouter.sessions(), codex = accountPool.codexStatus();
-  return { ...claude, codexRouting: { mode: codex.mode, selected: codex.selected }, accounts: [...claude.accounts.map(a => ({ ...a, engine: 'claude' })), ...codex.accounts.map(a => ({ ...a, engine: 'codex' }))], routes: { ...claude.routes, ...codex.routes }, items: [...claude.items, ...codexProxy.sessions()] };
+  return { ...claude, codexRouting: { mode: codex.mode, selected: codex.selected }, accounts: [...claude.accounts.map(a => ({ ...a, engine: 'claude' })), ...codex.accounts.map(a => ({ ...a, engine: 'codex' }))], routes: { ...claude.routes, ...codex.routes }, items: [...claude.items, ...codexProxy.sessions(), ...subscriptionProxy.sessions(), ...codexBridge.sessions()] };
 }
 const codexModelCatalog = require('./core/model-catalog').createModelCatalog({ load: async accountId => (await checkCodexPool(accountId)).catalog });
 async function codexPoolModels({ accountId = '', sessionId = '', refresh = false } = {}) {
@@ -1975,6 +2000,7 @@ function resourceUsageSnapshot() {
 }
 // ---------- server ----------
 const server = http.createServer(async (req, res) => {
+  if (req.url.split('?')[0].startsWith('/codex-subscription/')) return codexBridge.handle(req, res);
   // 仅本机访问
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const parts = url.pathname.split('/').filter(Boolean); // e.g. ['api','skills','lark']
@@ -2009,6 +2035,10 @@ const server = http.createServer(async (req, res) => {
     // Every API route shares one Host/Origin/token guard.
     const denied = auth.check(req);
     if (denied) return sendJSON(res, 403, { error: denied });
+    if (parts[1] === 'codex-bridge' && req.method === 'GET') {
+      try { const catalog = await subscriptionModels(); return sendJSON(res, 200, { basePath: '/codex-subscription', token: bridgeToken, ...catalog }); }
+      catch (error) { return sendJSON(res, 503, { error: error.message }); }
+    }
     const type = parts[1];
     if (type === 'claude' && req.method === 'GET') { const info = resolveClaude(); return sendJSON(res, 200, { cli: info.path, version: info.version, source: info.source, candidates: info.candidates }); }
     if (url.searchParams.get('engine') === 'codex' && ['skills', 'config', 'commands', 'agents', 'plugins', 'workflows'].includes(type)) {

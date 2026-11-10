@@ -111,10 +111,10 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
     vault.preference('codex-pin:' + sessionId, id ? { accountId: id, manual: true } : { accountId: '', manual: true, followGlobal: true });
   }
   const routeFor = (entry, mode) => ({ id: entry.key + ':' + fingerprint(entry.auth.tokens?.access_token || entry.auth.OPENAI_API_KEY).slice(0, 16), accountId: entry.key, sourceNode: entry.source, label: entry.label, mode: routing().mode, authMode:entry.mode, upstream:entry.mode === 'api-key' ? entry.auth.base_url || 'https://api.openai.com/v1' : 'https://chatgpt.com/backend-api/codex', headers: codexCredentials(entry.auth, entry.mode || mode) });
-  function codexRoute(mode, sessionId = '', excluded = [], forced = '') {
+  function codexRoute(mode, sessionId = '', excluded = [], forced = '', { subscriptionOnly = false } = {}) {
     const config = routing(), pin = sessionId && vault.preference('codex-pin:' + sessionId);
     const explicit = pin?.followGlobal ? '' : pin?.manual ? pin.accountId : forced;
-    let candidates = codexEntries(mode, true).map(entry => routeFor(entry, mode)).filter(route => route.headers && !excluded.includes(route.id) && (explicit || config.mode === 'manual' || (vault.preference('codex-health:' + route.accountId)?.cooldownUntil || 0) <= now()));
+    let candidates = codexEntries(mode, !subscriptionOnly).map(entry => routeFor(entry, mode)).filter(route => route.headers && !excluded.includes(route.id) && (explicit || config.mode === 'manual' || (vault.preference('codex-health:' + route.accountId)?.cooldownUntil || 0) <= now()));
     if (explicit) candidates = candidates.filter(route => route.accountId === explicit).map(route => ({ ...route, explicit: true }));
     if (!candidates.length) return null;
     if (explicit) return candidates[0];
@@ -203,7 +203,7 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
     else { const packet = await coordination.refresh({ ...request, publicKey: transport.publicKey }); response = transport.open(packet.sealed, packet.publicKey); }
     vault.merge(response.snapshot); vault.preference('codex-health:' + entry.key, { cooldownUntil: 0, lastStatus: 200 }); install();
   }
-  async function resolveCodex(mode, sessionId = '', excluded = [], forced = '') {
+  async function resolveCodex(mode, sessionId = '', excluded = [], forced = '', options = {}) {
     await refresh();
     // An auth rejection may mean revocation before JWT expiry. Refresh once
     // for that token generation; retries never loop indefinitely.
@@ -211,11 +211,11 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
       const rejected = codexEntries(mode).find(entry => excluded.includes(routeFor(entry, mode).id) && excluded.filter(id => id.startsWith(entry.key + ':')).length < 2);
       if (rejected?.auth.tokens.refresh_token) { try { await renewEntry(rejected, true); } catch {} }
     }
-    let selected = codexRoute(mode, sessionId, excluded, forced);
+    let selected = codexRoute(mode, sessionId, excluded, forced, options);
     if (selected && selected.authMode !== 'chatgpt') return selected;
     const entry = selected ? codexEntries('chatgpt').find(item => item.key === selected.accountId) : codexEntries('chatgpt').find(item => (!forced || item.key === forced) && item.auth.tokens.refresh_token && !excluded.some(id => id.startsWith(item.key + ':')));
     if (entry && (!selected || expiresSoon(entry.auth, now()))) {
-      try { await renewEntry(entry, false); selected = codexRoute(mode, sessionId, excluded, forced); }
+      try { await renewEntry(entry, false); selected = codexRoute(mode, sessionId, excluded, forced, options); }
       catch (error) { if (!selected) throw error; }
     }
     return selected;

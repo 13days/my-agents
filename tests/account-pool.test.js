@@ -258,3 +258,15 @@ test('new native credentials clear stale authentication failures without removin
  const restored=a.pool.codexStatus().accounts.find(x=>x.id===original.id);assert.equal(restored.cooldownUntil,0);assert.equal(restored.lastStatus,0);
  a.pool.observeNative('a',{codex:{tokens:{account_id:'new-user',access_token:'second-native-access',refresh_token:'second-native-refresh'}}});assert.equal(a.pool.codexStatus().accounts.length,2);
 });
+
+test('subscription-only routes never use API accounts, including explicit selection and empty subscription pools', async t => {
+  const f = fixture(t), node = f.add('mac', auth());
+  node.pool.importCodex({ OPENAI_API_KEY: 'api-key-only' }, 'API');
+  const api = node.pool.codexStatus().accounts.find(a => a.mode === 'api-key');
+  const subscription = node.pool.codexStatus().accounts.find(a => a.mode === 'chatgpt');
+  const options = { subscriptionOnly: true };
+  assert.equal(node.pool.codexRoute('chatgpt', 'bridge', [], '', options).accountId, subscription.id);
+  assert.equal(await node.pool.resolveCodex('chatgpt', 'bridge', [], api.id, options), null);
+  node.pool.configureCodex(subscription.id, { enabled: false });
+  assert.equal(await node.pool.resolveCodex('chatgpt', 'bridge', [], '', options), null);
+});

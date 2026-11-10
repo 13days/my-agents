@@ -195,3 +195,8 @@ node server.js service status
 | 集群没有主节点 | 多数派是否连通、成员表是否完全一致、时间与网络是否稳定 |
 
 完整排障时记录 Git SHA、面板地址、IM 主节点、执行机器和脱敏错误，不发送原始 token、账号 JSON 或私人抓包。
+
+
+### Claude Code 使用 Codex 订阅
+
+在 Codex 账号池点击「Claude Code 使用订阅代理」，复制独立配置。此入口只使用共享 Codex 订阅，不会回退到 API 账号。工具仍在 Claude Code 所在机器执行。配置与限制见 [Codex 订阅代理](codex-subscription-proxy.md)。
