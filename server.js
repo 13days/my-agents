@@ -2651,17 +2651,12 @@ async function attachClusterRuntime(id, peer) {
 let clusterNetwork = null;
 let clusterConfig = null;
 try { clusterConfig = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'panel-cluster.json'), 'utf8')); } catch {}
-const claudeLogin = require('./core/claude-credentials').createClaudeLogin({ dir: process.env.CLAUDE_CONFIG_DIR || CLAUDE_DIR });
+const {createClaudeLogins,createCodexLogins}=require('./core/login-profiles');
+const claudeLogin = createClaudeLogins({dir:process.env.CLAUDE_CONFIG_DIR || CLAUDE_DIR});
+const codexLogins = createCodexLogins({home:CODEX_HOME,readDefault:readCodexAuth});
 if (!HISTORY_WORKER) accountPool = require('./core/account-pool').createAccountPool({ claude: claudeLogin, accounts: accountRouter, dir: DATA_DIR, secret: clusterConfig?.token || auth.token, fallbackSecret: auth.token,
   identity: () => ({ id: machineId(), label: clusterConfig?.members?.find(item => item.id === machineId())?.label || '本机' }),
-  codex: { read: readCodexAuth, catalog: () => ({ token: codexRelayToken, modes: ['chatgpt', 'api-key'].filter(mode => codexCredentials(readCodexAuth(), mode)) }),
-    updated: (previous, fresh) => {
-      const current = readCodexAuth();
-      if (!current?.tokens?.refresh_token || current.tokens.refresh_token !== previous.tokens?.refresh_token) return;
-      const file = path.join(CODEX_HOME, 'auth.json'), temporary = file + '.' + crypto.randomUUID() + '.tmp';
-      try { fs.writeFileSync(temporary, JSON.stringify(fresh, null, 2) + '\n', { mode: 0o600, flag: 'wx' }); fs.renameSync(temporary, file); }
-      finally { fs.rmSync(temporary, { force: true }); }
-    } },
+  codex: { read: readCodexAuth, readAll:codexLogins.readAll, updated:codexLogins.updated, catalog: () => ({ token: codexRelayToken, modes: ['chatgpt', 'api-key'].filter(mode => codexCredentials(readCodexAuth(), mode)) }) },
   peers: () => (clusterNetwork?.connected() || []).filter(id => !clusterConfig.members.find(item => item.id === id)?.witness).map(id => ({ id, label: clusterConfig.members.find(item => item.id === id)?.label || id, peer: clusterNetwork.peer(id) })),
   coordination: {
     canRefresh: () => !clusterConfig?.clusterId || !!cluster?.canStart(),

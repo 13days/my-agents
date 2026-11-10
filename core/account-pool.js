@@ -11,7 +11,8 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
   const catalog = () => ({ claude: accounts.sharedCatalog(), codex: codex.catalog() });
   function observe() {
     vault.observe({ label: identity().label, claude: accounts.exportAccounts(), codex: codex.read() });
-    const auth = claude.read(); if (auth) vault.importClaude(auth);
+    for(const auth of claude.readAll?.() || [claude.read()])if(auth)vault.importClaude(auth);
+    for(const auth of codex.readAll?.() || [])if(auth)vault.importCodex(auth);
   }
   const origins = () => Object.entries(vault.origins()).map(([id, row]) => ({ id, ...row.payload }));
   const loopback = url => { try { const host = new URL(url).hostname; return ['localhost', '[::1]', '[::]', '0.0.0.0'].includes(host) || host.endsWith('.localhost') || /^127\./.test(host) || host.startsWith('[::ffff:127.'); } catch { return true; } };
@@ -30,10 +31,12 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
     accounts.setShared([...claudeEntries().map(entry => ({ id:entry.key, name:entry.label, url:'https://api.anthropic.com', token:entry.auth.claudeAiOauth.accessToken, authType:'oauth', modelMap:{}, env:{}, enabled:claudeCredentials.available(entry.auth,now()), managed:true, shared:true, mode:'subscription', sourceNode:entry.source, replicated:true })), ...shared.filter(account => { const key = fingerprint(account.url + ':' + account.authType + ':' + account.token); if (seen.has(key)) return false; if (account.enabled) seen.add(key); return true; })]);
     const claudeRouting = vault.preference('claude-routing');
     if (claudeRouting) accounts.applyPoolRouting?.({...claudeRouting,selected:claudeRouting.selected?.startsWith('cluster:'+identity().id+':') ? claudeRouting.selected.slice(('cluster:'+identity().id+':').length) : claudeRouting.selected});
-    const localClaude = claude.read();
-    if (localClaude) { const id = claudeCredentials.claudeAccountId(localClaude), fresh = vault.credential(id,localClaude); if (fresh !== localClaude && vault.matchesPrevious(id,localClaude)) claude.updated?.(localClaude,fresh); }
-    const localAuth = codex.read();
-    if (localAuth?.tokens?.access_token) { const id = accountId(localAuth, 'chatgpt'), fresh = vault.credential(id, localAuth); if (fresh !== localAuth && vault.matchesPrevious(id, localAuth)) codex.updated?.(localAuth, fresh); }
+    for (const localClaude of claude.readAll?.() || [claude.read()]) {
+      if (localClaude) { const id = claudeCredentials.claudeAccountId(localClaude), fresh = vault.credential(id,localClaude); if (fresh !== localClaude && vault.matchesPrevious(id,localClaude)) claude.updated?.(localClaude,fresh); }
+    }
+    for (const localAuth of codex.readAll?.() || [codex.read()]) {
+      if (localAuth?.tokens?.access_token) { const id = accountId(localAuth, 'chatgpt'), fresh = vault.credential(id, localAuth); if (fresh !== localAuth && vault.matchesPrevious(id, localAuth)) codex.updated?.(localAuth, fresh); }
+    }
   }
   function exchange(snapshot) {
     observe(); if (snapshot) vault.merge(snapshot); install();
@@ -110,10 +113,11 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
   const routeFor = (entry, mode) => ({ id: entry.key + ':' + fingerprint(entry.auth.tokens?.access_token || entry.auth.OPENAI_API_KEY).slice(0, 16), accountId: entry.key, sourceNode: entry.source, label: entry.label, mode: routing().mode, authMode:entry.mode, upstream:entry.mode === 'api-key' ? entry.auth.base_url || 'https://api.openai.com/v1' : 'https://chatgpt.com/backend-api/codex', headers: codexCredentials(entry.auth, entry.mode || mode) });
   function codexRoute(mode, sessionId = '', excluded = [], forced = '') {
     const config = routing(), pin = sessionId && vault.preference('codex-pin:' + sessionId);
-    let candidates = codexEntries(mode, true).map(entry => routeFor(entry, mode)).filter(route => route.headers && !excluded.includes(route.id) && (vault.preference('codex-health:' + route.accountId)?.cooldownUntil || 0) <= now());
     const explicit = pin?.followGlobal ? '' : pin?.manual ? pin.accountId : forced;
+    let candidates = codexEntries(mode, true).map(entry => routeFor(entry, mode)).filter(route => route.headers && !excluded.includes(route.id) && (explicit || config.mode === 'manual' || (vault.preference('codex-health:' + route.accountId)?.cooldownUntil || 0) <= now()));
     if (explicit) candidates = candidates.filter(route => route.accountId === explicit).map(route => ({ ...route, explicit: true }));
     if (!candidates.length) return null;
+    if (explicit) return candidates[0];
     const sticky = pin && candidates.find(route => route.accountId === pin.accountId);
     if (sticky) return sticky;
     const selected = candidates.find(route => route.accountId === config.selected);
@@ -228,6 +232,6 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
   observe(); install();
   accounts.setPreparation?.(prepareClaude);
   accounts.setRoutingObserver?.(input => { if (input.selected || input.mode!=='manual') setClaudeRouting(input); });
-  return { setClaudeRouting, observeNative: (source, input) => { if (input.claude) vault.importClaude(input.claude,{origin:source}); if (input.codex) vault.importCodex(input.codex,{origin:source}); install(); }, claudeStatus, importClaude, configureClaude, prepareClaude, catalog, egress: excluded => { const candidate = [...sources].filter(([id, source]) => !excluded.includes(id) && source.catalog?.codex?.token).sort(([a], [b]) => a.localeCompare(b))[0]; return candidate ? { id: candidate[0], url: candidate[1].url, token: candidate[1].catalog.codex.token } : null; }, codexStatus, resetCodex: () => { for (const entry of Object.values(vault.codexAccounts())) vault.preference('codex-health:' + entry.id, { cooldownUntil: 0, lastStatus: 0 }); return codexStatus(); }, setRouting, pinCodex, importCodex, configureCodex, accepted, rejected, exchange, exchangeWire, refreshWire, exchangeKey: () => ({ publicKey: transport.publicKey }), refresh, refreshAtLeader, resolveCodex, codexRoute, status, vault };
+  return { setClaudeRouting, observeNative: (source, input) => { for(const auth of (Array.isArray(input.claude)?input.claude:[input.claude]))if(auth)vault.importClaude(auth,{origin:source}); for(const auth of (Array.isArray(input.codex)?input.codex:[input.codex]))if(auth)vault.importCodex(auth,{origin:source}); install(); }, claudeStatus, importClaude, configureClaude, prepareClaude, catalog, egress: excluded => { const candidate = [...sources].filter(([id, source]) => !excluded.includes(id) && source.catalog?.codex?.token).sort(([a], [b]) => a.localeCompare(b))[0]; return candidate ? { id: candidate[0], url: candidate[1].url, token: candidate[1].catalog.codex.token } : null; }, codexStatus, resetCodex: () => { for (const entry of Object.values(vault.codexAccounts())) vault.preference('codex-health:' + entry.id, { cooldownUntil: 0, lastStatus: 0 }); return codexStatus(); }, setRouting, pinCodex, importCodex, configureCodex, accepted, rejected, exchange, exchangeWire, refreshWire, exchangeKey: () => ({ publicKey: transport.publicKey }), refresh, refreshAtLeader, resolveCodex, codexRoute, status, vault };
 }
 module.exports = { createAccountPool };

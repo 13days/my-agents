@@ -94,17 +94,29 @@ MY_AGENTS_HOME="$HOME/.my-agents" MY_AGENTS_BIND=0.0.0.0 node server.js
 
 「引擎与账号」中，Claude Code 与 Codex 各自有独立账号池。每个池都支持订阅账号和代理 / API 账号，页面使用同一套状态检查、命名、启停、移除和路由操作；切换引擎不会混入另一个引擎的账号。
 
-**订阅账号只需正常登录，不需要再点击导入。** 在任意已接入且运行中的面板或执行节点完成官方 CLI 登录：
+**订阅账号完成官方登录后自动入池，不需要再点击导入。** 新增第二个账号时，点击对应引擎池的「新增订阅账号」，复制生成的独立目录登录命令，到任一已接入且运行中的机器执行。不要先退出默认账号，也不要在正在使用的默认登录目录直接换号。
+
+例如，新增一个 Codex 账号：
 
 ```bash
-# Claude Code 订阅
-claude auth login
-
-# Codex / ChatGPT 订阅
-codex login
+my_agents_login_dir="${CODEX_HOME:-$HOME/.codex}/my-agents-logins/second-account"
+mkdir -p -m 700 "$my_agents_login_dir"
+CODEX_HOME="$my_agents_login_dir" codex -c 'cli_auth_credentials_store="file"' login
 ```
 
-后台约每 5 秒检查原生登录状态，自动加入对应账号池并加密同步到集群。页面在账号页空闲时自动更新，也可点「刷新」。切换登录账号会保留池内旧条目；重复身份去重。已停用或移除的条目不会被后台重新启用，显式「导入登录文件」可恢复。撤销上游授权或退出登录可能使旧凭证失效，账号池不能延长被撤销的授权。
+新增 Claude Code 账号同样使用独立目录：
+
+```bash
+my_agents_login_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/my-agents-logins/second-account"
+mkdir -p -m 700 "$my_agents_login_dir"
+CLAUDE_CONFIG_DIR="$my_agents_login_dir" claude auth login
+```
+
+页面每次生成不同的目录名；上例名称仅作示意，不要重复拿同一个目录切换多个账号。独立目录用于新增登录，后续可继续从面板和 IM 使用账号池，不必修改现有会话的目录。
+
+Codex CLI 与扩展会共用登录缓存；在同一目录退出或换号，可能让正在运行的旧 CLI 无法刷新。用 `CODEX_HOME` 隔离新增登录可避免覆盖默认缓存，参见 [官方认证说明](https://learn.chatgpt.com/docs/auth?surface=cli) 与 [配置目录说明](https://learn.chatgpt.com/docs/config-file/config-advanced)。账号池保留条目不代表被上游撤销的授权仍有效；显示 401 / 需要重新授权时，点击该条目的「重新授权」，在独立目录登录原账号。
+
+后台定期检查默认目录及上述独立登录目录，自动加入对应账号池并加密同步到集群。页面在账号页空闲时自动更新，也可点「刷新」。切换登录账号会保留池内旧条目；重复身份去重。已停用或移除的条目不会被后台重新启用，显式「导入登录文件」可恢复。撤销上游授权或退出登录可能使旧凭证失效，账号池不能延长被撤销的授权。
 
 Claude 原生凭证从 macOS 钥匙串或对应配置目录的 `.credentials.json` 发现；Codex 从 `CODEX_HOME/auth.json` 发现。自定义 Claude 登录目录应与面板 / 节点的 `CLAUDE_CONFIG_DIR` 一致。原生登录方法见 [Claude Code 官方认证说明](https://code.claude.com/docs/en/authentication)。
 

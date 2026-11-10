@@ -72,6 +72,7 @@ function createAccountVault({ dir, secret, fallbackSecret, nodeId, now = Date.no
       if ((old?.deleted || old?.authOverride) && !explicit) continue;
       if (!explicit && old && (digest(old.auth) === digest(auth) || issued(old.auth) > issued(auth))) { result.push(id); continue; }
       if (explicit) state.rotations[id] = { auth, previousHash: '', revision: ++state.clock, writer: nodeId, at: now() };
+      if (old && digest(old.auth)!==digest(auth)) state.preferences['codex-health:'+id]={value:{cooldownUntil:0,lastStatus:0},revision:++state.clock,writer:nodeId};
       state.codexAccounts[id] = { ...old, id, mode, auth, name: name || old?.name || 'Codex ' + id.slice(-6), origin: old?.origin || origin, enabled: explicit ? true : old?.enabled !== false, deleted: false, revision: ++state.clock, writer: nodeId, at: now() };
       result.push(id); persist();
     }

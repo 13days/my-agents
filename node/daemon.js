@@ -56,8 +56,12 @@ function run(argv, { engines = localEngines(), stderr = process.stderr } = {}) {
   const host = createLocalHost();
   const id = args.id || os.hostname().split('.')[0], label = args.label || id;
 
-  const claudeLogin=require('../core/claude-credentials').createClaudeLogin({dir:process.env.CLAUDE_CONFIG_DIR || process.env.CLAUDE_DIR || path.join(os.homedir(),'.claude')});
-  const nativeLogins=()=>{ let codex=null;try{codex=JSON.parse(fs.readFileSync(path.join(process.env.CODEX_HOME || path.join(os.homedir(),'.codex'),'auth.json'),'utf8'));}catch{} return {claude:claudeLogin.read(),codex}; };
+  const {createClaudeLogins,createCodexLogins}=require('../core/login-profiles');
+  const claudeLogin=createClaudeLogins({dir:process.env.CLAUDE_CONFIG_DIR || process.env.CLAUDE_DIR || path.join(os.homedir(),'.claude')});
+  const codexHome=process.env.CODEX_HOME || path.join(os.homedir(),'.codex');
+  const codexLogin=createCodexLogins({home:codexHome,readDefault:()=>{try{return JSON.parse(fs.readFileSync(path.join(codexHome,'auth.json'),'utf8'));}catch{return null;}}});
+  const nativeLogins=()=>({claude:claudeLogin.readAll(),codex:codexLogin.readAll()});
+
   if (args.stdio) {
     const peer = createPeer(streamTransport(process.stdin, process.stdout));
     serveNode({ peer, host, engines, id, label, nativeLogins });

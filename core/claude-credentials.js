@@ -16,10 +16,12 @@ function claudeAccountId(auth) {
 }
 const available = (auth, now = Date.now()) => !!auth?.claudeAiOauth?.accessToken && (!auth.claudeAiOauth.expiresAt || auth.claudeAiOauth.expiresAt > now);
 const expiresSoon = (auth, now = Date.now()) => !!auth?.claudeAiOauth?.expiresAt && auth.claudeAiOauth.expiresAt < now + 5 * 60 * 1000;
-function createClaudeLogin({ dir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), home = os.homedir(), platform = process.platform, env = process.env, exec = null, now = Date.now } = {}) {
+function createClaudeLogin({ dir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), home = os.homedir(), platform = process.platform, env = process.env, exec = null, now = Date.now, pollMs = 5000 } = {}) {
   const file = path.join(dir, '.credentials.json');
-  const service = 'Claude Code-credentials' + (env.CLAUDE_CONFIG_DIR ? '-' + digest(dir).slice(0,8) : '');
-  let cached = null, checked = -Infinity, reading = null;
+  const suffix=env.CLAUDE_CONFIG_DIR ? digest(dir).slice(0,8) : '';
+  const services=suffix ? ['Claude Code-credentials-'+suffix,'Claude Code-'+suffix+'-credentials'] : ['Claude Code-credentials'];
+  let service=services[0],storage='file';
+  let cached = null, checked = -Infinity, reading = null, marker='';
   function local() { try { return JSON.parse(fs.readFileSync(file,'utf8')); } catch { return env.CLAUDE_CODE_OAUTH_TOKEN ? {claudeAiOauth:{accessToken:env.CLAUDE_CODE_OAUTH_TOKEN}} : null; } }
   function enrich(raw) {
     if (!raw?.claudeAiOauth) return null;
@@ -29,17 +31,22 @@ function createClaudeLogin({ dir = process.env.CLAUDE_CONFIG_DIR || path.join(os
   }
   function keychain() {
     if (reading) return reading;
-    reading=new Promise(resolve=>execFile('security',['find-generic-password','-s',service,'-w'],{encoding:'utf8',timeout:2000},(error,stdout)=>{
-      let raw;try{if(!error)raw=JSON.parse(stdout);}catch{}
-      resolve(enrich(raw)||enrich(local()));
-    })).then(value=>{cached=value;return value;}).finally(()=>{reading=null;});
+    reading=(async()=>{
+      for (const candidate of services) {
+        const raw=await new Promise(resolve=>execFile('security',['find-generic-password','-s',candidate,'-w'],{encoding:'utf8',timeout:2000},(error,stdout)=>{try{resolve(!error?JSON.parse(stdout):null);}catch{resolve(null);}}));
+        const auth=enrich(raw);if(auth){service=candidate;storage='keychain';return auth;}
+      }
+      storage='file';return enrich(local());
+    })().then(value=>{cached=value;return value;}).finally(()=>{reading=null;});
     return reading;
   }
   function read(refresh = false) {
-    if (!refresh && now()-checked<5000) return cached;
+    const stamp=[file,path.join(dir,'.claude.json')].map(target=>{try{const stat=fs.statSync(target);return stat.mtimeMs+':'+stat.size;}catch{return '';}}).join('|');
+    if (!refresh && now()-checked<pollMs && stamp===marker) return cached;
+    marker=stamp;
     checked=now();
     if (platform==='darwin') {
-      if (exec) { let raw;try{raw=JSON.parse(exec('security',['find-generic-password','-s',service,'-w'],{encoding:'utf8',timeout:2000}));}catch{} return cached=enrich(raw)||enrich(local()); }
+      if (exec) { for(const candidate of services){let raw;try{raw=JSON.parse(exec('security',['find-generic-password','-s',candidate,'-w'],{encoding:'utf8',timeout:2000}));}catch{}const auth=enrich(raw);if(auth){service=candidate;storage='keychain';return cached=auth;}}storage='file';return cached=enrich(local()); }
       // Keychain access must never block the panel's HTTP/event loop.
       keychain().catch(()=>{}); return cached || enrich(local());
     }
@@ -49,7 +56,7 @@ function createClaudeLogin({ dir = process.env.CLAUDE_CONFIG_DIR || path.join(os
     try {
       const current=platform==='darwin'&&!exec ? await keychain() : read(true);
       if (!previous?.claudeAiOauth?.refreshToken || current?.claudeAiOauth?.refreshToken!==previous.claudeAiOauth.refreshToken) return;
-      if (platform==='darwin') {
+      if (platform==='darwin' && storage==='keychain') {
         const quote=text=>'"'+text.replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"';
         const value=JSON.stringify({claudeAiOauth:fresh.claudeAiOauth});
         const ok=await new Promise(resolve=>{

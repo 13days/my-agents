@@ -243,3 +243,18 @@ test('Codex subscriptions and custom Responses proxies are selectable in one ind
   assert.equal(JSON.stringify(a.pool.codexStatus()).includes('replacement-key'),false);
   assert.throws(()=>a.pool.importCodex({OPENAI_API_KEY:'key',base_url:'https://user:password@example.test/v1'}),/代理地址/);
 });
+
+test('explicit per-session and connection-check accounts override a different global manual selection',async t=>{
+ const f=fixture(t),a=f.add('a',auth());a.pool.importCodex({tokens:{account_id:'other',access_token:'other-token',refresh_token:'other-refresh'}});
+ const [first,second]=a.pool.codexStatus().accounts;a.pool.setRouting({mode:'manual',selected:second.id});
+ a.pool.rejected({accountId:first.id},401);
+ assert.equal((await a.pool.resolveCodex('chatgpt','',[],first.id)).accountId,first.id);
+ a.pool.pinCodex('conversation',first.id);assert.equal((await a.pool.resolveCodex('chatgpt','conversation')).accountId,first.id);
+});
+
+test('new native credentials clear stale authentication failures without removing another subscription',async t=>{
+ const f=fixture(t),a=f.add('a',auth());const original=a.pool.codexStatus().accounts[0];
+ a.pool.rejected({accountId:original.id},401);a.pool.observeNative('a',{codex:{tokens:{account_id:'same-user',access_token:'fresh-native-access',refresh_token:'fresh-native-refresh'}}});
+ const restored=a.pool.codexStatus().accounts.find(x=>x.id===original.id);assert.equal(restored.cooldownUntil,0);assert.equal(restored.lastStatus,0);
+ a.pool.observeNative('a',{codex:{tokens:{account_id:'new-user',access_token:'second-native-access',refresh_token:'second-native-refresh'}}});assert.equal(a.pool.codexStatus().accounts.length,2);
+});
