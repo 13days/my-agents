@@ -38,6 +38,8 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id, before
   if (history) {
     peer.handle('history.messages', ({ id }) => history.messages(id));
     peer.handle('history.list', () => history.list());
+    peer.handle('history.previews', async ({ items }) => history.previews ? history.previews(items) : Promise.all(items.map(async item => require('../core/session-previews').sessionPreview(await history.messages(item.id), item))));
+    peer.handle('history.userPage', async ({ item, page }) => history.userPage ? history.userPage({ item, page }) : require('../core/session-previews').userMessagePage(await history.messages(item.id), page, item));
   }
   peer.handle('host.resolveDir', ({ dir }) => host.resolveDir(dir));
   peer.handle('host.createWorktree', async ({ dir }) => host.createWorktree(await host.resolveDir(dir)));

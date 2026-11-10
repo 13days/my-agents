@@ -191,7 +191,7 @@ test('new project paths must be existing directories and retain management autho
 test('card actions cannot be used by another owner and groups require an allowlist plus mention', async t => {
   const f = await fixture(t); await f.pair(); await f.pair('ou_second');
   const action = { action: { value: { owner: 'ou_owner', action: 'switch', id: f.rows[0].id, key: contextKey(f.msg('')) } }, operator: { openId: 'ou_second' }, chatId: 'oc_private', messageId: 'card_id' };
-  const before = f.sent.length; await f.gateway.action(action); assert.equal(f.sent.length, before);
+  const before = f.sent.length; await f.gateway.action(action); assert.equal(f.sent.length, before + 1); assert.match(JSON.stringify(f.sent.at(-1).content), /仅限发起人/);
   await f.gateway.receive(f.msg('Run', { chatType: 'group', chatId: 'oc_group', mentionedBot: true })); assert.equal(f.calls.length, 0);
   await f.gateway.configure({ allowedChatIds: ['oc_group'] });
   await f.gateway.receive(f.msg('Run', { chatType: 'group', chatId: 'oc_group', mentionedBot: false })); assert.equal(f.calls.length, 0);
@@ -276,10 +276,10 @@ test('session pagination callbacks keep visible global numbers consistent with /
   for (let i = 2; i < 33; i++) f.rows.push({ id: `session-${i}`, title: `会话 ${i}`, project: f.dir });
   await f.gateway.receive(f.msg('/sessions'));
   await f.gateway.action({ action: { value: { action: 'sessions', page: 1, owner: 'ou_owner', key: contextKey(f.msg('')) } }, operator: { openId: 'ou_owner' }, chatId: 'oc_private', messageId: 'list-card' });
-  assert.match(JSON.stringify(f.sent.at(-1)), /16\. /);
-  await f.gateway.receive(f.msg('/switch 16'));
+  assert.match(JSON.stringify(f.sent.at(-1)), /6\. /);
+  await f.gateway.receive(f.msg('/switch 6'));
   await f.gateway.receive(f.msg('继续分页选择的会话'));
-  assert.equal(f.calls.at(-1).sessionId, f.rows[15].id);
+  assert.equal(f.calls.at(-1).sessionId, f.rows[5].id);
 });
 
 test('changing access permissions preserves the live connection and task card updates', async t => {
@@ -818,17 +818,17 @@ test('session accordions enrich only the current page and browsing user messages
   const click = (card, value, owner = 'ou_owner') => f.gateway.action({ messageId: card.messageId, chatId: 'oc_private', operator: { openId: owner }, action: { value: { owner: 'ou_owner', key, ...value } } });
   await f.gateway.receive(f.msg('/sessions work'));
   await click(f.sent.at(-1), { action: 'sessions', page: 1, query: 'work' });
-  assert.equal(enriched.length, 15); assert.equal(enriched[0], f.rows[15].id);
+  assert.equal(enriched.length, 5); assert.equal(enriched[0], f.rows[5].id);
   const list = f.sent.at(-1), before = f.sent.length;
-  await click(list, { action: 'user_messages', id: f.rows[15].id }, 'ou_stranger'); assert.equal(f.sent.length, before);
-  await click(list, { action: 'user_messages', id: f.rows[15].id });
+  await click(list, { action: 'user_messages', id: f.rows[5].id }, 'ou_stranger'); assert.equal(f.sent.length, before);
+  await click(list, { action: 'user_messages', id: f.rows[5].id });
   assert.match(JSON.stringify(f.sent.at(-1).content), /第 12 轮/); assert.equal(binding(), original);
-  await click(f.sent.at(-1), { action: 'user_messages', id: f.rows[15].id, page: 1 });
+  await click(f.sent.at(-1), { action: 'user_messages', id: f.rows[5].id, page: 1 });
   assert.match(JSON.stringify(f.sent.at(-1).content), /第 7 轮/); assert.equal(binding(), original);
   const allNodes = value => value && typeof value === 'object' ? [value, ...Object.values(value).flatMap(allNodes)] : [];
   const back = allNodes(f.sent.at(-1).content).find(node => node.type === 'callback' && node.value.action === 'sessions').value;
   assert.equal(back.page, 1); assert.equal(back.query, 'work');
-  await click(f.sent.at(-1), back); assert.match(JSON.stringify(f.sent.at(-1).content), /16\. /);
+  await click(f.sent.at(-1), back); assert.match(JSON.stringify(f.sent.at(-1).content), /6\. /);
   assert.equal(f.calls.length, 0); assert.equal(binding(), original);
 });
 
@@ -1100,4 +1100,29 @@ test('Feishu session search refreshes the cluster directory and searches native 
   const key = contextKey(f.msg(''));
   await f.gateway.action({ messageId: f.sent.at(-1).messageId, chatId: 'oc_private', operator: { openId: 'ou_owner' }, action: { value: { owner: 'ou_owner', key, action: 'sessions_search' }, form_value: { query: '新建表' } } });
   assert.equal(options.query, '新建表'); assert.equal(f.calls.length, 0, 'searching never submits work');
+});
+
+
+test('SDK session switches retain machine and directory after a leader loses its local session cache',async t=>{
+ const f=await fixture(t);await f.pair();
+ f.panel.machineId=()=> 'sgdev';
+ const native={id:'33333333-3333-4333-8333-333333333333',machineId:'mac',engine:'claude',project:'/Users/example/project/.claude/worktrees/native',title:'project-plugin-recommendations'};
+ f.panel.sessionCatalog=async()=>({sessions:[native],unavailable:[]});
+ await f.gateway.receive(f.msg('/sessions'));
+ const list=f.sent.at(-1),nodes=value=>value&&typeof value==='object'?[value,...Object.values(value).flatMap(nodes)]:[];
+ const value=nodes(list.content).find(n=>n.type==='callback'&&n.value.action==='switch').value;
+ let hint;f.panel.resolveSession=async(id,input)=>{hint=input;return{...input,id,project:input.cwd,started:true}};
+ value.key=JSON.stringify(['ou_owner','oc_fresh_private','main']);
+ const raw={operator:{open_id:'ou_owner'},context:{open_message_id:'om_card_from_previous_leader',open_chat_id:'oc_fresh_private'},action:{tag:'button',value}};
+ await f.gateway.action(require('@larksuiteoapi/node-sdk').normalizeCardAction(raw,{includeRaw:true}));
+ assert.equal(hint.cwd,native.project);assert.equal(hint.machineId,'mac');
+ assert.equal(f.sent.at(-1).content.card.header.title.content,'已切换会话');assert.match(JSON.stringify(f.sent.at(-1).content),/project-plugin-recommendations/);
+ const binding=JSON.parse(fs.readFileSync(path.join(f.dir,'panel-feishu-state.json'))).bindings[value.key];
+ assert.equal(binding.id,native.id);assert.equal(binding.cwd,native.project);assert.equal(binding.machineId,'mac');assert.equal(f.calls.length,0);
+});
+
+test('invalid card context explains how to refresh instead of silently ignoring the click',async t=>{
+ const f=await fixture(t);await f.pair();
+ await f.gateway.action({messageId:'bad-card',chatId:'oc_private',operator:{openId:'ou_owner'},action:{value:{action:'switch',id:f.rows[0].id,owner:'ou_owner',key:'{}'}}});
+ assert.match(JSON.stringify(f.sent.at(-1).content),/卡片上下文无效/);assert.equal(f.calls.length,0);
 });

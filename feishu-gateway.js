@@ -253,10 +253,10 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     const result = await send(msg, { card: cards.projectList({ forms: !!panel.workspaces, owner: msg.senderId, key: contextKey(msg), location: contextLabel(msg), rows: all.slice(page * cards.PAGE_SIZE, (page + 1) * cards.PAGE_SIZE), total: all.length, page, defaultProject: node === 'local' ? config.defaultProject : '', engine: catalog().fallback(engine, defaultEngine()), engines: catalog(), node: node === 'local' ? panel.machineId?.() || 'local' : node, nodeLabel: nodeLabel(node) }) });
     rememberCard(result, msg);
   }
-  async function currentCard(msg, binding) {
+  async function currentCard(msg, binding, switched = false, resolvedItem = null) {
     const node = nodeOf(binding), where = node === 'local' ? '' : ` · ${nodeLabel(node)}`;
     if (!detailed(msg)) return send(msg, { text: `${contextLabel(msg)} · ${catalog().label(engineOf(binding))}${where} · 模型：${modelLabel(binding)} 已就绪。直接发送消息继续。\n${catalog().switchHint(engineOf(binding))} 切换；各自保留上下文。/node 切换运行位置。/model 查看或切换模型。` });
-    const result = await send(msg, { card: cards.currentSession({ forms: !!panel.workspaces, engines: catalog(), owner: msg.senderId, key: contextKey(msg), location: contextLabel(msg), nodeLabel: nodeLabel(node), model: modelLabel(binding), binding, exists: !!session(binding.id) || !!binding.started, item: session(binding.id), running: panel.running(binding.id), requests: panel.pendingPermissions?.(binding.id) || [] }) });
+    const result = await send(msg, { card: cards.currentSession({ forms: !!panel.workspaces, engines: catalog(), owner: msg.senderId, key: contextKey(msg), location: contextLabel(msg), nodeLabel: nodeLabel(node), model: modelLabel(binding), binding, switched, exists: !!session(binding.id) || !!binding.started, item: session(binding.id) || resolvedItem, running: panel.running(binding.id), requests: panel.pendingPermissions?.(binding.id) || [] }) });
     rememberCard(result, msg, binding);
   }
   async function historyReply(msg, binding) {
@@ -706,9 +706,22 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     const rawValue = evt.action?.value;
     let value = rawValue?.action === 'set_model' ? { ...rawValue, model: evt.action.option } : rawValue;
     if (['new_submit','sessions_search'].includes(value?.action)) value = { ...value, fields: evt.action?.form_value || evt.raw?.action?.form_value || evt.raw?.event?.action?.form_value || {} };
-    const msg = { messageId: evt.messageId, senderId: evt.operator?.openId, chatId: evt.chatId, chatType: evt.chatType || inbox.chatType(config.appId, evt.chatId) || state.cards[evt.messageId]?.chatType || 'group', content: '' };
-    if (!value || typeof value !== 'object' || value.owner !== msg.senderId || !allowed(msg) || (!detailed(msg) && value.action !== 'new_submit')) return;
-    if (value.key) { try { const [owner, chat, thread] = JSON.parse(value.key); if ((owner !== msg.senderId && !(owner === '*' && msg.chatType !== 'p2p')) || chat !== msg.chatId || typeof thread !== 'string') return; const saved = state.cards[evt.messageId]; if (saved?.key && saved.key !== value.key) return; if (thread !== 'main') msg.threadId = thread; } catch { return; } }
+    let keyChatType;
+    try { const parts = JSON.parse(value?.key); if (Array.isArray(parts) && parts.length === 3 && parts[1] === evt.chatId && value.owner === evt.operator?.openId) keyChatType = parts[0] === value.owner ? 'p2p' : parts[0] === '*' ? 'group' : undefined; } catch {}
+    const msg = { messageId: evt.messageId, senderId: evt.operator?.openId, chatId: evt.chatId, chatType: evt.chatType || inbox.chatType(config.appId, evt.chatId) || state.cards[evt.messageId]?.chatType || keyChatType || 'group', content: '' };
+    if (!value || typeof value !== 'object' || !allowed(msg)) return;
+    if (value.owner !== msg.senderId) return send(msg, { text: '这张卡片仅限发起人操作，请发送 /sessions 获取自己的会话列表。' });
+    if (!detailed(msg) && value.action !== 'new_submit') return managementNotice(msg);
+    if (value.key) {
+      let parts;
+      try { parts = JSON.parse(value.key); } catch { return send(msg, { text: '卡片上下文无效，请发送 /sessions 刷新列表。' }); }
+      if (!Array.isArray(parts) || parts.length !== 3) return send(msg, { text: '卡片上下文无效，请发送 /sessions 刷新列表。' });
+      const [owner, chat, thread] = parts;
+      if ((owner !== msg.senderId && !(owner === '*' && msg.chatType !== 'p2p')) || chat !== msg.chatId || typeof thread !== 'string') return send(msg, { text: '此卡片不属于当前位置，请发送 /sessions 刷新列表。' });
+      const saved = state.cards[evt.messageId];
+      if (saved?.key && saved.key !== value.key) return send(msg, { text: '此卡片的会话位置已变化，请发送 /sessions 刷新列表。' });
+      if (thread !== 'main') msg.threadId = thread;
+    }
     const key = scope(msg);
     return withLock(contextKey(msg), () => cardAction(msg, key, value));
   }
@@ -741,9 +754,14 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       const targetId = referenceId(repaired || migrated ? original.sessionId : value.id);
       const remembered = original?.sessionId === targetId ? { ...original, id: targetId, project: original.cwd } : null;
       const cached = [state.bindings[key], ...Object.values(state.engineBindings[key] || {})].find(item => item?.id === targetId);
-      const hint = value.session?.id === targetId ? value.session : remembered || cached || state.sessionRefs[targetId];
+      let hint = value.session?.id === targetId ? value.session : remembered || cached || state.sessionRefs[targetId];
+      if (!hint?.cwd && !hint?.project && panel.sessionCatalog) {
+        const directory = await panel.sessionCatalog({ refresh: true, query: targetId });
+        const found = directory.sessions.find(item => item.id === targetId);
+        if (found) hint = { ...hint, ...found };
+      }
       const resolved = panel.resolveSession ? await panel.resolveSession(targetId, hint || {}) : null;
-      const item = resolved ? { ...session(targetId), ...resolved, started: true } : session(targetId) || (hint ? { ...hint, id: targetId, project: hint.project || hint.cwd, title: '原会话' } : null);
+      const item = resolved ? { ...session(targetId), ...resolved, started: true } : session(targetId) || (hint ? { ...hint, id: targetId, project: hint.project || hint.cwd, title: hint.title || '原会话' } : null);
       if (!item && value.action === 'history' && state.bindings[key]?.id === targetId) return send(msg, { text: '这段会话暂无已保存的对话，发送问题开始后可再查看。' });
       if (!item) return recoverSessionCard(msg,key,targetId);
       if (['stop','permission'].includes(value.action) && value.taskMessageId && panel.activeMessageId && panel.activeMessageId(item.id) !== value.taskMessageId) throw new Error('这张卡片对应的任务已结束，请发送 /current 查看当前任务');
@@ -771,7 +789,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (value.action === 'view') return currentCard(msg, bindingFor(item));
       if (value.action === 'history') return historyReply(msg, bindingFor(item));
       bind(key, bindingFor(item));
-      return currentCard(msg, state.bindings[key]);
+      return currentCard(msg, state.bindings[key], value.action === 'switch', item);
     } catch (e) { rememberError(e); await send(msg, { text: errorText(e) }); }
   }
   async function recoverTaskCards() {

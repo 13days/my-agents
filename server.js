@@ -1875,6 +1875,14 @@ async function conversationHistory(id, sourceMachine) {
   return result || (saved ? { id, project: saved.project, engine: saved.engine, machineId: saved.machineId, messages: saved.messages || [], checkpoint: true } : null);
 }
 
+const sessionInspection = require('./core/session-inspection').createSessionInspection({
+  selfId: machineId,
+  localPreviews: items => historyWorker.read('sessionPreviews', items),
+  localUserPage: input => historyWorker.read('sessionUserPage', input),
+  peerFor: id => clusterNetwork?.peer(id) || registry.node(id)?.peer,
+  checkpoint: id => conversations.get(id),
+});
+
 const resolveSessionReference = require('./core/session-reference').createSessionResolver({
   metadata: id => require('./core/session-directory').liveSessionMetadata({ ...conversations.get(id), ...sessionStore.read()[id] }, sessionDirectory.find(id)),
   selfId: machineId,
@@ -1973,8 +1981,8 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
     activeMessageId: id => manager.get(id)?.session.currentId || '',
     pendingPermissions: id => manager.pendingPermissions(id),
     history: async (id, machine) => (await conversationHistory(id, machine))?.messages || [],
-    sessionPreviews: items => Promise.all(items.map(async item => require('./core/session-previews').sessionPreview(await conversationHistory(item.id, item.machineId), item))),
-    sessionUserPage: async (item, page) => require('./core/session-previews').userMessagePage(await conversationHistory(item.id, item.machineId), page, item),
+    sessionPreviews: items => sessionInspection.previews(items),
+    sessionUserPage: (item, page) => sessionInspection.userPage(item, page),
     rename: (id, title) => { if (!listSessions().some(item => item.id === id)) throw new Error('会话不存在'); if (!title.trim() || title.trim().length > 80) throw new Error('名称需为 1–80 个字符'); sessionStore.update(id, { title: title.trim(), titleSource: 'manual' }); },
     stop: async id => { if (!manager.stop(id)) throw new Error('当前没有可停止的 Panel 任务；外部 CLI 进程请在其原入口停止'); },
   },
@@ -2721,7 +2729,7 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
     const self = clusterConfig.members.find(item => item.id === clusterConfig.nodeId);
     if (self?.witness) return;
     const oldRuntime = registry.node(id); if (oldRuntime?.info.transport === 'cluster' && oldRuntime.peer !== peer) { registry.removeNode(id); clusterRuntimePending.delete(id); }
-    require('./node/agent').serveNode({ peer, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listSessions, messages: id => sessionMessages(id) }, beforeOpen: id => { if (id && (manager.busy(id) || accountRouter.sessions().items.some(item => item.id === id && item.running))) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed) previous.session.close(); } });
+    require('./node/agent').serveNode({ peer, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listSessions, messages: id => sessionMessages(id), previews: items => historyWorker.read('sessionPreviews', items), userPage: input => historyWorker.read('sessionUserPage', input) }, beforeOpen: id => { if (id && (manager.busy(id) || accountRouter.sessions().items.some(item => item.id === id && item.running))) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed) previous.session.close(); } });
     setImmediate(() => attachClusterRuntime(id, peer).catch(error => console.warn('集群执行连接：' + error.message)));
   } });
   cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: feishuGateway, canTransfer: () => manager.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });

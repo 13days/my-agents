@@ -2,7 +2,7 @@ const path = require('path');
 const { previewText } = require('./core/session-previews');
 const { engineCatalog } = require('./channels/engine-catalog');
 const PAGE_SIZE = 5;
-const SESSION_PAGE_SIZE = 15;
+const SESSION_PAGE_SIZE = 5;
 const REPLY_PREVIEW = 2200;
 const clip = (value, max) => { const chars = Array.from(String(value || '')); return chars.length > max ? chars.slice(0, max).join('') + '…' : chars.join(''); };
 const escape = value => String(value || '').replace(/([\\`*_[\]<>])/g, '\\$1').replace(/\s+/g, ' ');
@@ -17,7 +17,7 @@ function card(title, elements, { subtitle = 'my-agents · 工作空间', templat
 }
 // Cards name engines through the catalog the gateway passes in (`context.engines`).
 const catalogOf = context => context.engines || engineCatalog();
-const sessionReference = item => ({ id: item.id, machineId: item.machineId || (item.node !== 'local' ? item.node : undefined), engine: item.engine, cwd: item.cwd || item.project, workspaceId: item.workspaceId });
+const sessionReference = item => ({ id: item.id, machineId: item.machineId || (item.node !== 'local' ? item.node : undefined), engine: item.engine, cwd: item.cwd || item.project, workspaceId: item.workspaceId, ...(item.title || item.sessionName ? { title: clip(previewText(item.sessionName || item.title), 120) } : {}) });
 const action = (context, value) => ({ ...value, ...(value.id && value.id === context.session?.id && (context.session.machineId || context.session.cwd) ? { session: context.session } : {}), owner: context.owner, key: context.key });
 function row(title, detail, operation) {
   return { tag: 'column_set', flex_mode: 'stretch', horizontal_spacing: '12px', columns: [
@@ -41,35 +41,36 @@ function sessionList({ rows, total, page, query, selected, ...context }) {
       { ...button('查找会话', action(context, { action: 'sessions_search' }), 'primary'), name: 'search_sessions', form_action_type: 'submit' },
     ] });
     if (context.unavailable?.length) elements.push(muted('部分机器暂不可读取，保留已知记录：' + context.unavailable.join('、')));
-    rows.forEach((item, index) => {
-      const rowContext = { ...context, session: { ...sessionReference(item), cwd: undefined } };
+    rows.slice(0, SESSION_PAGE_SIZE).forEach((item, index) => {
+      const rowContext = { ...context, session: sessionReference(item) };
       const number = page * SESSION_PAGE_SIZE + index + 1, current = item.id === selected;
-      const title = previewText(item.title) || (item.title ? '图片会话' : '未命名会话');
+      const title = previewText(item.sessionName || item.title) || (item.title ? '图片会话' : '未命名会话');
       const turns = Number.isInteger(item.turns) ? `${item.turns} 轮` : '轮次未记录';
       const messages = previewCount ? (item.userMessages || []).slice(-previewCount) : [];
       const previews = messages.map(message => `**第 ${message.round} 轮 · ${sessionTime(message.timestamp, timeZone)}**\n${escape(clip(message.text, previewSize))}`);
       if (!previews.length) previews.push(!previewCount ? '点击下方按钮查看用户消息。' : item.previewUnavailable ? '暂时无法读取用户消息；远程历史可能尚未同步。' : '暂无已保存的用户消息。');
       const contents = !previewCount && (item.userMessages || []).length ? [] : [markdown(previews.join('\n\n'), true)];
-      if ((item.userMessages || []).length) contents.push(button('查看全部用户消息', action(context, { action: 'user_messages', id: item.id })));
-      const line = row('', `${escape(clip(item.machineId || item.node || '机器未记录',24))} · ${catalogOf(context).label(item.engine || 'claude')} · ${escape(clip(path.basename(item.repository || item.worktree?.repository || item.project || ''), previewCount ? 24 : 12)) || '未指定项目'} · ${turns} · ${current ? '● 当前会话' : item.running ? '● 运行中' : '可接续'}\n创建 ${sessionTime(item.createdAt || item.first, timeZone)} · 最近 ${sessionTime(item.lastAt || item.last, timeZone)}`, button(current ? '继续' : '切换', action(rowContext, { action: 'switch', id: item.id }), current ? 'primary' : 'default'));
-      if (previewCount && (item.gitBranch || item.workspaceLabel)) line.columns[0].elements.push(muted('分支 / 工作区：' + escape(clip([item.gitBranch, item.workspaceLabel].filter(Boolean).join(' · '), 90))));
-      if (previewCount && item.latestPrompt) line.columns[0].elements.push(muted('最近问题：' + escape(clip(previewText(item.latestPrompt), previewSize || 40))));
-      if (previewCount) contents.push(muted('目录：' + escape(clip(item.project || '', Math.max(20, previewSize))) + '\n会话：' + item.id));
-      line.columns[0].elements[0] = { tag: 'collapsible_panel', expanded: false, header: { title: plain(`${number}. ${clip(title, titleSize)}`), icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined' }, icon_position: 'left' }, elements: contents };
-      delete line.flex_mode; delete line.horizontal_spacing; delete line.columns[1].vertical_align;
-      elements.push(line);
+      if ((item.userMessages || []).length) contents.push(button('查看全部用户消息', action(rowContext, { action: 'user_messages', id: item.id })));
+      const details = `${escape(clip(item.machineId || item.node || '机器未记录',24))} · ${catalogOf(context).label(item.engine || 'claude')} · ${escape(clip(path.basename(item.repository || item.worktree?.repository || item.project || ''), 32)) || '未指定项目'} · ${turns} · ${current ? '● 当前会话' : item.running ? '● 运行中' : '可接续'}`;
+      elements.push(markdown(`**${number}. ${escape(clip(title, titleSize))}**`), muted(details), muted(`创建 ${sessionTime(item.createdAt || item.first, timeZone)} · 最近 ${sessionTime(item.lastAt || item.last, timeZone)}`));
+      if (item.gitBranch || item.workspaceLabel) elements.push(muted('分支 / 工作区：' + escape(clip([item.gitBranch, item.workspaceLabel].filter(Boolean).join(' · '), 100))));
+      if (item.latestPrompt) elements.push(markdown('最近问题：' + escape(clip(previewText(item.latestPrompt), Math.max(60, previewSize)))));
+      contents.push(muted('目录：' + escape(clip(item.project || '', 180)) + '\n会话：' + item.id));
+      elements.push(collapse('展开用户消息', contents, false, `session_messages_${index}`));
+      elements.push(buttons([button(current ? '当前会话' : '切换到此会话', action(rowContext, { action: 'switch', id: item.id }), current ? 'primary' : 'default')]));
+
     });
     if (!rows.length) elements.push(markdown('没有找到匹配的会话。试试其他关键词，或新建一个会话。'));
     const navigation = [];
     if (page > 0) navigation.push(button('← 上一页', action(context, { action: 'sessions', page: page - 1, query })));
     if (page + 1 < pages) navigation.push(button('下一页 →', action(context, { action: 'sessions', page: page + 1, query })));
     navigation.push(button('刷新', action(context, { action: 'sessions', page, query })), button('＋ 新建会话', action(context, { action: 'new_form' }), 'primary'));
-    elements.push(buttons(navigation), muted(`各机器实时汇总，运行中优先，其余按最近活动排序；点击标题展开用户消息。时间：${timeZone}。/sessions 关键词筛选；/switch 序号切换。`));
+    elements.push(buttons(navigation), muted(`各机器实时汇总，运行中优先，其余按最近活动排序；点击“展开用户消息”查看近期对话。时间：${timeZone}。/sessions 关键词筛选；/switch 序号切换。`));
     return card('最近会话', elements, { summary: `${total} 个会话 · 选择一个继续工作` });
   };
   // Collapsed content still counts toward Feishu's 30 KB limit.
   let output;
-  for (const [previewSize, titleSize, previewCount] of [[90, 60, 2], [50, 45, 2], [24, 30, 1], [12, 20, 1], [0, 12, 0]]) {
+  for (const [previewSize, titleSize, previewCount] of [[180, 120, 2], [100, 100, 2], [60, 80, 1], [40, 60, 1]]) {
     output = render(previewSize, titleSize, previewCount);
     if (Buffer.byteLength(JSON.stringify({ msg_type: 'interactive', content: JSON.stringify(output) })) < 28000) break;
   }
@@ -161,7 +162,7 @@ function modelPicker({ engine, sessionId, model = '', models = [], accountName =
   elements.push(buttons([button('刷新模型', action(context, { action: 'models', refresh: true })), button('查看会话', action(context, { action: 'switch', id: sessionId }))]));
   return card('查看 / 切换模型', elements);
 }
-function currentSession({ binding, item, exists = false, running, model = '默认（CLI 配置）', requests = [], nodeLabel = '本机', ...context }) {
+function currentSession({ binding, item, switched = false, exists = false, running, model = '默认（CLI 配置）', requests = [], nodeLabel = '本机', ...context }) {
   context.session = sessionReference(binding);
   const pending = !item && !exists, title = item?.title || '新会话', engines = catalogOf(context), engineId = item?.engine || binding.engine || 'claude', engine = engines.label(engineId);
   const projectName = path.posix.basename(binding.worktree?.repository || binding.cwd) || binding.cwd, project = escape(projectName), where = escape(nodeLabel);
@@ -175,7 +176,7 @@ function currentSession({ binding, item, exists = false, running, model = '默�
   actions.push(button('查看 / 切换模型', action(context, { action: 'models' })));
   if (running) actions.push(button('停止任务', action(context, { action: 'stop', id: binding.id }), 'danger'));
   elements.push(buttons(actions), muted(`此绑定仅用于当前位置；群和话题内已授权用户共用。卡片操作限发起人，其他成员可使用命令。${engines.switchHint(engineId)} 切换引擎，各自接续上下文。`));
-  return card(pending ? '新会话已就绪' : '当前会话', elements, { subtitle: `${engine} · ${nodeLabel} · ${projectName}`, template: requests.length ? 'orange' : 'grey' });
+  return card(switched ? '已切换会话' : pending ? '新会话已就绪' : '当前会话', elements, { subtitle: `${engine} · ${nodeLabel} · ${projectName}`, template: requests.length ? 'orange' : 'grey' });
 }
 function task({ binding, title, view, elapsed, nodeLabel = '', model = '默认（CLI 配置）', ...context }) {
   context.session = sessionReference(binding);

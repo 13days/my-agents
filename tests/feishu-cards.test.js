@@ -23,7 +23,7 @@ test('session pages retain global command numbers and callback routing while hid
   assert.equal(card.schema, '2.0');
   const details = nodes(card).find(node => node.tag === 'collapsible_panel');
   assert.equal(details.expanded, false);
-  assert.match(JSON.stringify(card), /16\. /);
+  assert.match(JSON.stringify(card), /6\. /);
   assert.ok(actions(card).some(value => value.action === 'sessions' && value.page === 2 && value.query === 'project'));
   assert.ok(actions(card).some(value => value.action === 'switch' && value.id === rows[1].id));
   assert.ok(actions(card).every(value => value.owner === context.owner && value.key === context.key));
@@ -94,10 +94,10 @@ test('detailed task cards show available Codex reasoning summaries and real tool
   const text = JSON.stringify(task); assert.match(text, /思考摘要/); assert.match(text, /Public summary/); assert.match(text, /pwd/); assert.match(text, /shell/);
 });
 
-test('15 session choices with long CJK titles fit the Feishu message budget', () => {
+test('session choices with long CJK titles retain readable labels within the Feishu budget', () => {
   const rows = Array.from({ length: cards.SESSION_PAGE_SIZE }, (_, i) => ({ id: '11111111-2222-4333-8444-' + String(i).padStart(12, '0'), title: '任务'.repeat(60), project: '/workspace/' + '项目'.repeat(35) }));
   const card = cards.sessionList({ owner: 'ou_' + 'a'.repeat(32), key: JSON.stringify(['ou_' + 'a'.repeat(32), 'oc_' + 'b'.repeat(32), 'om_' + 'c'.repeat(32)]), rows, total: 100, page: 0 });
-  assert.equal(actions(card).filter(value => value.action === 'switch').length, 15);
+  assert.equal(actions(card).filter(value => value.action === 'switch').length, cards.SESSION_PAGE_SIZE);
   assert.ok(Buffer.byteLength(JSON.stringify({ msg_type: 'interactive', content: JSON.stringify(card) })) < 30000);
   assert.equal(cards.PAGE_SIZE, 5);
 });
@@ -105,17 +105,17 @@ test('15 session choices with long CJK titles fit the Feishu message budget', ()
 test('each session folds user messages and shows actual rounds, creation and activity times', () => {
   const card = cards.sessionList({ ...context, timeZone: 'Asia/Shanghai', rows: [{ id: 'session-user', title: '<image path="/tmp/private.png"></image>帮我修复', engine: 'codex', project: '/work/repo', turns: 12, createdAt: '2026-11-01T01:00:00Z', lastAt: '2026-11-09T01:00:00Z', userMessages: [{ round: 11, text: '用户之前的问题', timestamp: '2026-11-08T01:00:00Z' }, { round: 12, text: '用户最近的问题', timestamp: '2026-11-09T01:00:00Z' }] }], total: 1, page: 0 });
   const fold = nodes(card).find(node => node.tag === 'collapsible_panel');
-  assert.equal(fold.expanded, false); assert.match(fold.header.title.content, /帮我修复/);
+  assert.equal(fold.expanded, false); assert.match(JSON.stringify(card), /帮我修复/);
   assert.match(JSON.stringify(card), /12 轮/); assert.match(JSON.stringify(card), /创建 2026\/11\/01 09:00/);
   assert.match(JSON.stringify(fold), /用户最近的问题/); assert.doesNotMatch(JSON.stringify(card), /private.png/);
   assert.ok(actions(card).some(value => value.action === 'user_messages' && value.id === 'session-user'));
 });
 
-test('15 expanded-capable session entries with CJK previews still fit Feishu limits', () => {
-  const rows = Array.from({ length: 15 }, (_, i) => ({ id: '11111111-2222-4333-8444-' + String(i).padStart(12, '0'), title: '任务'.repeat(60), project: '/workspace/' + '项目'.repeat(35), turns: 200, first: Date.now(), last: Date.now(), userMessages: [199, 200].map(round => ({ round, text: '中'.repeat(100), timestamp: new Date().toISOString() })) }));
+test('session entries retain readable CJK previews within Feishu limits', () => {
+  const rows = Array.from({ length: cards.SESSION_PAGE_SIZE }, (_, i) => ({ id: '11111111-2222-4333-8444-' + String(i).padStart(12, '0'), title: '任务'.repeat(60), project: '/workspace/' + '项目'.repeat(35), turns: 200, first: Date.now(), last: Date.now(), userMessages: [199, 200].map(round => ({ round, text: '中'.repeat(100), timestamp: new Date().toISOString() })) }));
   const card = cards.sessionList({ owner: 'ou_' + 'a'.repeat(32), key: JSON.stringify(['ou_' + 'a'.repeat(32), 'oc_' + 'b'.repeat(32), 'om_' + 'c'.repeat(32)]), rows, total: 100, page: 0, query: '中'.repeat(80) });
-  assert.equal(nodes(card).filter(node => node.tag === 'collapsible_panel').length, 15);
-  assert.equal(actions(card).filter(value => value.action === 'switch').length, 15);
+  assert.equal(nodes(card).filter(node => node.tag === 'collapsible_panel').length, cards.SESSION_PAGE_SIZE);
+  assert.equal(actions(card).filter(value => value.action === 'switch').length, cards.SESSION_PAGE_SIZE);
   assert.ok(Buffer.byteLength(JSON.stringify({ msg_type: 'interactive', content: JSON.stringify(card) })) < 30000);
   assert.ok(nodes(card).filter(node => node.tag).length < 200);
 });
@@ -139,9 +139,20 @@ test('historical task actions carry stable ownership without relying on the gate
 
 
 test('session ownership and message expansion both fit the worst-case CJK card budget', () => {
-  const rows = Array.from({ length: 15 }, (_, i) => ({ id: '11111111-2222-4333-8444-' + String(i).padStart(12, '0'), machineId: 'panel-machine-alpha', engine: 'codex', title: '任务'.repeat(60), project: '/workspace/' + '项目'.repeat(35), turns: 200, first: Date.now(), last: Date.now(), userMessages: [199, 200].map(round => ({ round, text: '中'.repeat(100), timestamp: new Date().toISOString() })) }));
+  const rows = Array.from({ length: cards.SESSION_PAGE_SIZE }, (_, i) => ({ id: '11111111-2222-4333-8444-' + String(i).padStart(12, '0'), machineId: 'panel-machine-alpha', engine: 'codex', title: '任务'.repeat(60), project: '/workspace/' + '项目'.repeat(35), turns: 200, first: Date.now(), last: Date.now(), userMessages: [199, 200].map(round => ({ round, text: '中'.repeat(100), timestamp: new Date().toISOString() })) }));
   const card = cards.sessionList({ owner: 'ou_' + 'a'.repeat(32), key: JSON.stringify(['ou_' + 'a'.repeat(32), 'oc_' + 'b'.repeat(32), 'om_' + 'c'.repeat(32)]), rows, total: 100, page: 0, query: '中'.repeat(80) });
-  assert.equal(actions(card).filter(value => value.action === 'switch' && value.session.machineId === 'panel-machine-alpha').length, 15);
-  assert.equal(actions(card).filter(value => value.action === 'user_messages').length, 15);
+  assert.equal(actions(card).filter(value => value.action === 'switch' && value.session.machineId === 'panel-machine-alpha').length, cards.SESSION_PAGE_SIZE);
+  assert.equal(actions(card).filter(value => value.action === 'user_messages').length, cards.SESSION_PAGE_SIZE);
   assert.ok(Buffer.byteLength(JSON.stringify({ msg_type: 'interactive', content: JSON.stringify(card) })) < 30000);
+});
+
+
+test('session titles and latest prompts use full-width text and callbacks retain original directories', () => {
+ const rows=Array.from({length:cards.SESSION_PAGE_SIZE},(_,i)=>({id:'native-session-'+i,machineId:'mac',engine:'claude',project:'/work/native/worktree',title:'project-plugin-recommendations',latestPrompt:'请检查插件推荐的数据写入与查询链路，这是需要完整辨认的问题',turns:24,userMessages:[{round:24,text:'请核对真实生产调用链路，不要只看登记项',timestamp:'2026-11-10T10:18:00Z'}]}));
+ const card=cards.sessionList({...context,rows,total:300,page:0});
+ const text=JSON.stringify(card);
+ assert.match(text,/project-plugin-recommendations/);assert.match(text,/请检查插件推荐的数据写入与查询链路/);assert.match(text,/请核对真实生产调用链路/);
+ assert.ok(card.body.elements.some(e=>e.tag==='markdown'&&e.content.includes('project-plugin-recommendations')));
+ assert.ok(actions(card).filter(a=>['switch','user_messages'].includes(a.action)).every(a=>a.session?.cwd==='/work/native/worktree'&&a.session.machineId==='mac'));
+ assert.ok(Buffer.byteLength(JSON.stringify({msg_type:'interactive',content:JSON.stringify(card)}))<28000);
 });
