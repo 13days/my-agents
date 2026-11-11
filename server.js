@@ -1841,6 +1841,7 @@ registry.addNode({ id: 'local', label: '本机', host: createLocalHost() });
 registry.register(createClaudeEngine({
   accounts: accountRouter,
   transcripts: { path: transcriptPathFor, messages: id => sessionMessages(id, { limit: 0 })?.messages || [] },
+  nativeBusy: id => accountRouter.sessions().items.some(item => item.id === id && item.running) || require('./core/native-turn-state').nativeTurnBusy(transcriptPathFor(id)),
 }));
 registry.register(createCodexEngine({
   sessions: codexSessions, accounts: true,
@@ -1958,7 +1959,8 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
     running: id => manager.busy(id) || !!accountRouter.sessions().items.find(item => item.id === id)?.running,
     submit: async ({ gatewayContext, ...input }) => {
       const run = manager.get(input.sessionId), live = run && !run.job.closed;
-      if (!live && accountRouter.sessions().items.some(item => item.id === input.sessionId && item.running)) throw new Error('此会话正在外部 CLI 中运行，请等本轮结束后续接；可先用 /history 查看记录');
+      // The Claude adapter queues native handovers until the original turn is idle.
+      if (!live && input.engine !== 'claude' && accountRouter.sessions().items.some(item => item.id === input.sessionId && item.running)) throw new Error('此会话正在外部 CLI 中运行，请等本轮结束后续接；可先用 /history 查看记录');
       if (live && executionMachines().find(item => item.id === run.job.meta.machineId)?.online !== false && (run.job.meta.model || '') === (input.model || '')) { manager.send(input.sessionId, { ...input, context: gatewayContext }); return { sessionId: run.id }; }
       const { sessionId, run: started } = await manager.start({ ...input, context: gatewayContext });
       return { sessionId, cwd: started.job.meta.cwd, machineId: started.job.meta.machineId, handoff: started.job.meta.handoff, workspaceId: started.job.meta.workspaceId, worktree: started.job.meta.worktree };
@@ -2729,7 +2731,7 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
     const self = clusterConfig.members.find(item => item.id === clusterConfig.nodeId);
     if (self?.witness) return;
     const oldRuntime = registry.node(id); if (oldRuntime?.info.transport === 'cluster' && oldRuntime.peer !== peer) { registry.removeNode(id); clusterRuntimePending.delete(id); }
-    require('./node/agent').serveNode({ peer, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listSessions, messages: id => sessionMessages(id), previews: items => historyWorker.read('sessionPreviews', items), userPage: input => historyWorker.read('sessionUserPage', input) }, beforeOpen: id => { if (id && (manager.busy(id) || accountRouter.sessions().items.some(item => item.id === id && item.running))) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed) previous.session.close(); } });
+    require('./node/agent').serveNode({ peer, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listSessions, messages: id => sessionMessages(id), previews: items => historyWorker.read('sessionPreviews', items), userPage: input => historyWorker.read('sessionUserPage', input) }, beforeOpen: id => { if (id && manager.busy(id)) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed) previous.session.close(); } });
     setImmediate(() => attachClusterRuntime(id, peer).catch(error => console.warn('集群执行连接：' + error.message)));
   } });
   cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: feishuGateway, canTransfer: () => manager.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });

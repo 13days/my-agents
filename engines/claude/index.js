@@ -14,7 +14,24 @@ async function accountRouteEnv(accounts, { sessionId, accountId }) {
 
 // Claude Code engine adapter. Panel-specific services (account routing,
 // transcript lookup) are injected so the adapter also runs inside a remote node.
-function createClaudeEngine({ accounts = null, transcripts, timeoutMs = Number(process.env.CCP_CHAT_TIMEOUT_MS || 0), env = process.env } = {}) {
+function createClaudeEngine({ accounts = null, transcripts, nativeBusy = null, timeoutMs = Number(process.env.CCP_CHAT_TIMEOUT_MS || 0), env = process.env } = {}) {
+  const handovers = new Map();
+  async function openActual({ host, sessionId, resume, cwd, model, accountId, routeEnv, emit, onIdle, onClosed }) {
+    // Enabled proxy accounts route through the panel (per-account usage); otherwise the CLI's own login is used.
+    const clientEnv = routeEnv?.ANTHROPIC_BASE_URL ? { ...routeEnv } : accounts ? await accountRouteEnv(accounts, { sessionId, accountId }) : {};
+    const info = resolveClaude({ env });
+    const base = { ...env };
+    // A routed session must reach the panel proxy, not a cloud provider configured in the shell.
+    if (clientEnv.ANTHROPIC_BASE_URL) { delete base.CLAUDE_CODE_OAUTH_TOKEN; for (const key of PROVIDER_SWITCHES) delete base[key]; }
+    const session = openClaudeSession({
+      host, cli: info.path, env: claudeEnvironment({ ...base, ...clientEnv, PWD: cwd }, info), cwd, sessionId, resume, model,
+      settingsEnv: clientEnv.ANTHROPIC_BASE_URL ? { ...clientEnv, ...Object.fromEntries(PROVIDER_SWITCHES.map(key => [key, ''])) } : null,
+      emit, onIdle, onClosed, timeoutMs,
+      transcript: () => transcripts.messages(sessionId),
+    });
+    session.routed = !!clientEnv.ANTHROPIC_BASE_URL;
+    return session;
+  }
   return {
     id: 'claude',
     meta: { label: 'Claude Code', short: 'Claude', emblem: '✳', color: '#d97757', aliases: ['cc', 'claude-code'], cliEnv: 'CLAUDE_CLI', upstreamHint: '可停止任务后用 /route 切换账号' },
@@ -28,20 +45,19 @@ function createClaudeEngine({ accounts = null, transcripts, timeoutMs = Number(p
     owns: id => !!transcripts.path(id),
     // `routeEnv` comes from a hub when this adapter runs inside a remote node.
     async open({ host, sessionId, resume, cwd, model, accountId, routeEnv, emit, onIdle, onClosed }) {
-      // Enabled proxy accounts route through the panel (per-account usage); otherwise the CLI's own login is used.
-      const clientEnv = routeEnv?.ANTHROPIC_BASE_URL ? { ...routeEnv } : accounts ? await accountRouteEnv(accounts, { sessionId, accountId }) : {};
-      const info = resolveClaude({ env });
-      const base = { ...env };
-      // A routed session must reach the panel proxy, not a cloud provider configured in the shell.
-      if (clientEnv.ANTHROPIC_BASE_URL) { delete base.CLAUDE_CODE_OAUTH_TOKEN; for (const key of PROVIDER_SWITCHES) delete base[key]; }
-      const session = openClaudeSession({
-        host, cli: info.path, env: claudeEnvironment({ ...base, ...clientEnv, PWD: cwd }, info), cwd, sessionId, resume, model,
-        settingsEnv: clientEnv.ANTHROPIC_BASE_URL ? { ...clientEnv, ...Object.fromEntries(PROVIDER_SWITCHES.map(key => [key, ''])) } : null,
-        emit, onIdle, onClosed, timeoutMs,
-        transcript: () => transcripts.messages(sessionId),
-      });
-      session.routed = !!clientEnv.ANTHROPIC_BASE_URL;
-      return session;
+      const options = { host, sessionId, resume, cwd, model, accountId, routeEnv, emit, onIdle, onClosed };
+      if (handovers.has(sessionId)) throw Object.assign(new Error('这条会话已在等待 IM 接续，请在原任务卡片查看进展'), { status: 409 });
+      if (resume && nativeBusy && await nativeBusy(sessionId)) {
+        if (handovers.has(sessionId)) throw Object.assign(new Error('这条会话已在等待 IM 接续'), { status: 409 });
+        const deferred = require('../../core/deferred-session').createDeferredSession({
+          sessionId, busy: () => nativeBusy(sessionId), emit, routed: !!accounts || !!routeEnv?.ANTHROPIC_BASE_URL,
+          open: closed => openActual({ ...options, onClosed: closed }),
+          onClosed: () => { handovers.delete(sessionId); onClosed(); },
+        });
+        handovers.set(sessionId, deferred);
+        return deferred;
+      }
+      return openActual(options);
     },
   };
 }

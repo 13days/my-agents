@@ -265,3 +265,21 @@ test('working directories typed in chat may start with ~ on the machine that run
   assert.equal(createLocalHost().resolveDir('~'), fs.realpathSync(os.homedir()));
   assert.throws(() => createLocalHost().resolveDir('~/definitely-missing-dir-xyz'), { status: 400 });
 });
+
+test('a native remote handover stays queued on the owner then resumes the original transcript',async t=>{
+ const {createDeferredSession}=require('../core/deferred-session');
+ const [hubSide,nodeSide]=pairTransports(),actual=echoEngine();let busy=true,opened=0;
+ const engine={...actual,open:async options=>createDeferredSession({sessionId:options.sessionId,busy:()=>busy,pollMs:3,quietMs:10,emit:options.emit,onClosed:options.onClosed,open:async onClosed=>{opened++;return actual.open({...options,onClosed})}})};
+ serveNode({peer:createPeer(nodeSide),host:createLocalHost(),engines:[engine],id:'mac'});
+ const peer=createPeer(hubSide),registry=createRegistry({defaultEngine:'echo'});
+ await attachRemoteNode({peer,registry,log:{warn(){}}});t.after(()=>peer.close());
+ const owner={id:'thread-on-node',node:'mac',machineId:'mac',engine:'echo',project:fs.realpathSync(os.tmpdir())};
+ const manager=createSessionManager({registry,readyTimeoutMs:100,log:{warn(){}},history:{ownerOf:()=>owner,messages:()=>({messages:[{role:'user',text:'earlier native question'}]}),touch(){}}});t.after(()=>manager.shutdown());
+ const result=await manager.start({sessionId:owner.id,prompt:'前面聊了什么',cwd:'/wrong/default',engine:'echo'});
+ assert.equal(result.sessionId,owner.id);assert.equal(opened,0);
+ await until(()=>result.run.job.events.some(x=>x.event==='warning'&&x.data.kind==='native_handoff'));
+ assert.equal(manager.busy(owner.id),true);assert.equal(result.run.job.meta.cwd,owner.project);
+ busy=false;await until(()=>result.run.job.events.some(x=>x.event==='done'));
+ assert.equal(opened,1);assert.equal(actual.opened[0].sessionId,owner.id);assert.equal(actual.opened[0].resume,true);assert.equal(actual.opened[0].cwd,owner.project);
+ assert.ok(result.run.job.events.some(x=>x.event==='text'&&x.data.text==='echo:前面聊了什么'));
+});

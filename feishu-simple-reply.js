@@ -2,7 +2,7 @@ const { sendMarkdown } = require('./feishu-markdown');
 // Simple chats use ordinary rich-text replies and a temporary reaction on the user's
 // message. Capture the transport so cleanup also works while the gateway stops.
 function createSimpleReply({ channel, msg, messageId, footer = '', onError = () => {}, onFinish = () => {}, onClose = () => {} }) {
-  let reactionId, unsubscribe, timer, closed = false, closing, text = '', done = false, fallback = '已完成。', permissionPending = false, failed = false;
+  let reactionId, unsubscribe, timer, closed = false, closing, text = '', done = false, fallback = '已完成。', permissionPending = false, failed = false, handoverNotice = false;
   async function clearReaction() {
     if (!reactionId) return;
     const id = reactionId; reactionId = null;
@@ -37,6 +37,10 @@ function createSimpleReply({ channel, msg, messageId, footer = '', onError = () 
         if (closed) return;
         if (event !== 'stopped' && event !== 'end' && data.messageId !== messageId) return;
         if (event === 'text') text += data.text || '';
+        if (event === 'warning' && data.kind === 'native_handoff' && !handoverNotice) {
+          handoverNotice = true;
+          sendText('问题已接收，等待原执行机器当前一轮结束后，自动接续同一个会话。/stop 可取消等待。').catch(onError);
+        }
         if (event === 'permission' && !permissionPending) {
           permissionPending = true;
           sendText('任务需要工具授权，请在当前任务所在面板中确认后继续。').catch(onError);
