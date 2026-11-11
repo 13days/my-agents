@@ -34,6 +34,7 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id, before
     const transport=require('../core/account-transport').createAccountTransport('my-agents/runtime-native-accounts/v1');
     peer.handle('accounts.native', ({publicKey}) => ({publicKey:transport.publicKey,sealed:transport.seal(nativeLogins(),publicKey)}));
   }
+  peer.handle('engine.nativeSession', async ({ engine, id: sessionId }) => !!await engineOf(engine).nativeSessionAvailable?.(sessionId));
   peer.handle('engine.owns', async ({ engine, id: sessionId }) => !!await engineOf(engine).owns(sessionId));
   if (history) {
     peer.handle('history.messages', ({ id }) => history.messages(id));
@@ -44,8 +45,9 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id, before
   peer.handle('host.resolveDir', ({ dir }) => host.resolveDir(dir));
   peer.handle('host.createWorktree', async ({ dir }) => host.createWorktree(await host.resolveDir(dir)));
 
-  peer.handle('session.open', async ({ sid, engine: name, sessionId, resume, cwd, model, routeEnv }) => {
-    await beforeOpen(sessionId);
+  peer.handle('session.open', async ({ sid, engine: name, sessionId, resume, cwd, model, routeEnv, nativeOnly = false }) => {
+    if (nativeOnly && !await engineOf(name).nativeSessionAvailable?.(sessionId)) throw new Error('原终端会话已退出或切换，未另起执行进程');
+    await beforeOpen(sessionId, { engine: name });
     const engine = engineOf(name);
     const codexPath = String(routeEnv?.MY_AGENTS_CODEX_BASE || '');
     if (routeEnv?.ANTHROPIC_BASE_URL || /^\/(?!\/)/.test(codexPath)) {
@@ -66,7 +68,7 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id, before
     });
     sessions.set(sid, session);
     Promise.resolve(session.ready).then(realId => notify('session.ready', { id: realId }), e => notify('session.failed', { error: e?.message || String(e) }));
-    return { routed: !!session.routed };
+    return { routed: !!session.routed, nativeAttached: !!session.nativeAttached };
   });
   peer.handle('session.submit', ({ sid, turnId, input, steer, accept }) => {
     const session = sessionOf(sid);

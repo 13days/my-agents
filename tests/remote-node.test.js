@@ -283,3 +283,16 @@ test('a native remote handover stays queued on the owner then resumes the origin
  assert.equal(opened,1);assert.equal(actual.opened[0].sessionId,owner.id);assert.equal(actual.opened[0].resume,true);assert.equal(actual.opened[0].cwd,owner.project);
  assert.ok(result.run.job.events.some(x=>x.event==='text'&&x.data.text==='echo:前面聊了什么'));
 });
+
+test('attaching an existing native CLI bypasses account rerouting and remains a native attachment',async t=>{
+ const [a,b]=pairTransports();let routeCalls=0,spawns=0;
+ const engine={...echoEngine(),nativeSessionAvailable:id=>id==='thread-on-node',open:async options=>{
+  spawns++;assert.equal(options.routeEnv,null);
+  const session=await echoEngine().open(options);session.nativeAttached=true;return session;
+ }};
+ const peer=createPeer(a);serveNode({peer:createPeer(b),host:createLocalHost(),engines:[engine],id:'mac'});t.after(()=>peer.close());
+ const registry=createRegistry({defaultEngine:'echo'});
+ await attachRemoteNode({peer,registry,log:{warn(){}},routing:{target:'http://127.0.0.1:9',engines:{echo:()=>{routeCalls++;throw Error('must not reroute the original CLI')}}}});
+ const session=await registry.adapter('echo','mac').open({sessionId:'thread-on-node',resume:true,cwd:os.tmpdir(),emit(){},onIdle(){},onClosed(){}});
+ assert.equal(session.nativeAttached,true);assert.equal(routeCalls,0);assert.equal(spawns,1);session.submit('native-query-id',{prompt:'continue'},false);await session.ready;
+});

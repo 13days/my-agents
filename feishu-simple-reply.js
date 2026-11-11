@@ -37,9 +37,9 @@ function createSimpleReply({ channel, msg, messageId, footer = '', onError = () 
         if (closed) return;
         if (event !== 'stopped' && event !== 'end' && data.messageId !== messageId) return;
         if (event === 'text') text += data.text || '';
-        if (event === 'warning' && data.kind === 'native_handoff' && !handoverNotice) {
+        if (event === 'warning' && ['native_handoff','native_attachment'].includes(data.kind) && !handoverNotice) {
           handoverNotice = true;
-          sendText('问题已接收，等待原执行机器当前一轮结束后，自动接续同一个会话。/stop 可取消等待。').catch(onError);
+          sendText(data.kind === 'native_attachment' ? '已连接原终端窗口，消息由原窗口处理，回到终端可直接继续。/stop 只断开 IM 同步。' : '问题已接收，等待原执行机器当前一轮结束后，自动接续同一个会话。/stop 可取消等待。').catch(onError);
         }
         if (event === 'permission' && !permissionPending) {
           permissionPending = true;

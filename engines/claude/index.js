@@ -14,7 +14,7 @@ async function accountRouteEnv(accounts, { sessionId, accountId }) {
 
 // Claude Code engine adapter. Panel-specific services (account routing,
 // transcript lookup) are injected so the adapter also runs inside a remote node.
-function createClaudeEngine({ accounts = null, transcripts, nativeBusy = null, timeoutMs = Number(process.env.CCP_CHAT_TIMEOUT_MS || 0), env = process.env } = {}) {
+function createClaudeEngine({ accounts = null, transcripts, nativeBusy = null, nativeSessions = null, timeoutMs = Number(process.env.CCP_CHAT_TIMEOUT_MS || 0), env = process.env } = {}) {
   const handovers = new Map();
   async function openActual({ host, sessionId, resume, cwd, model, accountId, routeEnv, emit, onIdle, onClosed }) {
     // Enabled proxy accounts route through the panel (per-account usage); otherwise the CLI's own login is used.
@@ -43,9 +43,14 @@ function createClaudeEngine({ accounts = null, transcripts, nativeBusy = null, t
     detect: () => resolveClaude({ env }),
     validModel: model => MODEL.test(model),
     owns: id => !!transcripts.path(id),
+    nativeSessionAvailable: id => !!nativeSessions?.find(id),
     // `routeEnv` comes from a hub when this adapter runs inside a remote node.
     async open({ host, sessionId, resume, cwd, model, accountId, routeEnv, emit, onIdle, onClosed }) {
       const options = { host, sessionId, resume, cwd, model, accountId, routeEnv, emit, onIdle, onClosed };
+      if (resume && nativeSessions) {
+        const record = nativeSessions.find(sessionId);
+        if (record) return nativeSessions.open({ record, sessionId, emit, onIdle, onClosed });
+      }
       if (handovers.has(sessionId)) throw Object.assign(new Error('这条会话已在等待 IM 接续，请在原任务卡片查看进展'), { status: 409 });
       if (resume && nativeBusy && await nativeBusy(sessionId)) {
         if (handovers.has(sessionId)) throw Object.assign(new Error('这条会话已在等待 IM 接续'), { status: 409 });

@@ -1838,8 +1838,9 @@ function codexStatus() {
 const registry = createRegistry({ defaultEngine: 'claude' });
 registry.addNode({ id: 'local', label: '本机', host: createLocalHost() });
 // Registration order matters: Claude transcripts win id collisions with Codex threads.
+const claudeNativeSessions = require('./core/claude-native-session').createClaudeNativeSessions({ home: CLAUDE_DIR, transcriptPath: transcriptPathFor });
 registry.register(createClaudeEngine({
-  accounts: accountRouter,
+  accounts: accountRouter, nativeSessions: claudeNativeSessions,
   transcripts: { path: transcriptPathFor, messages: id => sessionMessages(id, { limit: 0 })?.messages || [] },
   nativeBusy: id => accountRouter.sessions().items.some(item => item.id === id && item.running) || require('./core/native-turn-state').nativeTurnBusy(transcriptPathFor(id)),
 }));
@@ -1986,7 +1987,7 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
     sessionPreviews: items => sessionInspection.previews(items),
     sessionUserPage: (item, page) => sessionInspection.userPage(item, page),
     rename: (id, title) => { if (!listSessions().some(item => item.id === id)) throw new Error('会话不存在'); if (!title.trim() || title.trim().length > 80) throw new Error('名称需为 1–80 个字符'); sessionStore.update(id, { title: title.trim(), titleSource: 'manual' }); },
-    stop: async id => { if (!manager.stop(id)) throw new Error('当前没有可停止的 Panel 任务；外部 CLI 进程请在其原入口停止'); },
+    stop: async id => { const detached = !!manager.get(id)?.session.nativeAttached; if (!manager.stop(id)) throw new Error('当前没有可停止的 Panel 任务；外部 CLI 进程请在其原入口停止'); return { detached }; },
   },
 });
 
@@ -2731,7 +2732,7 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
     const self = clusterConfig.members.find(item => item.id === clusterConfig.nodeId);
     if (self?.witness) return;
     const oldRuntime = registry.node(id); if (oldRuntime?.info.transport === 'cluster' && oldRuntime.peer !== peer) { registry.removeNode(id); clusterRuntimePending.delete(id); }
-    require('./node/agent').serveNode({ peer, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listSessions, messages: id => sessionMessages(id), previews: items => historyWorker.read('sessionPreviews', items), userPage: input => historyWorker.read('sessionUserPage', input) }, beforeOpen: id => { if (id && manager.busy(id)) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed) previous.session.close(); } });
+    require('./node/agent').serveNode({ peer, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listSessions, messages: id => sessionMessages(id), previews: items => historyWorker.read('sessionPreviews', items), userPage: input => historyWorker.read('sessionUserPage', input) }, beforeOpen: (id, options) => { const native = options.engine === 'claude' && id && claudeNativeSessions.find(id); if (id && manager.busy(id) && !native) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed && !manager.busy(id)) previous.session.close(); } });
     setImmediate(() => attachClusterRuntime(id, peer).catch(error => console.warn('集群执行连接：' + error.message)));
   } });
   cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: feishuGateway, canTransfer: () => manager.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });

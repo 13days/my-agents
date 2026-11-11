@@ -58,13 +58,14 @@ async function attachRemoteNode({ peer, registry, transport = 'ws', pin = null, 
         sessions.set(sid, proxy);
         let opened;
         try {
-          const env = routeEnv ? await routeEnv(options) : null;
-          opened = await peer.call('session.open', { sid, engine: engine.id, sessionId: options.sessionId, resume: options.resume, cwd: options.cwd, model: options.model, ...(env ? { routeEnv: env } : {}) }, { timeout: 60000 });
+          const nativeOnly = !!options.resume && !!options.sessionId && await peer.call('engine.nativeSession', { engine: engine.id, id: options.sessionId }, { timeout: 5000 }).catch(() => false);
+          const env = routeEnv && !nativeOnly ? await routeEnv(options) : null;
+          opened = await peer.call('session.open', { sid, engine: engine.id, sessionId: options.sessionId, resume: options.resume, cwd: options.cwd, model: options.model, nativeOnly, ...(env ? { routeEnv: env } : {}) }, { timeout: 60000 });
         }
         catch (e) { sessions.delete(sid); throw e; }
         const send = (method, params = {}) => peer.call(method, { sid, ...params }).catch(e => { if (!done) options.emit('warning', { warning: `${host.label}：${e.message}` }); });
         return {
-          ready, routed: !!opened?.routed,
+          ready, routed: !!opened?.routed, nativeAttached: !!opened?.nativeAttached,
           submit(turnId, input, steer, onAccept) {
             // Optimistic state until the node reports back, so busy checks stay accurate.
             if (proxy.state.currentId) proxy.state.pendingCount++; else proxy.state.currentId = turnId;
