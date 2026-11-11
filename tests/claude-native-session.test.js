@@ -7,7 +7,7 @@ async function until(fn){for(let i=0;i<150;i++){if(fn())return;await sleep(5)}as
 async function fixture(t){
  const home=fs.mkdtempSync(path.join(os.tmpdir(),'native-live-')),registry=path.join(home,'sessions'),transcript=path.join(home,'native.jsonl');fs.mkdirSync(registry,{mode:0o700});fs.writeFileSync(transcript,'');
  const socketPath=path.join(home,'inbox.sock'),frames=[];
- const row={pid:process.pid,sessionId:'original-native-session',kind:'interactive',peerProtocol:1,messagingSocketPath:socketPath,procStart:'test-process',pidDomain:'test',status:'idle'};
+ const row={pid:process.pid,sessionId:'original-native-session',kind:'interactive',peerProtocol:1,messagingSocketPath:socketPath,procStart:'test-process',pidDomain:'test',status:'idle',version:'2.1.283'};
  const record=path.join(registry,process.pid+'.json');fs.writeFileSync(record,JSON.stringify(row),{mode:0o600});
  fs.writeFileSync(path.join(registry,process.pid+'.auth.key'),JSON.stringify({peerToken:'test-inbox-key',procStart:row.procStart,pidDomain:row.pidDomain}),{mode:0o600});
  let count=0;
@@ -25,9 +25,9 @@ test('terminal → IM → terminal → IM stays in the existing native process w
  const engine=createClaudeEngine({transcripts:{path:()=>f.transcript,messages:()=>[]},nativeSessions:f.native,env:{CLAUDE_CLI:'/must-not-spawn'}});
  const session=await engine.open({host:{spawn(){throw Error('must not create a second CLI')}},sessionId:f.row.sessionId,resume:true,cwd:f.home,emit:(event,data)=>events.push({event,data}),onIdle(){},onClosed(){closed++}});t.after(()=>session.close());
  assert.equal(session.nativeAttached,true);assert.equal(await session.ready,f.row.sessionId);
- session.submit('im-question-one',{prompt:'second question from IM',context:'current IM context'});
+ session.submit('im-question-one',{prompt:'second question from IM',context:'[my-agents 飞书发送上下文，本轮有效]\n当前会话由 my-agents 直接启动，版本为 2.1.319\n{"messageId":"im-question-one"}\n原消息发送位置'});
  await until(()=>events.some(x=>x.event==='done'));
- assert.equal(f.frames[0].type,'auth');assert.equal(f.frames[0].token,'test-inbox-key');assert.match(f.frames[1].message.content,/second question from IM/);
+ assert.equal(f.frames[0].type,'auth');assert.equal(f.frames[0].token,'test-inbox-key');assert.match(f.frames[1].message.content,/second question from IM/);assert.match(f.frames[1].message.content,/2\.1\.283/);assert.doesNotMatch(f.frames[1].message.content,/2\.1\.319/);assert.match(f.frames[1].message.content,/原消息发送位置/);
  assert.ok(events.some(x=>x.event==='text'&&x.data.text==='native reply 1'&&x.data.messageId==='im-question-one'));
  f.append({type:'user',message:{content:'third question back at terminal'}});f.append({type:'assistant',message:{content:[{type:'text',text:'terminal answer'}],stop_reason:'end_turn'}});
  await sleep(25);assert.ok(!events.some(x=>x.data.text==='terminal answer'));

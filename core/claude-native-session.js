@@ -117,7 +117,14 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
         if (seen.has(id)) return;
         if (input.images?.length) throw new Error('原终端消息通道当前只支持文字，请在原窗口发送图片');
         if (pending.length >= 20) throw new Error('等待中的消息太多，请稍后发送');
-        const marker = `my-agents-im:${id}`, body = `[来自飞书 · ${marker}]\n${input.context || ''}\n\n${input.prompt || ''}`;
+        const prefix = '[my-agents 飞书发送上下文，本轮有效]\n';
+        let context = input.context || '';
+        if (context.startsWith(prefix)) {
+          const lines = context.slice(prefix.length).split('\n');
+          if (lines[0]?.startsWith('当前会话由 my-agents 直接启动')) lines.shift();
+          context = prefix + `本轮消息投递到原来已打开的 Claude Code 终端进程，不是 my-agents 新启动的 CLI。原进程版本：${record.version || '未提供'}；模型、登录与工具权限沿用该原窗口。\n` + lines.join('\n');
+        }
+        const marker = `my-agents-im:${id}`, body = `[来自飞书 · ${marker}]\n${context}\n\n${input.prompt || ''}`;
         if (Buffer.byteLength(body) > 512 * 1024) throw new Error('发送给原终端的消息过长');
         seen.add(id); pending.push({ id, marker, body, text: new Map(), tools: new Set() }); accept?.();
         emit('warning', { messageId: id, kind: 'native_attachment', warning: '已连接原来打开的 Claude Code 窗口。飞书消息会由这个窗口处理，回到终端可以直接接着聊；断开 IM 同步不会关闭原窗口。' });

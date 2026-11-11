@@ -505,7 +505,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       return;
     }
     const startedAt = now(), taskModel = selectedModel(binding) || (engineOf(binding) === 'codex' ? '默认（账号实时推荐）' : '默认（CLI 配置）');
-    const progress = () => cards.task({ nodeLabel: nodeLabel(nodeOf(binding)), model: selectedModel(binding) || panel.currentModel?.(binding.id) || taskModel, engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), detailed: detailed(msg), binding, title: session(binding.id)?.title || clip(prompt, 80) || '图片对话', view, taskMessageId: id, elapsed: now() - startedAt });
+    const progress = () => cards.task({ nodeLabel: nodeLabel(nodeOf(binding)), model: view.nativeAttached ? '沿用原终端当前模型' : selectedModel(binding) || panel.currentModel?.(binding.id) || taskModel, engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), detailed: detailed(msg), binding, title: session(binding.id)?.title || clip(prompt, 80) || '图片对话', view, taskMessageId: id, elapsed: now() - startedAt });
     const sent = await send(msg, { card: progress() }); rememberCard(sent, msg, binding);
     const transport = channel;
     const saveTask = card => {
