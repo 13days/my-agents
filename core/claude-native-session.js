@@ -49,7 +49,10 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
       socket.once('error', error => { clearTimeout(timer); reject(error); });
       socket.once('connect', () => {
         const frames = [...(token ? [{ type: 'auth', token }] : []), { type: 'user', message: { role: 'user', content: text } }];
-        socket.end(frames.map(frame => JSON.stringify(frame)).join('\n') + '\n', () => { clearTimeout(timer); resolve(); });
+        // Give the native macOS inbox time to consume the final frame before EOF.
+        socket.write(frames.map(frame => JSON.stringify(frame)).join('\n') + '\n', () => {
+          setTimeout(() => { socket.end(); clearTimeout(timer); resolve(); }, 150);
+        });
       });
     });
   }
@@ -67,6 +70,14 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
     const consume = row => {
       if (!active || row.isSidechain) return;
       const message = row.message || {};
+      // The native CLI records a held message before adding it as a user turn.
+      // Approval can take minutes: an observation deadline is not a delivery failure.
+      if (!active.confirmed && row.type === 'system' && row.subtype === 'informational'
+          && typeof row.content === 'string' && row.content.startsWith('Held peer message')
+          && row.content.includes(active.marker) && !active.held) {
+        active.held = true;
+        emit('warning', { messageId: active.id, kind: 'native_approval', warning: '消息已到达原终端，正在等待原窗口的接收授权。请在原窗口确认；IM 会继续跟踪，批准后的回答仍会同步到这里。无需重新提交。' });
+      }
       if (!active.confirmed && row.type === 'user' && textOf(message).includes(active.marker)) {
         active.confirmed = true; emit('turn', { id: active.id, messageId: active.id });
       }
@@ -102,7 +113,11 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
           while ((end = fragments.indexOf('\n')) >= 0) { const line = fragments.slice(0, end); fragments = fragments.slice(end + 1); try { consume(JSON.parse(line)); } catch {} }
           if (fragments.length > 8 * 1024 * 1024) throw new Error('原会话单条记录过大，IM 已停止同步；请在原窗口查看');
         }
-        if (active && !active.confirmed && now() - active.sentAt > deliveryTimeoutMs) throw new Error('原终端尚未确认收到此消息，可能在等待接收授权。投递状态未知，未自动重发；请检查原窗口');
+        if (active && !active.confirmed && !active.held && !active.deliveryPending
+            && offset >= size && now() - active.sentAt > deliveryTimeoutMs) {
+          active.deliveryPending = true;
+          emit('warning', { messageId: active.id, kind: 'native_delivery_pending', warning: '原终端尚未确认接收，投递状态待确认。IM 会继续跟踪，请检查原窗口是否需要授权；不要重复提交。/stop 只断开同步，不会撤回已发送的消息。' });
+        }
         if (!active && pending.length && current.status === 'idle' && offset >= size) {
           active = pending.shift(); active.sentAt = now();
           await deliver(record, active.body);

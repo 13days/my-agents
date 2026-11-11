@@ -1139,3 +1139,16 @@ test('an accepted native handover shows waiting instead of failure and keeps the
  for(let i=0;i<50&&f.updated.at(-1).card.header.title.content!=='已完成';i++)await new Promise(r=>setTimeout(r,10));
  assert.equal(f.updated.at(-1).card.header.title.content,'已完成');
 });
+
+test('a held original-terminal message keeps its card pending and receives the later answer',async t=>{
+ const f=await fixture(t);await f.pair();await f.gateway.receive(f.msg('/sessions'));await f.gateway.receive(f.msg('/switch 1'));
+ let input,listener;f.panel.submit=async value=>{input=value;f.calls.push(value);return{sessionId:value.sessionId}};
+ f.panel.watch=(_id,fn)=>{listener=fn;fn('warning',{messageId:input.messageId,kind:'native_attachment',warning:'原终端已连接'});fn('warning',{messageId:input.messageId,kind:'native_approval',warning:'问题已接收，等待原窗口接收授权'});return()=>{}};
+ await f.gateway.receive(f.msg('前面聊了什么'));
+ for(let i=0;i<100&&!f.updated.some(x=>x.card.header.title.content==='等待原窗口确认');i++)await new Promise(r=>setTimeout(r,20));
+ const waiting=f.updated.find(x=>x.card.header.title.content==='等待原窗口确认');assert.ok(waiting);assert.equal(waiting.card.header.template,'orange');assert.match(JSON.stringify(waiting.card),/问题已接收/);
+ assert.equal(input.sessionId,f.rows[0].id);assert.equal(input.prompt,'前面聊了什么');assert.equal(f.calls.length,1);
+ listener('turn',{messageId:input.messageId});listener('text',{messageId:input.messageId,text:'我们前面聊的是插件推荐。'});listener('done',{messageId:input.messageId});
+ for(let i=0;i<50&&f.updated.at(-1).card.header.title.content!=='已完成';i++)await new Promise(r=>setTimeout(r,10));
+ assert.equal(f.updated.at(-1).card.header.title.content,'已完成');
+});

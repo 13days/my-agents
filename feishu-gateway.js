@@ -574,8 +574,8 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (data.messageId !== id) return;
       if (event === 'permission') { view.permissions.set(data.id, data); view.phase = '等待你的授权'; }
       if (event === 'permission_resolved') { view.permissions.delete(data.id); view.phase = data.behavior === 'allow' ? '正在处理' : '授权已结束'; }
-      if (event === 'turn') view.phase = '正在思考';
-      if (event === 'warning') { view.nativeAttached ||= data.kind === 'native_attachment'; view.phase = data.kind === 'native_handoff' ? '等待原会话接续' : data.kind === 'native_attachment' ? '已连接原终端' : '连接重试中'; view.warning = clip(data.warning || '引擎正在重试，请稍候', 500); }
+      if (event === 'turn') { view.phase = '正在思考'; if (view.nativeAttached) view.warning = ''; }
+      if (event === 'warning') { view.nativeAttached ||= data.kind === 'native_attachment'; view.phase = data.kind === 'native_handoff' ? '等待原会话接续' : data.kind === 'native_attachment' ? '已连接原终端' : data.kind === 'native_approval' ? '等待原窗口确认' : data.kind === 'native_delivery_pending' ? '投递待确认' : '连接重试中'; view.warning = clip(data.warning || '引擎正在重试，请稍候', 500); }
       if (event === 'text') { view.text += data.text || ''; view.phase = '正在输出'; }
       if (event === 'reasoning') { view.reasoning.set(data.id, data.text); view.phase = '正在思考'; }
       if (event === 'tool') view.tools.set(data.id, { name: data.name, state: '执行中', input: JSON.stringify(data.input || {}, null, 2) });
@@ -583,7 +583,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (event === 'error') { view.text += '\n⚠ ' + data.error; view.phase = '失败'; view.done = true; }
       if (event === 'done') { if (data.isError && !view.text) view.text = data.error || '引擎报告执行失败，请检查模型与账号配置'; view.phase = data.isError ? '失败' : data.interrupted ? '已按补充消息继续' : '已完成'; view.done = true; }
       if (view.done) saveTask(progress());
-      schedule(view.done || ['native_handoff','native_attachment'].includes(data.kind));
+      schedule(view.done || ['native_handoff','native_attachment','native_approval','native_delivery_pending'].includes(data.kind));
     });
   }
   async function processMessage(msg) {

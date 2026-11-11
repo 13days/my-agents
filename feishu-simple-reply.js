@@ -41,6 +41,7 @@ function createSimpleReply({ channel, msg, messageId, footer = '', onError = () 
           handoverNotice = true;
           sendText(data.kind === 'native_attachment' ? '已连接原终端窗口，消息由原窗口处理，回到终端可直接继续。/stop 只断开 IM 同步。' : '问题已接收，等待原执行机器当前一轮结束后，自动接续同一个会话。/stop 可取消等待。').catch(onError);
         }
+        if (event === 'warning' && ['native_approval','native_delivery_pending'].includes(data.kind)) sendText(data.warning).catch(onError);
         if (event === 'permission' && !permissionPending) {
           permissionPending = true;
           sendText('任务需要工具授权，请在当前任务所在面板中确认后继续。').catch(onError);
