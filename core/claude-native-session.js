@@ -12,14 +12,14 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
     if (stat.isSymbolicLink() || stat.uid !== process.getuid?.() || (stat.mode & (metadata ? 0o022 : 0o077))) throw new Error('原终端消息入口权限不安全，未发送');
     return stat;
   };
-  function find(id) {
+  function find(id, preferred = null) {
     let names; try { names = fs.readdirSync(registry); } catch { return null; }
     const matches = [];
     for (const name of names.filter(name => /^\d+\.json$/.test(name))) {
       try {
         const file = path.join(registry, name); privateFile(file, true);
         const row = JSON.parse(fs.readFileSync(file, 'utf8'));
-        if (row.sessionId !== id || row.kind !== 'interactive' || !Number.isSafeInteger(row.pid) || row.pid < 2) continue;
+        if (name !== String(row.pid) + '.json' || row.sessionId !== id || row.kind !== 'interactive' || !Number.isSafeInteger(row.pid) || row.pid < 2) continue;
         try { process.kill(row.pid, 0); } catch { continue; }
         const stat = privateFile(row.messagingSocketPath);
         if (!stat.isSocket()) throw new Error('原终端消息入口不是套接字');
@@ -27,7 +27,16 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
         matches.push(row);
       } catch (error) { if (/原终端/.test(error.message)) throw error; }
     }
-    if (matches.length > 1) throw new Error('同一会话有多个原生终端窗口，无法确定要连接哪一个，请先确认会话');
+    // Once attached, follow the exact process rather than re-electing a window
+    // whenever another terminal resumes the same transcript.
+    if (preferred) return matches.find(row => row.pid === preferred.pid && row.procStart === preferred.procStart && row.pidDomain === preferred.pidDomain && row.messagingSocketPath === preferred.messagingSocketPath) || null;
+    if (matches.length > 1) {
+      // A suspended shell window still publishes the same session ID. It is
+      // not the conversational inbox when exactly one other window is ready.
+      const conversational = matches.filter(row => ['idle', 'working'].includes(row.status));
+      if (conversational.length === 1 && matches.every(row => row === conversational[0] || row.status === 'shell')) return conversational[0];
+      throw new Error('这条会话同时在多个 Claude Code 对话窗口打开（进程 ' + matches.map(row => row.pid).join('、') + '）。请关闭不需要接续的窗口，再从飞书发送；本次尚未投递，也未复制或关闭原会话');
+    }
     return matches[0] || null;
   }
   function tokenFor(row) {
@@ -40,7 +49,7 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
   }
   function deliver(row, text) {
     // Re-resolve immediately before writing to reject stale or reused PIDs.
-    const current = find(row.sessionId);
+    const current = find(row.sessionId, row);
     if (!current || current.pid !== row.pid || current.procStart !== row.procStart) throw new Error('原终端已经退出或切换，请重新选择会话');
     const token = tokenFor(row);
     return new Promise((resolve, reject) => {
@@ -101,7 +110,7 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
     async function poll() {
       if (closed || polling) return; polling = true;
       try {
-        const current = find(sessionId);
+        const current = find(sessionId, record);
         if (!current || current.pid !== record.pid || current.procStart !== record.procStart) throw new Error('原终端会话已退出或切换；IM 已断开同步，历史仍保留');
         const size = fs.statSync(file).size;
         if (size < offset) throw new Error('原会话记录已重建，请重新连接');

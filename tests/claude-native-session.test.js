@@ -78,3 +78,44 @@ test('unknown native delivery stays pending without retry and can later be confi
  await until(()=>events.some(x=>x.event==='done'));
  assert.equal(f.frames.filter(x=>x.type==='user').length,1);
 });
+
+async function secondWindow(f, status = 'idle') {
+ const row = { ...f.row, pid: process.ppid, procStart: 'second-process', status };
+ fs.writeFileSync(path.join(f.registry, row.pid + '.json'), JSON.stringify(row), { mode: 0o600 });
+ return row;
+}
+
+test('a single conversational window wins over an older shell window without delivering a probe', async t => {
+ const f = await fixture(t);
+ await secondWindow(f, 'shell');
+ assert.equal(f.native.find(f.row.sessionId).pid, f.row.pid);
+ assert.equal(f.frames.length, 0);
+ // File traversal order and misleading recency must not decide ownership.
+ const second = await secondWindow(f, 'idle');
+ assert.throws(() => f.native.find(f.row.sessionId), /多个 Claude Code 对话窗口.*本次尚未投递/);
+ assert.equal(f.native.find(f.row.sessionId, f.row).pid, f.row.pid);
+ assert.equal(f.native.find(f.row.sessionId, second).pid, second.pid);
+});
+
+test('opening another window does not break an established native attachment or redirect its messages', async t => {
+ const f = await fixture(t), events = [];
+ const record = f.native.find(f.row.sessionId);
+ const session = f.native.open({ record, sessionId: f.row.sessionId, emit: (event, data) => events.push({ event, data }), onIdle() {}, onClosed() {} });
+ t.after(() => session.close());
+ await secondWindow(f);
+ session.submit('pinned-window', { prompt: 'continue in the selected window' });
+ await until(() => events.some(e => e.event === 'done'));
+ assert.equal(f.frames.filter(frame => frame.type === 'user').length, 1);
+ assert.ok(!events.some(e => e.event === 'error'));
+ fs.unlinkSync(f.record);
+ assert.equal(f.native.find(f.row.sessionId, record), null, 'a closed selected window never silently becomes the other window');
+});
+
+test('a registry filename cannot impersonate a second window and pinned process identity cannot be reused', async t => {
+ const f = await fixture(t);
+ fs.writeFileSync(path.join(f.registry, '0' + f.row.pid + '.json'), JSON.stringify(f.row), { mode: 0o600 });
+ assert.equal(f.native.find(f.row.sessionId).pid, f.row.pid);
+ const changed = { ...f.row, procStart: 'reused-process' };
+ fs.writeFileSync(f.record, JSON.stringify(changed));
+ assert.equal(f.native.find(f.row.sessionId, f.row), null);
+});
