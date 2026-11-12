@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('http');
 const { createClusterNetwork } = require('../node/cluster-peer');
-const until = async check => { const end = Date.now() + 3000; while (!check()) { if (Date.now() > end) throw new Error('timeout'); await new Promise(r => setTimeout(r, 10)); } };
+const until = async check => { const end = Date.now() + 3000; while (!await check()) { if (Date.now() > end) throw new Error('timeout'); await new Promise(r => setTimeout(r, 10)); } };
 
 test('a different panel resumes an existing session on its original machine over the cluster link', async t => {
   const { serveNode } = require('../node/agent'), { attachRemoteNode } = require('../node/remote');
@@ -20,7 +20,12 @@ test('a different panel resumes an existing session on its original machine over
   }
   t.after(() => { networks.forEach(network => network.stop()); servers.forEach(server => server.close()); });
   networks.forEach(network => network.start());
-  await until(() => networks.every(network => network.connected().length === 1));
+  // A transport may be visible while simultaneous connections are still
+  // selecting their shared peer. Wait for both runtime handlers as well.
+  await until(async () => {
+    try { await Promise.all(networks.map((network, index) => network.peer(members[1 - index].id)?.call('hello', {}, { timeout: 200 }))); return networks.every(network => network.connected().length === 1); }
+    catch { return false; }
+  });
   await attachRemoteNode({ peer: networks[1].peer('mac'), registry: registries[1], transport: 'cluster' });
   const manager = createSessionManager({ registry: registries[1], resolveLocation: () => ({ machineId: 'mac', node: 'mac', cwd: '/mac/project' }), history: { ownerOf: () => null, messages: () => null, touch() {} } });
   t.after(() => manager.shutdown());
