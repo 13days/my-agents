@@ -18,6 +18,7 @@ function createClusterNetwork({ token, selfId, members = [], WebSocket = require
     const timer = setInterval(() => { if (!alive) return ws.terminate(); alive = false; if (ws.readyState === WebSocket.OPEN) ws.ping(); }, 4000); timer.unref?.();
     ws.on('close', () => { clearInterval(timer); sockets.delete(ws); });
   };
+  const installHandlers = (id, peer) => { for (const [method, fn] of handlers) peer.handle(method, params => fn(id, params)); };
   const wire = (id, peer, initiator) => {
     if (stopped) { peer.close(); return; }
     const old = peers.get(id);
@@ -26,7 +27,7 @@ function createClusterNetwork({ token, selfId, members = [], WebSocket = require
     initiators.set(id, initiator);
     if (old && old !== peer) old.close();
     reports.set(id, { connectedAt: Date.now(), error: '' });
-    for (const [method, fn] of handlers) peer.handle(method, params => fn(id, params));
+    installHandlers(id, peer);
     peer.onClose(() => { if (peers.get(id) === peer) peers.delete(id); });
     try { Promise.resolve(onPeer(id, peer)).catch(error => { reports.set(id, { error: error.message }); log.warn?.('集群运行通道：' + error.message); }); }
     catch (error) { reports.set(id, { error: error.message }); }
@@ -55,6 +56,10 @@ function createClusterNetwork({ token, selfId, members = [], WebSocket = require
       if (stopped) { ws.close(); return; }
       keepAlive(ws);
       const peer = createPeer(wsTransport(ws));
+      // The accepting side may send control RPCs before its hello reply.
+      // Install registered handlers first; publish membership and expose the
+      // execution runtime only after verifying the returned node identity.
+      installHandlers(item.id, peer);
       try { const hello = await peer.call('cluster.hello', { id: selfId }, { timeout: 5000 }); if (hello.id !== item.id) throw new Error('集群节点身份不匹配'); wire(item.id, peer, selfId); }
       catch (e) { reports.set(item.id, { error: e.message }); peer.close(); }
     });

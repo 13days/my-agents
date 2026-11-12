@@ -60,3 +60,21 @@ test('members stay connected when only the reverse connection direction is reach
   await until(() => networks.every(network => network.connected().length === 1));
   assert.deepEqual(await networks[1].call('a', 'echo', { alive: true }), { from: 'b', input: { alive: true } });
 });
+
+test('the accepting peer can call control RPCs before the outgoing hello has returned', async t => {
+ const members = [{ id: 'a' }, { id: 'b' }], servers = [], networks = [];
+ let outcome;
+ for (const member of members) { const server = http.createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); member.url = `http://127.0.0.1:${server.address().port}`; servers.push(server); }
+ for (let index = 0; index < 2; index++) {
+  const network = createClusterNetwork({ token: 'handshake-race', selfId: members[index].id, members, onPeer: (_, peer) => {
+   if (index === 1) peer.call('echo', { duringHello: true }).then(value => { outcome = { value }; }, error => { outcome = { error }; });
+  } });
+  networks.push(network); servers[index].on('upgrade', (req, socket, head) => network.upgrade(req, socket, head));
+ }
+ t.after(() => { networks.forEach(network => network.stop()); servers.forEach(server => server.close()); });
+ networks[0].handle('echo', (from, input) => ({ from, input }));
+ networks[0].start();
+ await until(() => outcome);
+ assert.equal(outcome.error, undefined);
+ assert.deepEqual(outcome.value, { from: 'b', input: { duringHello: true } });
+});
