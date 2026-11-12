@@ -64,7 +64,7 @@ test('simple group cards show tool status while withholding intermediate text, t
 test('engine choices and conversation cards expose both engines with topic-scoped callbacks', () => {
   const picker = cards.enginePicker({ ...context, location: '当前话题', engine: 'codex', defaultEngine: 'claude', cwd: '/project' });
   const choices = actions(picker).filter(value => value.action === 'use_engine');
-  assert.deepEqual(choices.map(value => value.engine), ['claude', 'codex']);
+  assert.deepEqual(choices.map(value => value.engine), ['claude']);
   assert.ok(choices.every(value => value.key === context.key));
   assert.match(JSON.stringify(picker), /分别保留上下文/);
   const current = cards.currentSession({ ...context, binding: { id: 'codex-session', cwd: '/project', engine: 'codex' }, running: false });
@@ -72,7 +72,8 @@ test('engine choices and conversation cards expose both engines with topic-scope
   assert.ok(actions(current).some(value => value.action === 'engine'));
   const task = cards.task({ ...context, binding: { id: 'codex-session', cwd: '/project', engine: 'codex' }, title: 'Task', view: { text: 'Done', phase: '已完成', done: true, tools: new Map(), permissions: new Map() }, elapsed: 1000 });
   assert.match(JSON.stringify(task), /Codex/);
-  assert.ok(actions(task).some(value => value.action === 'engine'));
+  assert.equal(actions(task).some(value => ['engine', 'models', 'nodes'].includes(value.action)), false);
+  assert.ok(actions(task).some(value => value.action === 'view'));
   const claudeProject = cards.projectList({ ...context, rows: ['/project'], total: 1, page: 0, engine: 'claude' });
   assert.equal(actions(claudeProject).find(value => value.action === 'new').engine, 'claude');
 });
@@ -82,7 +83,7 @@ test('new session cards confirm project and engine without offering nonexistent 
   const pending = cards.currentSession({ ...context, binding, running: false });
   assert.ok(actions(pending).some(value => value.action === 'projects' && value.engine === 'codex'));
   assert.equal(actions(pending).some(value => ['history', 'switch', 'sessions'].includes(value.action)), false);
-  assert.doesNotMatch(JSON.stringify(pending), /最近对话|not-started-id/);
+  assert.doesNotMatch(JSON.stringify(pending.body.elements.filter(e => e.tag === 'markdown')), /最近对话|not-started-id/);
   const existing = cards.currentSession({ ...context, binding, item: { id: binding.id, title: 'Existing', engine: 'codex' }, running: false });
   assert.ok(actions(existing).some(value => value.action === 'history'));
   const legacy = cards.currentSession({ ...context, binding: { id: binding.id, cwd: binding.cwd }, item: { id: binding.id, engine: 'codex' }, running: false });
@@ -123,7 +124,7 @@ test('session entries retain readable CJK previews within Feishu limits', () => 
 test('task action rows have at most two full-width buttons so labels remain readable', () => {
   const card = cards.task({ ...context, binding: { id: 'session', cwd: '/project' }, view: { done: false, phase: '正在思考', text: '', tools: new Map(), permissions: new Map() }, title: 'Task', elapsed: 1000 });
   const rows = nodes(card).filter(node => node.tag === 'column_set' && node.columns?.some(column => column.elements?.some(item => item.tag === 'button')));
-  assert.ok(rows.length >= 3);
+  assert.equal(rows.length, 2);
   assert.ok(rows.every(row => row.columns.length <= 2));
   assert.ok(rows.flatMap(row => row.columns).every(column => column.elements[0].width === 'fill'));
 });
@@ -155,4 +156,49 @@ test('session titles and latest prompts use full-width text and callbacks retain
  assert.ok(card.body.elements.some(e=>e.tag==='markdown'&&e.content.includes('project-plugin-recommendations')));
  assert.ok(actions(card).filter(a=>['switch','user_messages'].includes(a.action)).every(a=>a.session?.cwd==='/work/native/worktree'&&a.session.machineId==='mac'));
  assert.ok(Buffer.byteLength(JSON.stringify({msg_type:'interactive',content:JSON.stringify(card)}))<28000);
+});
+
+test('task cards separate conversation navigation from settings and terminal actions', () => {
+  const options = { ...context, binding: { id: 's', cwd: '/project', engine: 'claude' }, title: 'Task', elapsed: 2000 };
+  for (const phase of ['正在思考', '已完成', '失败', '结果待核对', '连接已结束']) {
+    const view = { phase, done: phase !== '正在思考', accepted: true, text: '', tools: new Map(), permissions: new Map() };
+    const output = cards.task({ ...options, view }), callbacks = actions(output);
+    assert.equal(new Set(callbacks.map(a => a.action)).size, callbacks.length);
+    assert.deepEqual(callbacks.slice(0, 2).map(a => a.action), ['history', 'view']);
+    assert.equal(callbacks.some(a => a.action === 'stop'), !view.done);
+    assert.equal(callbacks.some(a => a.action === 'continue_task'), phase === '失败');
+    assert.doesNotMatch(JSON.stringify(output), /查看 \/ 切换/);
+    if (['结果待核对', '连接已结束'].includes(phase)) {
+      assert.equal(output.header.template, 'orange');
+      assert.doesNotMatch(JSON.stringify(output), /正在处理你的请求|本轮已结束/);
+    }
+  }
+});
+
+test('recovery removes stale processing and permission controls from previously saved cards', () => {
+  const binding = { id: 's', cwd: '/project', machineId: 'mac', engine: 'claude' };
+  const pending = cards.task({ ...context, binding, title: 'Task', elapsed: 2000, view: { phase: '正在处理', done: false, text: '', tools: new Map(), permissions: new Map() } });
+  pending.body.elements.push(cards.button('旧版引擎按钮', { ...context, action: 'engine' }));
+  const recovered = cards.interruptedTask(pending);
+  assert.equal(recovered.header.title.content, '进度同步已中断');
+  assert.equal(recovered.header.template, 'orange');
+  assert.doesNotMatch(JSON.stringify(recovered), /正在处理你的请求|旧版引擎按钮|停止当前任务/);
+  assert.deepEqual(actions(recovered).map(a => a.action), ['history', 'view']);
+  assert.deepEqual(actions(recovered)[0].session, binding);
+  assert.equal(pending.header.title.content, '正在处理');
+  const permission = cards.task({ ...context, binding, title: 'Task', elapsed: 2000, view: { phase: '等待你的授权', done: false, text: '已完成的部分回复', tools: new Map(), permissions: new Map([['p', { id: 'p', tool: 'Bash', input: { command: 'private-command' } }]]) } });
+  const restored = cards.interruptedTask(permission);
+  assert.match(JSON.stringify(restored), /已完成的部分回复/);
+  assert.doesNotMatch(JSON.stringify(restored), /需要授权|private-command|允许本次调用/);
+});
+
+test('historical conversation settings cannot offer controls for a different current conversation', () => {
+  const output = cards.currentSession({ ...context, binding: { id: 'old', cwd: '/project' }, exists: true, running: true, isCurrent: false });
+  assert.deepEqual(actions(output).map(a => a.action), ['history', 'switch']);
+  assert.doesNotMatch(JSON.stringify(output), /更换 AI 模型|切换执行机器|结束本轮/);
+  const active = cards.currentSession({ ...context, binding: { id: 'current', cwd: '/project' }, exists: true, running: false });
+  const controls = nodes(active).find(n => n.tag === 'collapsible_panel' && n.header?.title?.content === '更改模型、账号或执行机器');
+  assert.ok(controls && controls.expanded === false);
+  assert.deepEqual(actions(controls).map(a => a.action), ['models', 'route', 'nodes', 'engine']);
+  assert.ok(actions(controls).every(a => a.expectedSessionId === 'current'));
 });

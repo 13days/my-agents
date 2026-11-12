@@ -92,6 +92,7 @@ flowchart LR
 ## 使用与维护
 
 - [完整使用手册](docs/user-guide.md)：账号池、模型、IM、目录映射、worktree、备份与排障。
+- [飞书卡片与操作说明](docs/feishu-interaction.md)：任务状态、查看对话、会话设置与各类切换的区别。
 - [集群搭建与升级](docs/cluster-setup.md)：三节点部署、成员配置、常驻运行和接管验证。
 - [Agent 安装协议](docs/agent-install.md)：可直接交给 Agent 执行的完整说明。
 - [执行位置与工作区](docs/execution-workspaces.md)、[数据迁移](docs/migration.md)、[IM 扩展设计](docs/im-channels.md)、[当前架构与可靠性边界](docs/architecture-current.md)、[架构设计历史](docs/architecture-v2.md)。

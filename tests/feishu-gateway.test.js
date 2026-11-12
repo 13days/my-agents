@@ -382,7 +382,7 @@ test('open groups hide session controls and tool details while explicitly select
   await f.gateway.receive(f.msg('逐项授权群任务', group));
   await new Promise(resolve => setTimeout(resolve, 30));
   rendered = JSON.stringify(f.updated.at(-1).card);
-  assert.match(rendered, /README contents/); assert.match(rendered, /会话信息/); assert.match(rendered, /查看会话/);
+  assert.match(rendered, /README contents/); assert.match(rendered, /会话信息/); assert.match(rendered, /查看最近对话/);
   await f.gateway.receive(f.msg('/sessions', group)); assert.ok(f.sent.at(-1).content.card);
 });
 
@@ -480,7 +480,7 @@ test('/route switches proxy accounts, modes, cooldowns, pins and Codex capture i
   });
   await f.gateway.receive(f.msg('/route'));
   let card = JSON.stringify(f.sent.at(-1).content);
-  assert.match(card, /代理路由/); assert.match(card, /Primary/); assert.match(card, /● 当前/); assert.doesNotMatch(card, /secret-token/);
+  assert.match(card, /账号与连接/); assert.match(card, /Primary/); assert.match(card, /● 当前/); assert.doesNotMatch(card, /secret-token/);
   await f.gateway.receive(f.msg('/route 2'));
   assert.equal(router.status().selected, 'acc-b'); assert.equal(router.status().mode, 'manual');
   assert.match(JSON.stringify(f.sent.at(-1).content), /已切到「Backup」/);
@@ -590,7 +590,7 @@ test('engine picker cards start explicit engines without changing another topic 
   const f = await fixture(t); await f.pair(); await f.gateway.configure({ allowedChatIds: ['oc_engine_card'], defaultEngine: 'codex' });
   const topic = { chatType: 'group', chatId: 'oc_engine_card', threadId: 'omt_engine_card', mentionedBot: true };
   await f.gateway.receive(f.msg('/engine', topic)); const card = f.sent.at(-1), key = contextKey(f.msg('', topic));
-  assert.match(JSON.stringify(card.content), /选择会话引擎/);
+  assert.match(JSON.stringify(card.content), /切换聊天程序/);
   await f.gateway.action({ messageId: card.messageId, chatId: topic.chatId, operator: { openId: 'ou_owner' }, action: { value: { owner: 'ou_owner', key, action: 'new', cwd: f.dir, engine: 'claude' } } });
   await f.gateway.receive(f.msg('Picked Claude', topic)); assert.notEqual(f.calls.at(-1).engine, 'codex');
   await f.gateway.receive(f.msg('/new', { ...topic, threadId: 'omt_other' }));
@@ -754,7 +754,7 @@ test('/node moves a topic to a remote node; turns, engine switches and project l
 
   await f.gateway.receive(f.msg('/node'));
   const picker = JSON.stringify(f.sent.at(-1).content);
-  assert.match(picker, /选择运行位置/); assert.match(picker, /开发机/); assert.match(picker, /use_node/);
+  assert.match(picker, /切换执行机器/); assert.match(picker, /开发机/); assert.match(picker, /use_node/);
   await f.gateway.receive(f.msg('/node devbox ~/repos/app'));
   assert.match(JSON.stringify(f.sent.at(-1).content), /开发机 · app/);
   await f.gateway.receive(f.msg('Run on the dev machine'));
@@ -848,8 +848,8 @@ test('closing an unfinished monitor records a truthful connection-ended state an
   f.panel.watch = (id, listener) => { listener('turn', { messageId: f.calls.at(-1).messageId }); listener('text', { messageId: f.calls.at(-1).messageId, text: 'Work so far' }); return () => {}; };
   await f.gateway.receive(f.msg('Still working during restart')); await f.gateway.stop();
   const card = f.updated.at(-1).card;
-  assert.equal(card.header.title.content, '连接已结束'); assert.match(JSON.stringify(card), /Work so far/);
-  assert.doesNotMatch(JSON.stringify(card), /停止任务/); assert.match(JSON.stringify(card), /任务是否完成请查看会话记录/);
+  assert.equal(card.header.title.content, '进度同步已中断'); assert.match(JSON.stringify(card), /Work so far/);
+  assert.doesNotMatch(JSON.stringify(card), /停止任务/); assert.match(JSON.stringify(card), /确认结果后再继续/);
 });
 
 test('failed final delivery is persisted and repaired after gateway restart', async t => {
@@ -888,7 +888,7 @@ test('a task card left by an abrupt exit is recovered without claiming the task 
   const restored = createFeishuGateway(f.options); await restored.start();
   try {
     const card = f.updated.at(-1).card;
-    assert.equal(card.header.title.content, '连接已结束'); assert.notEqual(card.header.template, 'green');
+    assert.equal(card.header.title.content, '进度同步已中断'); assert.notEqual(card.header.template, 'green');
     assert.match(JSON.stringify(card), /Saved partial output/); assert.doesNotMatch(JSON.stringify(card), /停止任务/);
   } finally { await restored.stop(); }
 });
@@ -1116,7 +1116,7 @@ test('SDK session switches retain machine and directory after a leader loses its
  const raw={operator:{open_id:'ou_owner'},context:{open_message_id:'om_card_from_previous_leader',open_chat_id:'oc_fresh_private'},action:{tag:'button',value}};
  await f.gateway.action(require('@larksuiteoapi/node-sdk').normalizeCardAction(raw,{includeRaw:true}));
  assert.equal(hint.cwd,native.project);assert.equal(hint.machineId,'mac');
- assert.equal(f.sent.at(-1).content.card.header.title.content,'已切换会话');assert.match(JSON.stringify(f.sent.at(-1).content),/project-plugin-recommendations/);
+ assert.equal(f.sent.at(-1).content.card.header.title.content,'已切换到此会话');assert.match(JSON.stringify(f.sent.at(-1).content),/project-plugin-recommendations/);
  const binding=JSON.parse(fs.readFileSync(path.join(f.dir,'panel-feishu-state.json'))).bindings[value.key];
  assert.equal(binding.id,native.id);assert.equal(binding.cwd,native.project);assert.equal(binding.machineId,'mac');assert.equal(f.calls.length,0);
 });
@@ -1151,4 +1151,19 @@ test('a held original-terminal message keeps its card pending and receives the l
  listener('turn',{messageId:input.messageId});listener('text',{messageId:input.messageId,text:'我们前面聊的是插件推荐。'});listener('done',{messageId:input.messageId});
  for(let i=0;i<50&&f.updated.at(-1).card.header.title.content!=='已完成';i++)await new Promise(r=>setTimeout(r,10));
  assert.equal(f.updated.at(-1).card.header.title.content,'已完成');
+});
+
+test('settings opened from an old card stay read-only until explicitly switching to that conversation', async t => {
+  const f = await fixture(t); await f.pair();
+  await f.gateway.receive(f.msg('/new'));
+  const original = f.sent.at(-1), oldState = JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json'))), oldBinding = oldState.bindings[contextKey(f.msg(''))];
+  await f.gateway.receive(f.msg('/new'));
+  const before = JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json'))).bindings[contextKey(f.msg(''))];
+  for (const action of ['models', 'engine', 'nodes', 'route']) {
+    await f.gateway.action({ messageId: original.messageId, chatId: 'oc_private', operator: { openId: 'ou_owner' }, action: { value: { owner: 'ou_owner', key: contextKey(f.msg('')), action, id: oldBinding.id } } });
+    assert.match(JSON.stringify(f.sent.at(-1).content), /会话已切换|不是当前会话/);
+  }
+  const after = JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json'))).bindings[contextKey(f.msg(''))];
+  assert.equal(after.id, before.id);
+  assert.equal(f.calls.length, 0);
 });
