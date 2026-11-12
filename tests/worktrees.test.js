@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { createWorktree } = require('../core/worktrees');
+const { createWorktree, worktreeFailure } = require('../core/worktrees');
 const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 function repo(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-test-'));
@@ -40,4 +40,13 @@ test('plain directories stay usable and empty Git repositories report a useful f
   assert.equal(await createWorktree(plain), null);
   git(plain, 'init');
   await assert.rejects(createWorktree(plain), /HEAD/);
+});
+
+test('worktree failures put the actual disk or timeout cause ahead of long checkout progress', () => {
+  const progress = Array.from({ length: 100 }, (_, i) => `Updating files: ${i}% (${i}/11847)`).join('\r');
+  const disk = worktreeFailure({ stderr: 'Preparing worktree (new branch)\n' + progress + '\nfatal: cannot create directory: No space left on device' });
+  assert.match(disk.message.slice(0, 150), /磁盘空间不足.*No space left on device/);
+  assert.doesNotMatch(disk.message, /Updating files|Preparing worktree/);
+  assert.match(worktreeFailure({ killed: true, stderr: progress }).message, /Git 检出超时/);
+  assert.match(worktreeFailure({ code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER', killed: true, stderr: progress }).message, /输出超过大小限制/);
 });

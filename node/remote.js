@@ -20,7 +20,7 @@ async function attachRemoteNode({ peer, registry, transport = 'ws', pin = null, 
     id, label: info.label || id, platform: info.platform, remote: true,
     homeDir: () => info.home || '~',
     resolveDir: dir => peer.call('host.resolveDir', { dir }),
-    createWorktree: info.worktrees ? dir => peer.call('host.createWorktree', { dir }, { timeout: 150000 }) : undefined,
+    createWorktree: info.worktrees ? dir => peer.call('host.createWorktree', { dir }, { timeout: require('../core/worktrees').WORKTREE_TIMEOUT_MS + 30000 }) : undefined,
     join: (...parts) => parts.join('/').replace(/\/+/g, '/'),
   };
   const node = registry.addNode({ id, label: info.label || id, host, remote: true, info: { platform: info.platform, version: info.version, transport, home: info.home, projects: Array.isArray(info.projects) ? info.projects : [] } });
