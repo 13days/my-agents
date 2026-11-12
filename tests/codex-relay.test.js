@@ -181,3 +181,47 @@ test('runtime native sign-ins are exchanged in encrypted envelopes on the authen
   assert.equal(JSON.stringify(packet).includes('private-refresh'),false);
   assert.deepEqual(transport.open(packet.sealed,packet.publicKey),login);
 });
+
+test('a connection reset fails over to another pooled account and records the failed attempt', async t => {
+  const sent = [], captures = [], rejected = [], accepted = [];
+  const routes = ['broken', 'healthy'].map(id => ({ id, accountId: id, headers: { authorization: 'Bearer ' + id } }));
+  const https = { request(options, callback) {
+    sent.push({ ...options, headers: { ...options.headers } }); const req = new PassThrough(); req.setTimeout = () => {};
+    req.on('finish', () => {
+      if (options.headers.authorization === 'Bearer broken') return req.emit('error', Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }));
+      const response = new PassThrough(); Object.assign(response, { statusCode: 200, headers: { 'content-type': 'application/json' }, complete: true }); callback(response); response.end('{}');
+    }); return req;
+  } };
+  const proxy = createCodexProxy({ request: { http, https }, record: (_path, status) => captures.push(status), relay: {
+    token: 'pool', resolve: async (_mode, _session, excluded, forced) => routes.find(r => !excluded.includes(r.id) && (!forced || r.id === forced)),
+    rejected: (route, status) => rejected.push([route.id, status]), accepted: route => accepted.push(route.id),
+  } });
+  const server = http.createServer(proxy.handle); await new Promise(r => server.listen(0, '127.0.0.1', r));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const url = `http://127.0.0.1:${server.address().port}/backend-api/codex/responses`;
+  const response = await fetch(url, { method: 'POST', headers: { authorization: 'Bearer pool', 'session-id': 'old-conversation' }, body: '{}' });
+  assert.equal(response.status, 200); await response.text();
+  assert.deepEqual(sent.map(x => x.headers.authorization), ['Bearer broken', 'Bearer healthy']);
+  assert.deepEqual(captures, [502, 200]); assert.deepEqual(rejected, [['broken', 502]]); assert.deepEqual(accepted, ['healthy']);
+  const fixed = await fetch(url, { method: 'POST', headers: { authorization: 'Bearer pool', 'x-my-agents-codex-account': 'broken' }, body: '{}' });
+  assert.equal(fixed.status, 502); await fixed.text(); assert.equal(sent.length, 3, 'an explicit account is never replaced');
+});
+
+test('an exhausted egress with HTTP 502 still follows account-pool failover', async t => {
+  const failed = await proxyWith({ token: 'egress', resolve: async () => ({ id: 'broken', accountId: 'broken', headers: codexCredentials(AUTH, 'chatgpt') }) }, 502);
+  t.after(failed.close);
+  const sent = [];
+  const https = { request(options, callback) {
+    sent.push(options.headers.authorization); const req = new PassThrough(); req.setTimeout = () => {};
+    req.on('finish', () => {
+      if (options.headers.authorization === 'Bearer broken') return req.emit('error', new Error('network reset'));
+      const response = new PassThrough(); Object.assign(response, { statusCode: 200, headers: {}, complete: true }); callback(response); response.end('{}');
+    }); return req;
+  } };
+  const routes = ['broken', 'healthy'].map(id => ({ id, accountId: id, headers: { authorization: 'Bearer ' + id } }));
+  const proxy = createCodexProxy({ request: { http, https }, relay: { token: 'pool', resolve: async (_m, _s, excluded) => routes.find(r => !excluded.includes(r.id)), egress: excluded => excluded.length ? null : { id: 'failed-egress', url: failed.url, token: 'egress' } } });
+  const server = http.createServer(proxy.handle); await new Promise(r => server.listen(0, '127.0.0.1', r));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/backend-api/codex/responses`, { method: 'POST', headers: { authorization: 'Bearer pool' }, body: '{}' });
+  assert.equal(response.status, 200); await response.text(); assert.deepEqual(sent, ['Bearer broken', 'Bearer healthy']); assert.equal(failed.sent.length, 1);
+});

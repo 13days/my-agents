@@ -168,6 +168,20 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
         headers['x-my-agents-codex-account'] = selectedAccount.accountId; headers['x-my-agents-egress-hop'] = '1';
         return true;
       };
+      const switchAccount = async (status, retryAfter) => {
+        if (!pooled || !selectedAccount || !relay.resolve || res.headersSent || res.destroyed) return false;
+        relay.rejected?.(selectedAccount, status, retryAfter);
+        if (!excluded.includes(selectedAccount.id)) excluded.push(selectedAccount.id);
+        const next = await relay.resolve(route.mode, sessionId, excluded, forcedAccount).catch(() => null);
+        if (!next || excluded.includes(next.id) || res.destroyed) return false;
+        selectedAccount = next; delegatedURL = next.url || null;
+        delete headers['chatgpt-account-id'];
+        delete headers['x-my-agents-local-account'];
+        delete headers['x-my-agents-codex-account'];
+        delete headers['x-my-agents-egress-hop'];
+        Object.assign(headers, next.url ? { authorization: `Bearer ${next.token}`, 'x-my-agents-local-account': '1' } : next.headers || relay.credentials?.(route.mode));
+        return true;
+      };
       const send = () => {
       const upstreamURL = selectedAccount?.upstream;
       const tail = new URL(req.url, 'http://localhost');
@@ -183,28 +197,26 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
       upstream = (target.protocol === 'https:' ? request.https : request.http).request({ ...upstreamNetwork, timeout: 10 * 60 * 1000, protocol: target.protocol, hostname: target.hostname, port: target.port || undefined, path: target.pathname + target.search, method: req.method, headers }, response => {
         clearTimeout(connectTimer);
         if (delegatedURL && pooled && !relayedEgress && response.statusCode === 502 && egressTried.length) {
-          response.resume(); response.on('end', async () => { if (await useEgress()) send(); else if (!res.destroyed) { res.writeHead(502, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: '可用出网节点均连接失败，请检查网络' })); } }); return;
+          response.resume(); response.on('end', async () => {
+            save(502, Buffer.from(JSON.stringify({ error: '出网节点连接失败' })), false, '', true);
+            if (await useEgress() || await switchAccount(502)) send();
+            else if (!res.destroyed) { res.writeHead(502, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: '可用账号与出网节点均连接失败，请检查网络或稍后重试' })); }
+          }); return;
         }
         if (pooled && selectedAccount && [401, 403, 429, 500, 502, 503, 504].includes(response.statusCode) && relay.resolve) {
-          relay.rejected?.(selectedAccount, response.statusCode, response.headers['retry-after']);
-          excluded.push(selectedAccount.id);
           const rejected = []; response.on('data', chunk => rejected.push(chunk));
           response.on('end', async () => {
             save(response.statusCode, Buffer.concat(rejected), false, response.headers['content-encoding'], false);
             if (res.destroyed) return;
-            const next = await relay.resolve(route.mode, sessionId, excluded, forcedAccount).catch(() => null);
-            if (res.destroyed) return;
-            if (!next) { res.writeHead(response.statusCode, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { message: '共享 Codex 账号暂不可用：可用账号已尝试，请检查账号状态、额度或稍后重试' } })); }
-            selectedAccount = next; delegatedURL = next.url || null; delete headers['chatgpt-account-id'];
-            delete headers['x-my-agents-local-account'];
-      delete headers['x-my-agents-codex-account'];
-      delete headers['x-my-agents-egress-hop'];
-            Object.assign(headers, next.url ? { authorization: `Bearer ${next.token}`, 'x-my-agents-local-account': '1' } : next.headers || relay.credentials(route.mode));
-            saved = false; if (!delegatedURL && directUnavailableUntil > Date.now()) await useEgress(); send();
+            if (!await switchAccount(response.statusCode, response.headers['retry-after'])) { res.writeHead(response.statusCode, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { message: '共享 Codex 账号暂不可用：可用账号已尝试，请检查账号状态、额度或稍后重试' } })); }
+            send();
           });
           return;
         }
-        if (response.statusCode >= 200 && response.statusCode < 300) relay?.accepted?.(relayedEgress && selectedAccount ? { ...selectedAccount, explicit: false } : selectedAccount, sessionId);
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          if (!delegatedURL) directUnavailableUntil = 0;
+          relay?.accepted?.(relayedEgress && selectedAccount ? { ...selectedAccount, explicit: false } : selectedAccount, sessionId);
+        }
         const captured = [];
         const out = {};
         for (const [k, v] of Object.entries(response.headers)) if (!HOP.has(k.toLowerCase()) || k.toLowerCase() === 'content-length') out[k] = v;
@@ -222,7 +234,9 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
         clearTimeout(connectTimer);
         save(502, Buffer.from(JSON.stringify({ error: e.message })), false, '', true);
         if (!res.headersSent && !delegatedURL) directUnavailableUntil = Date.now() + 5 * 60 * 1000;
-        if (!res.headersSent && await useEgress()) return send();
+        // Exhaust egress for this account, then follow the pool's routing policy.
+        // No retries once response bytes have reached the caller.
+        if (!res.headersSent && (await useEgress() || await switchAccount(502))) return send();
         if (!res.headersSent) { res.writeHead(502, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: '上游连接失败或超时' })); } else res.destroy();
       });
       upstream.end(body);
