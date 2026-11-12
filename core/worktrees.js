@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const exec = promisify(execFile);
+const checkoutQueues = new Map();
 const WORKTREE_TIMEOUT_MS = 10 * 60 * 1000;
 const git = async (cwd, args, timeout = 120000) => (await exec('git', ['-C', cwd, ...args], { timeout, maxBuffer: 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })).stdout.trim();
 
@@ -35,8 +36,14 @@ async function createWorktree(cwd, { baseDir = path.join(require('./data-dir').r
   const name = crypto.randomUUID(), branch = `my-agents/task-${name}`;
   const parent = path.join(baseDir, `${repo}-${hash}`), target = path.join(parent, name);
   await fs.promises.mkdir(parent, { recursive: true });
-  try { await git(root, ['worktree', 'add', '--quiet', '-b', branch, target, base], WORKTREE_TIMEOUT_MS); }
+  // Git scans the common worktree registry while adding a new entry. Concurrent
+  // additions can expose another entry before its commondir file is written.
+  const previous = checkoutQueues.get(common) || Promise.resolve();
+  const checkout = previous.catch(() => {}).then(() => git(root, ['worktree', 'add', '--quiet', '-b', branch, target, base], WORKTREE_TIMEOUT_MS));
+  checkoutQueues.set(common, checkout);
+  try { await checkout; }
   catch (error) { throw worktreeFailure(error); }
+  finally { if (checkoutQueues.get(common) === checkout) checkoutQueues.delete(common); }
   const relative = path.relative(root, cwd);
   const dir = path.join(target, relative);
   // The chosen subdirectory can contain only untracked files and be absent in HEAD.
