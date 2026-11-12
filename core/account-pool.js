@@ -1,3 +1,4 @@
+const { cooldownSeconds } = require('./route-policy');
 const { createRelayClient } = require('../node/relay');
 const { createAccountVault } = require('./account-vault');
 const claudeCredentials = require('./claude-credentials');
@@ -133,7 +134,7 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
   }
   function rejected(route, status, retryAfter) {
     const id = route?.accountId; if (!id) return;
-    const delay = Number(retryAfter), seconds = Number.isFinite(delay) && delay > 0 ? Math.min(delay, 900) : status === 429 ? 60 : status >= 500 ? 15 : 30;
+    const seconds = cooldownSeconds(status, retryAfter, now());
     vault.preference('codex-health:' + id, { lastStatus: status, cooldownUntil: now() + seconds * 1000 });
   }
   function codexStatus() {

@@ -32,7 +32,7 @@ function compareCaptures(a, b) {
 // Keep only byte offsets and list metadata in memory. Bodies remain complete on disk.
 function createCaptureStore(file) {
   const records = new Map(), messages = new Map();
-  let sequence = 0, needsNewline = false, revision = 0;
+  let sequence = 0, needsNewline = false, revision = 0, loading = null, loadError = '', generation = 0;
   function index(rec, offset, length) {
     const meta = {};
     for (const key of ['id', 'ts', 'path', 'status', 'durationMs', 'model', 'messagesCount', 'respMsgId', 'clientVersion', 'upstreamId', 'upstreamName', 'usage', 'requestOrder', 'routing', 'method', 'incomplete', 'engine']) meta[key] = rec[key];
@@ -45,7 +45,7 @@ function createCaptureStore(file) {
     if (rec.respMsgId) messages.set(rec.respMsgId, String(rec.id));
     sequence = Math.max(sequence, Number(rec.id) || 0);
   }
-  function load() {
+  function load({ limit = Infinity } = {}) {
     records.clear(); messages.clear(); sequence = 0; needsNewline = false;
     if (!fs.existsSync(file)) return;
     const fd = fs.openSync(file, 'r'), chunk = Buffer.alloc(1024 * 1024);
@@ -57,7 +57,9 @@ function createCaptureStore(file) {
     };
     try {
       let count;
-      while ((count = fs.readSync(fd, chunk, 0, chunk.length, null))) {
+      let consumed = 0;
+      while (consumed < limit && (count = fs.readSync(fd, chunk, 0, Math.min(chunk.length, limit - consumed), null))) {
+        consumed += count;
         let start = 0, end;
         while ((end = chunk.indexOf(10, start)) >= 0 && end < count) {
           const part = Buffer.from(chunk.subarray(start, end + 1));
@@ -68,6 +70,30 @@ function createCaptureStore(file) {
       if (length) { needsNewline = true; consume(); }
     } finally { fs.closeSync(fd); }
     revision++;
+  }
+  function loadAsync() {
+    if (loading) return loading;
+    if (!fs.existsSync(file)) return Promise.resolve();
+    // New traffic may arrive before the historical maximum id is known.
+    sequence = Math.max(sequence, Date.now() * 1000);
+    const limit = fs.statSync(file).size, epoch = generation;
+    if (limit) { const fd = fs.openSync(file, 'r'), tail = Buffer.alloc(1); try { fs.readSync(fd, tail, 0, 1, limit - 1); needsNewline = tail[0] !== 10; } finally { fs.closeSync(fd); } }
+    const { Worker } = require('worker_threads');
+    const worker = new Worker(require.resolve('./capture-index-worker'), { workerData: { file, limit } });
+    loading = new Promise((resolve, reject) => {
+      let complete = false;
+      worker.on('message', message => {
+        if (epoch === generation && message.entries) for (const [id, entry] of message.entries) {
+          if (!records.has(id)) records.set(id, entry);
+          if (entry.meta.respMsgId && Number(messages.get(entry.meta.respMsgId) || 0) < Number(id)) messages.set(entry.meta.respMsgId, id);
+          sequence = Math.max(sequence, Number(id) || 0);
+        }
+        if (message.done) { complete = true; revision++; resolve(); }
+      });
+      worker.once('error', reject);
+      worker.once('exit', code => { if (!complete) reject(new Error('抓包索引进程退出：' + code)); });
+    }).catch(error => { loadError = error.message; throw error; }).finally(() => { loading = null; revision++; });
+    return loading;
   }
   function append(rec) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -95,7 +121,9 @@ function createCaptureStore(file) {
     } finally { fs.closeSync(fd); }
   }
   return {
-    load, append, get,
+    load, loadAsync, append, get,
+    indexEntries: () => [...records],
+    status: () => ({ loading: !!loading, error: loadError, records: records.size }),
     metadata: id => records.get(String(id))?.meta || null,
     linkSessions(byMessage) {
       let changed = false;
@@ -117,7 +145,7 @@ function createCaptureStore(file) {
       return { sessionId: current.sessionId, position: index + 1, total: items.length, previousId: index > 0 ? String(items[index - 1].id) : null, nextId: index < items.length - 1 ? String(items[index + 1].id) : null };
     },
     getByMessageId: id => get(messages.get(id)),
-    clear() { fs.writeFileSync(file, ''); records.clear(); messages.clear(); revision++; },
+    clear() { generation++; fs.writeFileSync(file, ''); records.clear(); messages.clear(); revision++; },
   };
 }
 module.exports = { createCaptureStore };

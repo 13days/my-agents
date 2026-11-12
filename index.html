@@ -163,6 +163,7 @@ function renderUserGuide() {
   host.querySelectorAll('[data-guide-target]').forEach(button => button.onclick = () => { if (button.dataset.guideInfra) localStorage.setItem('panel-infra-tab', button.dataset.guideInfra); switchType(button.dataset.guideTarget); });
 }
 </script>
+<script src="/conversation-state.js"></script>
 <script src="/feishu-ui.js"></script>
 <script src="/mermaid-ui.js"></script>
 <script>
@@ -1392,7 +1393,7 @@ function voyageHTML(d) {
 }
 
 // ---------- Inspector 抓包 ----------
-let _insTimer = null, _insProxyPort = 0, _insRevision = '', _insRefreshing = false;
+let _insTimer = null, _insProxyPort = 0, _insRevision = '', _insRefreshing = false, _insIndexing = false, _insIndexError = '';
 function startInspectorPoll() { stopInspectorPoll(); _insRevision = ''; refreshInspector(); _insTimer = setInterval(refreshInspector, 2500); }
 function stopInspectorPoll() { if (_insTimer) { clearInterval(_insTimer); _insTimer = null; } }
 async function refreshInspector() {
@@ -1404,7 +1405,7 @@ async function refreshInspector() {
     if (state.type !== 'inspector') return;
     if (d.unchanged) return;
     _insRevision = d.revision;
-    _insProxyPort = d.proxyPort;
+    _insProxyPort = d.proxyPort; _insIndexing = !!d.indexing; _insIndexError = d.indexError || '';
     const changed = JSON.stringify(d.items.map(i => i.key)) !== JSON.stringify(state.items.map(i => i.key));
     state.items = d.items; updateCaptureFilterCounts();
     document.querySelector('.tab[data-type="inspector"] .cnt').textContent = d.items.length;
@@ -1417,6 +1418,10 @@ async function refreshInspector() {
   } catch {} finally { _insRefreshing = false; }
 }
 function renderInspectorEmpty() {
+  if (_insIndexing || _insIndexError) {
+    $('#empty').style.display = 'none'; $('#render').style.display = 'block';
+    $('#render').innerHTML = viewHeading('inspector') + `<div class="chart"><h3>${esc(_insIndexing ? rt('正在加载历史记录', 'Loading historical records') : rt('历史记录暂不可读', 'History is temporarily unavailable'))}</h3><p>${esc(_insIndexing ? rt('历史记录正在后台加载，新请求可以照常使用。', 'Historical records are loading in the background. New requests remain available.') : rt('已有文件未删除，请检查磁盘和服务日志。', 'Existing files are preserved. Check disk space and service logs.'))}</p></div>`; return;
+  }
   const cmd = `ANTHROPIC_BASE_URL=http://localhost:${_insProxyPort || 4322} claude`;
   $('#empty').style.display = 'none';
   $('#render').style.display = 'block';
@@ -2918,12 +2923,16 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
   const timer = setInterval(updateStatus, 1000); updateChatSendState(v); updateStatus();
   // State events always apply, even while another view is open; only DOM work is skipped when the chat isn't on screen.
   const receive = raw => {
-    let kind = '', data = '';
-    for (const line of raw.split('\n')) { if (line.startsWith('event: ')) kind = line.slice(7); else if (line.startsWith('data: ')) data += line.slice(6); }
+    let kind = '', data = '', sequence = 0;
+    for (const line of raw.split('\n')) { if (line.startsWith('id: ')) sequence = Number(line.slice(4).split(':').at(-1)) || 0; else if (line.startsWith('event: ')) kind = line.slice(7); else if (line.startsWith('data: ')) data += line.slice(6); }
     if (!kind) return;
     let payload; try { payload = JSON.parse(data || '{}'); } catch { return; }
+    if (kind === 'meta' && run.metaSeen && payload.jobId && payload.jobId !== v.lastReplayJobId) { resetRun(); run.lastSeq = 0; run.taskState = ConversationState.create(); }
+    if (sequence && sequence <= (run.lastSeq || 0)) return;
+    if (sequence) run.lastSeq = sequence;
+    run.taskState ||= ConversationState.create(); ConversationState.apply(run.taskState, kind, payload);
     const shown = visible();
-    if (kind === 'end') { run.ended = true; return; }
+    if (kind === 'end') { run.ended = true; if (run.taskState.phase === '结果待核对') { run.lastStatus = rt('执行结果待核对；未自动重跑', 'Execution outcome needs review; not replayed automatically', '実行結果の確認が必要です'); run.turns.forEach(item => { if (!item.finished) item.finish(run.lastStatus); }); } return; }
     if (kind === 'input') {
       if (!run.turns.has(payload.id) && shown) run.turns.set(payload.id, createChatTurn(v, payload.prompt || '', payload.images || [], payload.id));
       const current = run.turns.get(payload.id);
@@ -2975,7 +2984,7 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
       updateChatSendState(v); updateStatus(); return;
     }
     if (kind === 'idle') { run.activeId = ''; updateChatSendState(v); updateStatus(); return; }
-    if (kind === 'warning') { if (shown) toast(payload.warning, false); return; }
+    if (kind === 'warning') { const active = run.turns.get(payload.messageId || run.activeId); if (active && !active.finished) { active.phase = rt(run.taskState.phase, ...ConversationState.labels(run.taskState.phase)); active.label.textContent = active.phase; } if (shown) toast(payload.warning, false); updateStatus(); return; }
     if (kind === 'permission') {
       if (run.permissions.has(payload.id) || !shown) return;
       const card = document.createElement('section'); card.className = 'chat-permission';
@@ -3050,9 +3059,9 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
     while (true) {
       let lost;
       try {
-        if (resume && attempt) resetRun();
+        if (resume && attempt && !run.lastSeq) resetRun();
         const response = await fetch(resume ? `/api/chat/${encodeURIComponent(v.sessionId)}/events` : '/api/chat', {
-          method: resume ? 'GET' : 'POST', headers: resume ? undefined : { 'Content-Type': 'application/json' },
+          method: resume ? 'GET' : 'POST', headers: resume ? (run.lastSeq ? { 'Last-Event-ID': `${v.lastReplayJobId}:${run.lastSeq}` } : undefined) : { 'Content-Type': 'application/json' },
           body: resume ? undefined : JSON.stringify({ prompt, images, cwd: v.cwd, worktree: v.worktreeEnabled !== false, model: chatModel, machineId: v.machineId, workspaceId: v.workspaceId, switchMachine: !!v.switchMachine, sessionId: v.sessionId, messageId: turn.id, accountId: can(v.engine, 'accounts') ? v.accountId : undefined, engine: v.engine }), signal: abort.signal,
         });
         if (!response.ok) throw await responseError(response);
@@ -3247,7 +3256,7 @@ async function renderClusterPanel() {
       const local = member.id === data.nodeId, primary = member.id === leaderId;
       const gateway = primary && member.gatewayStatus === 'connected' ? rt('已连接', 'Connected') : member.gatewayStatus === 'connecting' || member.gatewayStatus === 'reconnecting' ? rt('连接中', 'Connecting') : primary ? rt('未就绪', 'Not ready') : rt('待命', 'Standby');
       const diagnostic = (data.diagnostics || []).find(item => item.id === member.id);
-      return `<article class="machine-card${primary ? ' is-leader' : ''}"><header><div><h3>${esc(member.label || member.id)}</h3><code>${esc(member.id)}</code></div>${clusterStatusBadge(primary ? rt('IM 主节点', 'IM leader') : local ? rt('当前面板', 'This panel') : rt('集群成员', 'Member'), primary ? 'good' : 'muted')}</header><dl><dt>${esc(rt('面板通信', 'Panel link'))}</dt><dd>${clusterStatusBadge(member.online ? rt('已连接', 'Connected') : rt('未连接', 'Disconnected'), member.online ? 'good' : 'danger')}</dd><dt>${esc(rt('Agent 执行通道', 'Agent runtime'))}</dt><dd>${esc(member.runtimeConnected ? rt('可执行', 'Ready') : rt('未连接', 'Disconnected'))}</dd><dt>${esc(rt('IM 接收', 'IM reception'))}</dt><dd>${esc(gateway)}</dd><dt>${esc(rt('新对话默认目录', 'Default for new chats'))}</dt><dd class="machine-directory-actions">${directory ? `<button type="button" data-copy-directory="${esc(directory)}">${esc(rt('复制', 'Copy'))}</button>` : ''}<button type="button" data-machine-directory="${esc(member.id)}">${esc(rt('修改', 'Edit'))}</button></dd><dd class="machine-directory">${esc(directory || rt('尚未获取', 'Not available'))}</dd></dl><footer><span class="route-muted">${esc([member.platform, member.version && 'v' + String(member.version).replace(/^v/, '')].filter(Boolean).join(' · ') || rt('平台信息未上报', 'Platform not reported'))}</span>${data.leader && !primary && member.online && !member.witness ? `<button class="btn" data-cluster-transfer="${esc(member.id)}">${esc(rt('接管 IM', 'Take over IM'))}</button>` : ''}</footer>${diagnostic?.error ? `<p class="machine-error">${esc(diagnostic.error)}</p>` : ''}</article>`;
+      return `<article class="machine-card${primary ? ' is-leader' : ''}"><header><div><h3>${esc(member.label || member.id)}</h3><code>${esc(member.id)}</code></div>${clusterStatusBadge(primary ? rt('IM 主节点', 'IM leader') : local ? rt('当前面板', 'This panel') : rt('集群成员', 'Member'), primary ? 'good' : 'muted')}</header><dl><dt>${esc(rt('面板通信', 'Panel link'))}</dt><dd>${clusterStatusBadge(member.online ? rt('已连接', 'Connected') : rt('未连接', 'Disconnected'), member.online ? 'good' : 'danger')}</dd><dt>${esc(rt('Agent 执行通道', 'Agent runtime'))}</dt><dd>${esc(member.runtimeConnected ? rt('可执行', 'Ready') : rt('未连接', 'Disconnected'))}</dd><dt>${esc(rt('IM 接收', 'IM reception'))}</dt><dd>${esc(gateway)}</dd><dt>${esc(rt('新对话默认目录', 'Default for new chats'))}</dt><dd class="machine-directory-actions">${directory ? `<button type="button" data-copy-directory="${esc(directory)}">${esc(rt('复制', 'Copy'))}</button>` : ''}<button type="button" data-machine-directory="${esc(member.id)}">${esc(rt('修改', 'Edit'))}</button></dd><dd class="machine-directory">${esc(directory || rt('尚未获取', 'Not available'))}</dd></dl><footer><span class="route-muted">${esc([member.platform, member.version && 'v' + String(member.version).replace(/^v/, ''), member.build?.gitCommit?.slice(0, 8)].filter(Boolean).join(' · ') || rt('平台信息未上报', 'Platform not reported'))}</span>${data.leader && !primary && member.online && !member.witness ? `<button class="btn" data-cluster-transfer="${esc(member.id)}">${esc(rt('接管 IM', 'Take over IM'))}</button>` : ''}</footer>${diagnostic?.error ? `<p class="machine-error">${esc(diagnostic.error)}</p>` : ''}</article>`;
     }).join('');
     section.hidden = false;
     section.innerHTML = `<section class="cluster-summary ${healthy ? 'is-ready' : 'is-blocked'}"><div><span class="cluster-eyebrow">${esc(rt('运行状态', 'Runtime status'))}</span><h2 id="cluster-title">${esc(heading)}</h2><p>${esc(reason)}</p></div><button class="btn" id="cluster-refresh">${esc(rt('刷新', 'Refresh'))}</button></section><div class="panel-layers"><div><span>${esc(rt('你正在打开', 'You are viewing'))}</span><strong>${esc(self?.label || data.nodeId || rt('本机面板', 'Local panel'))}</strong></div><span class="layer-arrow">→</span><div><span>${esc(rt('IM 消息入口', 'IM ingress'))}</span><strong>${esc(leader?.label || leaderId || (data.enabled === false ? rt('本机', 'Local') : rt('暂不可用', 'Unavailable')))}</strong></div><span class="layer-arrow">→</span><div><span>${esc(rt('Agent 执行机器', 'Agent execution'))}</span><strong>${esc(rt('由会话指定', 'Chosen per session'))}</strong></div></div><div class="machine-section-heading"><div><h3>${esc(rt('机器节点', 'Machines'))}</h3><p class="route-muted">${esc(rt('管理执行机器与集群面板的连接。', 'Manage runtime and cluster connections.'))}</p></div><button class="btn primary" id="machine-add-node">＋ ${esc(rt('新增节点', 'Add node'))}</button></div><div class="machine-grid">${cards}</div><details class="cluster-diagnostics"><summary>${esc(rt('查看选举与连接诊断', 'Election & connection diagnostics'))}</summary><p>${esc(rt(`可达成员 ${data.quorum?.online ?? members.length} / ${data.quorum?.total ?? members.length}；多数派需要 ${data.quorum?.required ?? 1} 个成员；主节点确认${data.hasQuorum ? '已完成' : '未完成'}`, `Reachable ${data.quorum?.online ?? members.length}/${data.quorum?.total ?? members.length}; majority ${data.quorum?.required ?? 1}; leader confirmation ${data.hasQuorum ? 'valid' : 'pending'}`))}</p><p>${esc(rt(`任期 ${data.term ?? '—'} · 同步版本 ${data.snapshotIndex ?? '—'} · 本机监听 ${data.panel?.bind || '未知'}:${data.panel?.port || ''}`, `Term ${data.term ?? '—'} · snapshot ${data.snapshotIndex ?? '—'} · bind ${data.panel?.bind || '?'}:${data.panel?.port || ''}`))}</p>${members.map(item => `<p><strong>${esc(item.label || item.id)}</strong> <code>${esc(item.url || '')}</code></p>`).join('')}</details>`;

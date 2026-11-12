@@ -1,6 +1,7 @@
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
+const { retryableStatus } = require('../../core/route-policy');
 const { upstreamNetwork } = require('../../upstream-network');
 
 // Pass-through capture for Codex. Codex keeps its own credentials (ChatGPT
@@ -203,7 +204,7 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
             else if (!res.destroyed) { res.writeHead(502, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: '可用账号与出网节点均连接失败，请检查网络或稍后重试' })); }
           }); return;
         }
-        if (pooled && selectedAccount && [401, 403, 429, 500, 502, 503, 504].includes(response.statusCode) && relay.resolve) {
+        if (pooled && selectedAccount && retryableStatus(response.statusCode) && relay.resolve) {
           const rejected = []; response.on('data', chunk => rejected.push(chunk));
           response.on('end', async () => {
             save(response.statusCode, Buffer.concat(rejected), false, response.headers['content-encoding'], false);

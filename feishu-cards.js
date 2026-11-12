@@ -183,7 +183,7 @@ function task({ binding, title, view, elapsed, nodeLabel = '', model = '默认�
   const tools = [...view.tools.values()], requests = view.done ? [] : [...view.permissions.values()];
   const done = tools.filter(item => item.state === '已完成').length;
   const failed = view.phase === '失败' || view.phase === '连接已结束';
-  const template = failed ? 'red' : requests.length || ['等待原窗口确认', '投递待确认'].includes(view.phase) ? 'orange' : view.done ? 'green' : 'blue';
+  const template = failed ? 'red' : requests.length || ['等待原窗口确认', '投递待确认', '结果待核对', '等待节点重连'].includes(view.phase) ? 'orange' : view.done ? 'green' : 'blue';
   if (context.detailed === false) {
     const elements = [muted(`${Math.max(0, Math.floor(elapsed / 1000))} 秒${tools.length ? ` · 工具 ${done}/${tools.length}` : ''}`)];
     if (tools.length) elements.push(markdown(tools.slice(-8).map(tool => `🔧 ${escape(clip(tool.name, 60))} · ${escape(tool.state)}`).join('\n')));

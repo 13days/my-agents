@@ -1,3 +1,4 @@
+const { retryableStatus, cooldownSeconds } = require('./core/route-policy');
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -291,13 +292,13 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
         const requestPath = basePath + (basePath.endsWith('/v1') && incoming.startsWith('/v1/') ? incoming.slice(3) : incoming);
         let moved = false;
         const cool = status => {
-          const seconds = status === 429 || status === 402 ? 60 : status === 401 || status === 403 ? 300 : 15;
+          const seconds = cooldownSeconds(status);
           health.set(account.id, { ...health.get(account.id), lastStatus: status, cooldownUntil: Date.now() + seconds * 1000 });
         };
         const upstream = (target.protocol === 'https:' ? https : http).request({ ...upstreamNetwork, timeout: 120000, protocol: target.protocol, hostname: target.hostname, port: target.port || undefined, path: requestPath, method: req.method, headers }, response => {
           if (res.destroyed) { response.destroy(); return; }
           const code = response.statusCode;
-          const retry = [401, 402, 403, 429, 500, 502, 503, 504, 529].includes(code);
+          const retry = retryableStatus(code);
           if (retry) {
             cool(code);
             const retryAfter = response.headers['retry-after'];

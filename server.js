@@ -1903,7 +1903,10 @@ const resolveSessionReference = require('./core/session-reference').createSessio
   },
 });
 
+const executionRuntime = HISTORY_WORKER ? null : require('./node/execution-runtime').createExecutionRuntime({ dir: path.join(DATA_DIR, 'executor') });
+const runStore = HISTORY_WORKER ? null : require('./core/run-store').createRunStore({ dir: DATA_DIR });
 const manager = createSessionManager({
+  runStore,
   registry,
   ensureNode: async id => { if (registry.node(id)) return; const peer = clusterNetwork?.peer(id); if (peer) await attachClusterRuntime(id, peer); if (!registry.node(id)) await nodeHub.ensure(id); },
   resolveLocation: (input, owner) => workspaceStore.resolve(input, owner),
@@ -1922,7 +1925,7 @@ const manager = createSessionManager({
   },
 });
 
-if (!HISTORY_WORKER) loadCaptures();
+if (!HISTORY_WORKER) captureStore.loadAsync().catch(error => console.warn('历史抓包索引加载失败：' + error.message));
 proxyServer.on('error', e => {
   // 端口被占等情况：只关掉 Inspector，别拖垮整个面板
   console.warn(`⚠ Inspector 代理未能在 ${PROXY_PORT} 启动（${e.code || e.message}）；面板其余功能正常。可设 PROXY_PORT=其它端口。`);
@@ -2030,7 +2033,7 @@ const server = http.createServer(async (req, res) => {
   if (scope && !knownProjects().includes(scope)) scope = '';
 
   try {
-    if (req.method === 'GET' && ['/mermaid-ui.js', '/vendor/mermaid/mermaid.tiny.js'].includes(url.pathname)) {
+    if (req.method === 'GET' && ['/conversation-state.js', '/mermaid-ui.js', '/vendor/mermaid/mermaid.tiny.js'].includes(url.pathname)) {
       res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' });
       return fs.createReadStream(path.join(__dirname, url.pathname.slice(1))).pipe(res);
     }
@@ -2059,6 +2062,11 @@ const server = http.createServer(async (req, res) => {
       catch (error) { return sendJSON(res, 503, { error: error.message }); }
     }
     const type = parts[1];
+    if (type === 'health' && req.method === 'GET') return sendJSON(res, 200, {
+      build: require('./core/build-info').buildInfo, ready: true,
+      captureIndex: captureStore.status(), taskStore: runStore.status(), tasks: { running: manager.running().length, preparing: manager.preparing().length, executing: executionRuntime.running().length },
+      cluster: { leader: cluster?.status().leader, hasQuorum: cluster?.status().hasQuorum },
+    });
     if (type === 'claude' && req.method === 'GET') { const info = resolveClaude(); return sendJSON(res, 200, { cli: info.path, version: info.version, source: info.source, candidates: info.candidates }); }
     if (url.searchParams.get('engine') === 'codex' && ['skills', 'config', 'commands', 'agents', 'plugins', 'workflows'].includes(type)) {
       if (parts.length > 3) return sendJSON(res, 404, { error: '资源不存在' });
@@ -2149,7 +2157,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (type === 'cluster') {
       res.setHeader('Cache-Control', 'no-store');
-      if (req.method === 'GET') { const data = cluster.status(); const members = (data.members || []).map(item => { const node = registry.node(item.id === data.nodeId ? 'local' : item.id); return { ...item, runtimeConnected: !!node, home: node?.host.homeDir(), platform: node?.info.platform || node?.host.platform, version: item.id === data.nodeId ? require('./package.json').version : node?.info.version }; }); return sendJSON(res, 200, { ...data, members, panel: { id: machineId(), bind: BIND_HOST, port: PORT }, gateway: { phase: feishuGateway.status().phase } }); }
+      if (req.method === 'GET') { const data = cluster.status(); const members = (data.members || []).map(item => { const node = registry.node(item.id === data.nodeId ? 'local' : item.id); return { ...item, runtimeConnected: !!node, home: node?.host.homeDir(), platform: node?.info.platform || node?.host.platform, version: item.id === data.nodeId ? require('./package.json').version : node?.info.version, build: item.id === data.nodeId ? require('./core/build-info').buildInfo : node?.info.build }; }); return sendJSON(res, 200, { ...data, members, panel: { id: machineId(), bind: BIND_HOST, port: PORT }, gateway: { phase: feishuGateway.status().phase } }); }
       if (req.method === 'POST' && parts[2] === 'transfer') {
         const { target } = JSON.parse(await readBody(req, 64 * 1024) || '{}');
         return sendJSON(res, 202, await cluster.transfer(String(target || '')));
@@ -2173,13 +2181,14 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Chat sessions run through the session manager, whatever the engine or node.
+    if (type === 'tasks' && req.method === 'GET') return sendJSON(res, 200, { items: manager.tasks(), preparing: manager.preparing() });
     if (type === 'chat' && ['POST', 'GET'].includes(req.method)) {
       const id = parts[2] ? decodeURIComponent(parts[2]) : '';
-      if (req.method === 'GET' && parts.length === 3 && id === 'status') return sendJSON(res, 200, { running: manager.running() });
+      if (req.method === 'GET' && parts.length === 3 && id === 'status') return sendJSON(res, 200, { running: [...manager.running(), ...executionRuntime.running()] });
       if (req.method === 'GET' && parts.length === 4 && parts[3] === 'events') {
         const run = manager.get(id);
         if (!run) return sendJSON(res, 404, { error: '此任务已结束，请重新打开会话查看结果' });
-        return run.job.subscribe(res);
+        return run.job.subscribe(res, require('./core/chat-job').parseCursor(req.headers['last-event-id'] || url.searchParams.get('after'), run.job.meta.jobId));
       }
       if (req.method !== 'POST') return sendJSON(res, 405, { error: 'method not allowed' });
       if (parts.length === 4 && parts[3] === 'stop') {
@@ -2198,7 +2207,7 @@ const server = http.createServer(async (req, res) => {
         if (parts.length === 4 && parts[3] === 'input') return sendJSON(res, 202, { ok: true, ...manager.send(id, input) });
         if (parts.length !== 2) return sendJSON(res, 404, { error: '接口不存在' });
         const { run } = await manager.start(input);
-        return run.job.subscribe(res);
+        return run.job.subscribe(res, require('./core/chat-job').parseCursor(req.headers['last-event-id'] || url.searchParams.get('after'), run.job.meta.jobId));
       } catch (e) {
         if (!e.status) console.warn('会话启动失败：', e.message);
         return sendJSON(res, e.status || 400, { error: e.message });
@@ -2408,6 +2417,7 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 200, {
           proxyPort: Number(PROXY_PORT),
           linking: !!captureLinkPromise,
+          indexing: captureStore.status().loading, indexError: captureStore.status().error,
           revision: captureStore.revision,
           items: captureStore.list().map(r => ({
             key: String(r.id), engine: r.engine || 'claude', sessionId: r.sessionId, startedAt: r.startedAt, purpose: r.purpose, purposeInferred: r.purposeInferred,
@@ -2693,14 +2703,25 @@ const clusterRuntimePending = new Map();
 async function attachClusterRuntime(id, peer) {
   const member = clusterConfig?.members.find(item => item.id === id);
   if (member?.witness) return;
-  // Account relays use the cluster peer even when SSH already supplies its engines.
   require('./node/relay').serveRelay({ peer, target: runtimeRouting.target });
-  if (registry.node(id)) return;
   if (clusterRuntimePending.has(id)) return clusterRuntimePending.get(id);
-  const pending = (async () => { for (let attempt = 0; attempt < 3; attempt++) { if (registry.node(id)) return registry.node(id); try { return await require('./node/remote').attachRemoteNode({ peer, registry, transport: 'cluster', pin: { id, label: member?.label || id }, routing: runtimeRouting }); } catch (error) { if (attempt === 2) throw error; await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1))); } } })();
+  const pending = (async () => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const activePeer = clusterNetwork?.peer(id) || peer;
+      const existing = registry.node(id);
+      if (existing && (existing.info.transport !== 'cluster' || existing.peer === activePeer)) return existing;
+      if (existing) registry.removeNode(id);
+      try {
+        if (!activePeer || activePeer.closed) throw new Error('集群执行连接正在重连');
+        require('./node/relay').serveRelay({ peer: activePeer, target: runtimeRouting.target });
+        return await require('./node/remote').attachRemoteNode({ peer: activePeer, registry, transport: 'cluster', pin: { id, label: member?.label || id }, routing: runtimeRouting });
+      } catch (error) { if (attempt === 2) throw error; await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1))); }
+    }
+  })();
   clusterRuntimePending.set(id, pending);
-  try { return await pending; } finally { clusterRuntimePending.delete(id); }
+  try { return await pending; } finally { if (clusterRuntimePending.get(id) === pending) clusterRuntimePending.delete(id); }
 }
+
 let clusterNetwork = null;
 let clusterConfig = null;
 try { clusterConfig = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'panel-cluster.json'), 'utf8')); } catch {}
@@ -2725,17 +2746,17 @@ async function syncRuntimeLogins() {
     try { const packet=await node.peer.call('accounts.native',{publicKey:runtimeAccountTransport.publicKey},{timeout:3000});accountPool.observeNative(node.id,runtimeAccountTransport.open(packet.sealed,packet.publicKey)); } catch {}
   }));
 }
-const poolTimer = HISTORY_WORKER ? null : setInterval(() => syncRuntimeLogins().then(()=>accountPool.refresh()).catch(() => console.warn('共享账号池同步失败，请检查集群连接')), 5000); poolTimer?.unref();
+const poolTimer = HISTORY_WORKER ? null : setInterval(() => { for (const id of clusterNetwork?.connected() || []) if (!registry.node(id) && !clusterRuntimePending.has(id)) attachClusterRuntime(id, clusterNetwork.peer(id)).catch(error => console.warn('集群执行连接：' + error.message)); return syncRuntimeLogins().then(()=>accountPool.refresh()).catch(() => console.warn('共享账号池同步失败，请检查集群连接')); }, 5000); poolTimer?.unref();
 
 if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token && Array.isArray(clusterConfig.members)) {
   clusterNetwork = require('./node/cluster-peer').createClusterNetwork({ token: clusterConfig.token, selfId: clusterConfig.nodeId, members: clusterConfig.members, onPeer: async (id, peer) => {
     const self = clusterConfig.members.find(item => item.id === clusterConfig.nodeId);
     if (self?.witness) return;
     const oldRuntime = registry.node(id); if (oldRuntime?.info.transport === 'cluster' && oldRuntime.peer !== peer) { registry.removeNode(id); clusterRuntimePending.delete(id); }
-    require('./node/agent').serveNode({ peer, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listSessions, messages: id => sessionMessages(id), previews: items => historyWorker.read('sessionPreviews', items), userPage: input => historyWorker.read('sessionUserPage', input) }, beforeOpen: (id, options) => { const native = options.engine === 'claude' && id && claudeNativeSessions.find(id); if (id && manager.busy(id) && !native) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed && !manager.busy(id)) previous.session.close(); } });
+    require('./node/agent').serveNode({ peer, runtime: executionRuntime, ownerId: id, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listSessions, messages: id => sessionMessages(id), previews: items => historyWorker.read('sessionPreviews', items), userPage: input => historyWorker.read('sessionUserPage', input) }, beforeOpen: (id, options) => { const native = options.engine === 'claude' && id && claudeNativeSessions.find(id); if (id && manager.busy(id) && !native) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed && !manager.busy(id)) previous.session.close(); } });
     setImmediate(() => attachClusterRuntime(id, peer).catch(error => console.warn('集群执行连接：' + error.message)));
   } });
-  cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: feishuGateway, canTransfer: () => manager.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });
+  cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: feishuGateway, canTransfer: () => manager.running().length === 0 && executionRuntime.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });
   clusterNetwork.handle('accounts.configureProxy', (_, input) => saveClaudeProxy(input));
   clusterNetwork.handle('accounts.catalog', () => accountPool.catalog());
   clusterNetwork.handle('accounts.key', () => accountPool.exchangeKey());
@@ -2792,6 +2813,7 @@ const stopPanel = async () => {
   conversations.flush();
   await cluster.stop().catch(() => {});
   manager.shutdown();
+  executionRuntime.shutdown();
   nodeHub.stop();
   process.exit(0);
 };

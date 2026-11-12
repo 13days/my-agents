@@ -94,7 +94,7 @@ flowchart LR
 - [完整使用手册](docs/user-guide.md)：账号池、模型、IM、目录映射、worktree、备份与排障。
 - [集群搭建与升级](docs/cluster-setup.md)：三节点部署、成员配置、常驻运行和接管验证。
 - [Agent 安装协议](docs/agent-install.md)：可直接交给 Agent 执行的完整说明。
-- [执行位置与工作区](docs/execution-workspaces.md)、[数据迁移](docs/migration.md)、[IM 扩展设计](docs/im-channels.md)、[架构说明](docs/architecture-v2.md)。
+- [执行位置与工作区](docs/execution-workspaces.md)、[数据迁移](docs/migration.md)、[IM 扩展设计](docs/im-channels.md)、[当前架构与可靠性边界](docs/architecture-current.md)、[架构设计历史](docs/architecture-v2.md)。
 
 页面左下角的「使用指南」也可以离线阅读。
 

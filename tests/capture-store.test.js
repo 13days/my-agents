@@ -69,3 +69,20 @@ test('legacy start time is reconstructed; unmatched and ambiguous captures do no
   assert.equal(store.navigation(1).nextId, null);
   assert.equal(store.navigation(1).previousId, null);
 });
+
+function fixture(t) { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'capture-index-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true })); return path.join(dir, 'captures.jsonl'); }
+test('background indexing permits new requests without id collisions or losing historical bodies', async t => {
+  const file = fixture(t), old = { id: 10, requestBody: JSON.stringify({ model: 'test' }), responseBody: 'old full response' };
+  fs.writeFileSync(file, JSON.stringify(old)); // Interrupted last newline remains recoverable.
+  const store = createCaptureStore(file), loading = store.loadAsync();
+  assert.equal(store.status().loading, true);
+  const id = store.nextId(); assert.ok(id > 10);
+  store.append({ id, requestBody: '{}', responseBody: 'new full response' });
+  await loading;
+  assert.equal(store.list().length, 2); assert.equal(store.get(10).responseBody, old.responseBody); assert.equal(store.get(id).responseBody, 'new full response');
+  const replay = createCaptureStore(file); replay.load(); assert.equal(replay.list().length, 2);
+});
+test('clearing captures during indexing cannot resurrect the historical index', async t => {
+  const file = fixture(t); fs.writeFileSync(file, JSON.stringify({ id: 1 }) + '\n');
+  const store = createCaptureStore(file), loading = store.loadAsync(); store.clear(); await loading; assert.deepEqual(store.list(), []);
+});
