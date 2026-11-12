@@ -4,10 +4,12 @@ const os = require('os');
 const { spawn } = require('child_process');
 const xml = value => String(value).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
 function createMacRuntime({ dir, claudeDir = dir, serverPath, port, proxyPort, platform = process.platform, home = os.homedir(), launch = spawn, claudeInfo = { path: process.env.CLAUDE_CLI || 'claude', version: '' } }) {
-  let awake = null;
+  let awake = null, nativeInboxError = '';
+  const nativeInbox = require('./core/native-inbox-policy').createNativeInboxPolicy({ home: process.env.CLAUDE_CONFIG_DIR || claudeDir, stateDir: dir });
   const agent = path.join(home, 'Library/LaunchAgents/io.my-agents.gateway.plist');
   return {
-    status() { return { supported: platform === 'darwin', keepAwake: !!awake, autoStart: fs.existsSync(agent), backgroundService: (process.env.MY_AGENTS_BACKGROUND_SERVICE || process.env.CCP_BACKGROUND_SERVICE) === '1', claudeCli: claudeInfo.path, claudeVersion: claudeInfo.version }; },
+    status() { return { nativeInbox: { ...nativeInbox.status(), ...(nativeInboxError ? { error: nativeInboxError } : {}) }, supported: platform === 'darwin', keepAwake: !!awake, autoStart: fs.existsSync(agent), backgroundService: (process.env.MY_AGENTS_BACKGROUND_SERVICE || process.env.CCP_BACKGROUND_SERVICE) === '1', claudeCli: claudeInfo.path, claudeVersion: claudeInfo.version }; },
+    nativeAutoAccept(enabled) { try { nativeInbox.set(enabled); nativeInboxError = ''; } catch (error) { nativeInboxError = error.message; } },
     keepAwake(enabled) {
       if (awake) { awake.kill('SIGTERM'); awake = null; }
       if (enabled && platform === 'darwin') {

@@ -50,7 +50,7 @@ function errorMessage(value, seen = new Set()) {
 function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '', leadership = null, now = Date.now }) {
   const configFile = path.join(dir, 'panel-feishu.json'), stateFile = path.join(dir, 'panel-feishu-state.json');
   const inbox = createFeishuInbox(dir);
-  const defaults = { allowAllUsers: false, allowAllGroups: false, enabled: false, appId: '', appSecret: '', domain: 'feishu', allowedUserIds: [], disabledUserIds: [], allowedChatIds: [], defaultProject: '', defaultMachine: '', defaultEngine: 'claude', worktree: true, model: '', keepAwake: false };
+  const defaults = { allowAllUsers: false, allowAllGroups: false, enabled: false, appId: '', appSecret: '', domain: 'feishu', allowedUserIds: [], disabledUserIds: [], allowedChatIds: [], defaultProject: '', defaultMachine: '', defaultEngine: 'claude', worktree: true, model: '', keepAwake: false, nativeAutoAccept: false };
   const emptyState = () => ({ bindings: {}, engineBindings: {}, cards: {}, sessionRefs: {}, taskCards: {}, sessionModels: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} });
   let config = defaults, state = emptyState(), phase = 'disabled', lastError = '', channel = null, connecting = null, pairing = null;
   function reloadFiles() {
@@ -58,7 +58,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     catch (e) { lastError = e.message; phase = 'error'; }
   }
   reloadFiles();
-  const applyRuntime = () => runtime.keepAwake(config.keepAwake);
+  const applyRuntime = () => { runtime.keepAwake(config.keepAwake); runtime.nativeAutoAccept?.(config.nativeAutoAccept); };
   // Engines come from the panel registry; unknown defaults fall back at use time.
   const catalog = () => engineCatalog(panel.engines?.());
   const defaultEngine = () => catalog().fallback(config.defaultEngine, 'claude');
@@ -832,7 +832,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   }
   async function configure(input) {
     const next = { ...config };
-    for (const key of ['enabled', 'keepAwake', 'cardCallbacksReady', 'worktree', 'allowAllUsers', 'allowAllGroups']) if (key in input) { if (typeof input[key] !== 'boolean') throw new Error('配置类型无效'); next[key] = input[key]; }
+    for (const key of ['enabled', 'keepAwake', 'nativeAutoAccept', 'cardCallbacksReady', 'worktree', 'allowAllUsers', 'allowAllGroups']) if (key in input) { if (typeof input[key] !== 'boolean') throw new Error('配置类型无效'); next[key] = input[key]; }
     for (const key of ['appId', 'domain', 'defaultProject', 'defaultMachine', 'defaultEngine', 'model']) if (key in input) { if (typeof input[key] !== 'string') throw new Error('配置类型无效'); next[key] = input[key].trim(); }
     if (input.appSecret) next.appSecret = String(input.appSecret).trim();
     for (const key of ['allowedUserIds', 'disabledUserIds', 'allowedChatIds']) if (key in input) {

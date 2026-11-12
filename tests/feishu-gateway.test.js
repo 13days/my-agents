@@ -1167,3 +1167,14 @@ test('settings opened from an old card stay read-only until explicitly switching
   assert.equal(after.id, before.id);
   assert.equal(f.calls.length, 0);
 });
+
+test('native receive opt-in is explicit, persisted, and restored independently of gateway leadership', async t => {
+ const f = await fixture(t), applied = [];
+ f.options.runtime.nativeAutoAccept = value => applied.push(value);
+ await f.pair(); await f.gateway.configure({ nativeAutoAccept: true });
+ assert.equal(f.gateway.status().config.nativeAutoAccept, true);
+ assert.equal(applied.at(-1), true);
+ await f.gateway.stop(); const restored = createFeishuGateway(f.options); await restored.start();
+ try { assert.equal(applied.at(-1), true); await restored.configure({ nativeAutoAccept: false }); assert.equal(applied.at(-1), false); }
+ finally { await restored.stop(); }
+});
