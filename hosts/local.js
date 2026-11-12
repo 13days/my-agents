@@ -25,7 +25,7 @@ function createLocalHost({ id = 'local', label = '本机' } = {}) {
       return real;
     },
     join: (...parts) => path.join(...parts),
-    createWorktree: dir => require('../core/worktrees').createWorktree(dir),
+    createWorktree: (dir, options) => require('../core/worktrees').createWorktree(dir, options),
     // Read-only file access for history and resource lookups on the node's disk.
     exists: file => fs.existsSync(file),
     readFile: (file, encoding = 'utf8') => fs.promises.readFile(file, encoding),

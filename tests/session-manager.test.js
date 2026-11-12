@@ -173,3 +173,16 @@ test('model resolution pins a supported default at launch while preserving an ex
   assert.equal(opened[1].model, 'chosen-explicitly'); assert.equal(resolutions, 1);
   manager.closeAll?.();
 });
+
+test('workspace preparation is counted as busy before an engine has started', async () => {
+ const {manager,registry}=setup();let release;registry.node('local').host.createWorktree=()=>new Promise(resolve=>release=resolve);
+ const pending=manager.start({prompt:'prepare',cwd:os.tmpdir(),worktree:true});await settle();
+ assert.equal(manager.preparing().length,1);assert.equal(manager.running().length,1);assert.equal(manager.preparing()[0].state,'preparing');
+ release(null);const {sessionId}=await pending;assert.equal(manager.preparing().length,0);await settle();manager.stop(sessionId);
+});
+
+test('cancelling preparation prevents the engine from launching the first query', async () => {
+ const {manager,registry,opened}=setup();registry.node('local').host.createWorktree=(_dir,{signal})=>new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true}));
+ const pending=manager.start({prompt:'must not run',sessionId:'cancel-before-launch',cwd:os.tmpdir(),worktree:true});await settle();assert.equal(manager.stop('cancel-before-launch'),true);
+ await assert.rejects(pending,/cancelled/);assert.equal(opened.length,0);assert.equal(manager.running().length,0);
+});

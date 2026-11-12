@@ -2,6 +2,7 @@
 // over a pair of streams (SSH stdio, child processes).
 function wsTransport(socket) {
   return {
+    get bufferedBytes() { return socket.bufferedAmount || 0; },
     send: text => { if (socket.readyState === 1) socket.send(text); },
     onMessage: fn => socket.on('message', data => fn(String(data))),
     onClose: fn => { socket.on('close', fn); socket.on('error', fn); },
@@ -27,6 +28,7 @@ function streamTransport(readable, writable, { onEnd } = {}) {
   readable.on('end', end); readable.on('close', end); readable.on('error', end);
   writable.on?.('error', end);
   return {
+    get bufferedBytes() { return writable.writableLength || 0; },
     send: text => { if (!ended && writable.writable !== false) writable.write(text + '\n'); },
     onMessage: fn => messageListeners.push(fn),
     onClose: fn => closeListeners.push(fn),

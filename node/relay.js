@@ -39,7 +39,8 @@ function serveRelay({ peer, target }) {
 }
 
 // Node side: lazily opens the local listener; resolves to its base URL.
-function createRelayClient(peer) {
+function createRelayClient(initialPeer, { reconnectable = false } = {}) {
+  let peer = initialPeer;
   const pending = new Map(); // rid → response
   let listening = null, server = null;
   const finish = (rid, error) => {
@@ -51,23 +52,35 @@ function createRelayClient(peer) {
     res.writeHead(502, { 'content-type': 'application/json' });
     res.end(errorBody(error));
   };
-  peer.on('relay.head', ({ rid, status, headers }) => { const res = pending.get(rid); if (res && !res.headersSent) res.writeHead(status, headers); });
-  peer.on('relay.data', ({ rid, chunk }) => pending.get(rid)?.write(Buffer.from(chunk, 'base64')));
-  peer.on('relay.end', ({ rid, error }) => finish(rid, error));
-  peer.onClose(() => { for (const rid of [...pending.keys()]) finish(rid, 'Hub 连接已断开'); server?.closeAllConnections?.(); server?.close(); });
+  const attach = next => {
+    peer = next;
+    next.on('relay.head', ({ rid, status, headers }) => { if (peer !== next) return; const res = pending.get(rid); if (res && !res.headersSent) res.writeHead(status, headers); });
+    next.on('relay.data', ({ rid, chunk }) => { if (peer === next) pending.get(rid)?.write(Buffer.from(chunk, 'base64')); });
+    next.on('relay.end', ({ rid, error }) => { if (peer === next) finish(rid, error); });
+    next.onClose(() => {
+      if (peer !== next) return;
+      for (const rid of [...pending.keys()]) finish(rid, 'Hub 连接暂时断开，请稍后重试');
+      if (reconnectable) peer = null;
+      else { server?.closeAllConnections?.(); server?.close(); }
+    });
+  };
+  attach(initialPeer);
 
   const handle = (req, res) => {
-    const chunks = [];
-    req.on('data', chunk => chunks.push(chunk));
+    const chunks = []; let bytes = 0;
+    req.on('data', chunk => { bytes += chunk.length; if (bytes > 32 * 1024 * 1024) { res.writeHead(413); res.end(); req.destroy(); } else chunks.push(chunk); });
     req.on('end', () => {
+      if (res.destroyed || res.writableEnded) return;
+      if (!peer || peer.closed) { res.writeHead(503, { 'content-type': 'application/json' }); return res.end(errorBody('控制通道正在重连，请稍后重试')); }
       const rid = crypto.randomUUID();
       pending.set(rid, res);
-      res.on('close', () => { if (pending.delete(rid)) peer.notify('relay.abort', { rid }); });
+      res.on('close', () => { if (pending.delete(rid)) peer?.notify('relay.abort', { rid }); });
       peer.call('relay.request', { rid, method: req.method, path: req.url, headers: req.headers, body: Buffer.concat(chunks).toString('base64') }, { timeout: 30000 })
         .catch(e => finish(rid, `Hub 未接受转发：${e.message}`));
     });
   };
   return {
+    attach,
     url() {
       listening ||= new Promise((resolve, reject) => {
         server = http.createServer(handle);

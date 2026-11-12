@@ -35,7 +35,7 @@ function localEngines(env = process.env) {
   const { createClaudeEngine } = require('../engines/claude');
   const { createCodexEngine } = require('../engines/codex');
   const { createCodexSessions } = require('../engines/codex/sessions');
-  const claudeDir = env.CLAUDE_DIR || path.join(os.homedir(), '.claude');
+  const claudeDir = env.CLAUDE_CONFIG_DIR || env.CLAUDE_DIR || path.join(os.homedir(), '.claude');
   const transcriptPath = id => {
     const root = path.join(claudeDir, 'projects');
     let dirs = [];
@@ -44,7 +44,7 @@ function localEngines(env = process.env) {
     return '';
   };
   return [
-    createClaudeEngine({ transcripts: { path: transcriptPath, messages: () => null }, env }),
+    createClaudeEngine({ transcripts: { path: transcriptPath, messages: () => null }, nativeSessions: require('../core/claude-native-session').createClaudeNativeSessions({ home: claudeDir, transcriptPath }), env }),
     createCodexEngine({ sessions: createCodexSessions({ home: env.CODEX_HOME || path.join(os.homedir(), '.codex') }), env }),
   ];
 }
@@ -70,6 +70,7 @@ function run(argv, { engines = localEngines(), stderr = process.stderr } = {}) {
     return peer;
   }
 
+  const executionRuntime = require('./execution-runtime').createExecutionRuntime({ dir: path.join(require('../core/data-dir').resolveDataDir({ claudeDir: process.env.CLAUDE_DIR }).dir, 'executor') });
   const WebSocket = require('ws');
   const url = new URL('/api/nodes/connect', args.hub.replace(/^http/, 'ws')).toString();
   let delay = 1000;
@@ -79,7 +80,7 @@ function run(argv, { engines = localEngines(), stderr = process.stderr } = {}) {
       delay = 1000;
       log(`已连接 Hub：${args.hub}（节点 ${id}）`);
       const peer = createPeer(wsTransport(socket));
-      serveNode({ peer, host, engines, id, label, nativeLogins });
+      serveNode({ peer, host, engines, id, label, nativeLogins, runtime: executionRuntime, ownerId: args.hub });
     });
     socket.on('unexpected-response', (_, res) => { log(`Hub 拒绝连接：HTTP ${res.statusCode}${res.statusCode === 401 ? '（令牌无效）' : ''}`); });
     socket.on('error', e => log(`连接失败：${e.message}`));

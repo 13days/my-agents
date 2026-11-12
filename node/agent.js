@@ -13,16 +13,19 @@ const VERSION = require('../package.json').version;
 // Notifications (node → hub): session.event, session.idle, session.ready,
 // session.failed, session.accepted, session.closed. Each carries the session
 // state so the hub can answer currentId / busy synchronously.
-function serveNode({ peer, host, engines, id = os.hostname(), label = id, beforeOpen = () => {}, history = null, nativeLogins = null }) {
+function serveNode({ peer, host, engines, id = os.hostname(), label = id, beforeOpen = () => {}, history = null, nativeLogins = null, runtime = null, ownerId = 'hub' }) {
   const byId = new Map(engines.map(engine => [engine.id, engine]));
-  const sessions = new Map();
+  const retained = runtime?.bind(ownerId, peer);
+  const worktrees = retained ? (retained.worktrees ||= new Map()) : new Map();
+  peer.onClose(() => { if (!retained || !retained.peer || retained.peer === peer) for (const controller of worktrees.values()) controller.abort(); });
+  const sessions = retained?.sessions || new Map();
   const engineOf = name => { const engine = byId.get(name); if (!engine) throw Object.assign(new Error(`节点上没有引擎：${name}`), { status: 400 }); return engine; };
   const sessionOf = sid => { const session = sessions.get(sid); if (!session) throw Object.assign(new Error('节点上的会话已结束'), { status: 409 }); return session; };
-  const relay = createRelayClient(peer);
+  const relay = retained?.relay || createRelayClient(peer);
   const state = session => ({ currentId: session?.currentId || '', pendingCount: session?.pendingCount || 0, busy: !!session?.busy });
 
   peer.handle('hello', () => ({
-    nativeAccounts:!!nativeLogins, id, label, platform: host.platform, version: VERSION, home: host.homeDir(), worktrees: typeof host.createWorktree === 'function',
+    runtimeCapabilities: { sessionRecovery: !!runtime }, build: require('../core/build-info').buildInfo, nativeAccounts:!!nativeLogins, id, label, platform: host.platform, version: VERSION, home: host.homeDir(), worktrees: typeof host.createWorktree === 'function',
     engines: engines.map(engine => {
       let cli = null;
       try { const info = engine.detect?.(); if (info) cli = { path: info.path, version: info.version }; } catch {}
@@ -43,11 +46,18 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id, before
     peer.handle('history.userPage', async ({ item, page }) => history.userPage ? history.userPage({ item, page }) : require('../core/session-previews').userMessagePage(await history.messages(item.id), page, item));
   }
   peer.handle('host.resolveDir', ({ dir }) => host.resolveDir(dir));
-  peer.handle('host.createWorktree', async ({ dir }) => host.createWorktree(await host.resolveDir(dir)));
+  peer.handle('host.createWorktree', async ({ dir, operationId }) => {
+    const controller = new AbortController(); if (operationId) worktrees.set(operationId, controller);
+    try { return await host.createWorktree(await host.resolveDir(dir), { signal: controller.signal }); }
+    finally { if (operationId) worktrees.delete(operationId); }
+  });
+  peer.handle('host.cancelWorktree', ({ operationId }) => { worktrees.get(operationId)?.abort(); return true; });
 
   peer.handle('session.open', async ({ sid, engine: name, sessionId, resume, cwd, model, routeEnv, nativeOnly = false }) => {
     if (nativeOnly && !await engineOf(name).nativeSessionAvailable?.(sessionId)) throw new Error('原终端会话已退出或切换，未另起执行进程');
+    if (sessions.has(sid) && !runtime?.record(ownerId, sid)?.closed) return { routed: !!sessions.get(sid).routed, nativeAttached: !!sessions.get(sid).nativeAttached };
     await beforeOpen(sessionId, { engine: name });
+    runtime?.claim(ownerId, sid, { engine: name, sessionId, cwd, model });
     const engine = engineOf(name);
     const codexPath = String(routeEnv?.MY_AGENTS_CODEX_BASE || '');
     if (routeEnv?.ANTHROPIC_BASE_URL || /^\/(?!\/)/.test(codexPath)) {
@@ -59,13 +69,13 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id, before
       if (codexPath) routeEnv.MY_AGENTS_CODEX_BASE = url + codexPath;
     } else routeEnv = null;
     let session = null;
-    const notify = (method, extra = {}) => peer.notify(method, { sid, ...extra, state: state(session) });
-    session = await engine.open({
+    const notify = (method, extra = {}) => { const data = { sid, ...extra, state: state(session) }; if (runtime) runtime.emit(ownerId, sid, method, data); else peer.notify(method, data); };
+    try { session = await engine.open({
       host, sessionId, resume, cwd: host.resolveDir(cwd), model: model && engine.validModel(model) ? model : '', routeEnv: routeEnv || null,
       emit: (event, data) => notify('session.event', { event, data }),
       onIdle: () => notify('session.idle'),
-      onClosed: () => { sessions.delete(sid); notify('session.closed'); },
-    });
+      onClosed: () => { if (!runtime) sessions.delete(sid); notify('session.closed'); },
+    }); } catch (error) { notify('session.failed', { error: error.message }); notify('session.closed'); throw error; }
     sessions.set(sid, session);
     Promise.resolve(session.ready).then(realId => notify('session.ready', { id: realId }), e => notify('session.failed', { error: e?.message || String(e) }));
     return { routed: !!session.routed, nativeAttached: !!session.nativeAttached };
@@ -75,12 +85,17 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id, before
     session.submit(turnId, input, !!steer, accept ? () => peer.notify('session.accepted', { sid, turnId, state: state(session) }) : undefined);
     return state(session);
   });
+  if (runtime) peer.handle('session.find', ({ engine, sessionId }) => {
+    const record = [...retained.records.values()].find(row => row.engine === engine && row.sessionId === sessionId && !row.closed && sessions.has(row.sid));
+    return record ? { sid: record.sid, model: record.model } : null;
+  });
+  if (runtime) peer.handle('session.attach', ({ sid, after }) => runtime.attach(ownerId, sid, peer, after));
   peer.handle('session.stop', ({ sid }) => { sessions.get(sid)?.stop(); return true; });
   peer.handle('session.close', ({ sid }) => { sessions.get(sid)?.close(); return true; });
   peer.handle('session.permission', ({ sid, requestId, behavior }) => { sessionOf(sid).respondPermission(requestId, behavior); return true; });
 
   // A lost hub cannot receive events any more: stop everything this node started.
-  peer.onClose(() => { for (const session of sessions.values()) { try { session.stop(); } catch {} } sessions.clear(); });
+  if (!runtime) peer.onClose(() => { for (const session of sessions.values()) { try { session.stop(); } catch {} } sessions.clear(); });
   return { sessions };
 }
 module.exports = { serveNode };

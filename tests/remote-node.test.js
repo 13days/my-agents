@@ -296,3 +296,28 @@ test('attaching an existing native CLI bypasses account rerouting and remains a 
  const session=await registry.adapter('echo','mac').open({sessionId:'thread-on-node',resume:true,cwd:os.tmpdir(),emit(){},onIdle(){},onClosed(){}});
  assert.equal(session.nativeAttached,true);assert.equal(routeCalls,0);assert.equal(spawns,1);session.submit('native-query-id',{prompt:'continue'},false);await session.ready;
 });
+
+test('a recoverable execution survives a control disconnect and replays missed output without another CLI', async t => {
+ const runtime=require('../node/execution-runtime').createExecutionRuntime(),registry=createRegistry();registry.addNode({id:'local',host:createLocalHost()});
+ let launches=0,stops=0,options,active='';
+ const engine={id:'persistent',meta:{label:'Persistent'},capabilities:{sessionId:'assigned'},validModel:()=>true,owns:()=>false,async open(input){launches++;options=input;return{ready:Promise.resolve(input.sessionId),submit(id){active=id;input.emit('turn',{messageId:id})},stop(){stops++;active='';input.onClosed()},close(){input.onClosed()},get currentId(){return active},get pendingCount(){return 0},get busy(){return !!active}}}};
+ function connect(){const[a,b]=pairTransports(),hub=createPeer(a),node=createPeer(b);serveNode({peer:node,host:createLocalHost(),engines:[engine],id:'recoverable',runtime,ownerId:'stable-controller'});return hub;}
+ const first=connect();await attachRemoteNode({peer:first,registry,log:{warn(){}}});
+ const events=[],session=await registry.adapter('persistent','recoverable').open({sessionId:'persistent-native',cwd:os.tmpdir(),emit:(event,data)=>events.push({event,data}),onIdle(){},onClosed(){events.push({event:'closed'})}});
+ session.submit('original-turn',{prompt:'continue the same execution'});await until(()=>events.some(e=>e.event==='turn'));
+ first.close();await until(()=>!registry.node('recoverable'));assert.equal(stops,0);assert.equal(runtime.running().length,1);
+ options.emit('text',{messageId:'original-turn',text:'output while disconnected'});
+ const second=connect();t.after(()=>{second.close();runtime.shutdown()});await attachRemoteNode({peer:second,registry,log:{warn(){}}});
+ await until(()=>events.some(e=>e.event==='text'));assert.equal(events.filter(e=>e.event==='text').length,1);assert.equal(launches,1);assert.equal(stops,0);
+ active='';options.emit('done',{messageId:'original-turn'});options.onIdle();await until(()=>events.some(e=>e.event==='done'));assert.equal(session.busy,false);
+});
+
+test('a rebuilt controller finds the existing native execution instead of starting a duplicate', async t => {
+ const runtime=require('../node/execution-runtime').createExecutionRuntime();let launches=0,current='';
+ const engine={id:'retained',meta:{label:'Retained'},capabilities:{sessionId:'assigned'},validModel:()=>true,owns:()=>true,async open(o){launches++;return{ready:Promise.resolve(o.sessionId),submit(id){current=id;o.emit('turn',{id})},stop(){current='';o.onClosed()},close(){o.onClosed()},get currentId(){return current},get pendingCount(){return 0},get busy(){return !!current}}}};
+ async function connect(){const[a,b]=pairTransports(),hub=createPeer(a),node=createPeer(b),registry=createRegistry();registry.addNode({id:'local',host:createLocalHost()});serveNode({peer:node,host:createLocalHost(),engines:[engine],id:'retained-node',runtime,ownerId:'same-control-machine'});await attachRemoteNode({peer:hub,registry,log:{warn(){}}});return{hub,registry};}
+ const first=await connect(),base={sessionId:'retained-native',cwd:os.tmpdir(),emit(){},onIdle(){},onClosed(){}};
+ const original=await first.registry.adapter('retained','retained-node').open(base);original.submit('original-turn',{prompt:'work'});await until(()=>runtime.running().length===1);first.hub.close();
+ const second=await connect();t.after(()=>{second.hub.close();runtime.shutdown()});const recovered=await second.registry.adapter('retained','retained-node').open({...base,resume:true});
+ assert.equal(await recovered.ready,'retained-native');assert.equal(launches,1);assert.equal(recovered.currentId,'original-turn');
+});
