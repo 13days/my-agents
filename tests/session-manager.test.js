@@ -186,3 +186,11 @@ test('cancelling preparation prevents the engine from launching the first query'
  const pending=manager.start({prompt:'must not run',sessionId:'cancel-before-launch',cwd:os.tmpdir(),worktree:true});await settle();assert.equal(manager.stop('cancel-before-launch'),true);
  await assert.rejects(pending,/cancelled/);assert.equal(opened.length,0);assert.equal(manager.running().length,0);
 });
+
+test('restart retains the newest native-session alias after repeated handoffs', t => {
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'handoff-alias-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));let tick=0;
+ const store=require('../core/run-store').createRunStore({dir,now:()=>++tick});
+ const old=store.begin({requestedId:'original-native',conversationId:'stable-conversation'},{messageId:'first-message'});store.update(old.id,{sessionId:'older-native',state:'completed'});
+ const latest=store.begin({requestedId:'original-native',conversationId:'stable-conversation'},{messageId:'second-message'});store.update(latest.id,{sessionId:'newest-native',state:'completed'});
+ const {registry}=setup(),manager=createSessionManager({registry,history:{},runStore:store});assert.equal(manager.resolveId('original-native'),'newest-native');
+});

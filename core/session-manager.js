@@ -15,7 +15,7 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
   const runs = new Map();
   const aliases = new Map(), preparations = new Map();
   runStore?.recover();
-  for (const row of runStore?.list() || []) if (row.requestedId && row.sessionId) aliases.set(row.requestedId, row.sessionId);
+  for (const row of runStore?.list() || []) if (row.requestedId && row.sessionId && !aliases.has(row.requestedId)) aliases.set(row.requestedId, row.sessionId);
   const resolveId = id => aliases.get(id) || id;
   const live = run => run && !run.job.closed;
 
