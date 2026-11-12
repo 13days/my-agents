@@ -15,13 +15,13 @@ function mesh(ids) {
     block(other) { blocked.add([id, other].sort().join(':')); }, unblock(other) { blocked.delete([id, other].sort().join(':')); },
   }]));
 }
-function fixture(spec, initial = {}) {
+function fixture(spec, initial = {}, clocks = {}) {
   const ids = spec.map(x => x.id), networks = mesh(ids), gateways = {}, clusters = {}, dirs = {};
   for (const member of spec) {
     const gateway = gateways[member.id] = { active: false, starts: 0, reloads: 0, async start() { this.active = true; this.starts++; }, async stop() { this.active = false; }, async reload() { this.reloads++; } };
     const dir = dirs[member.id] = fs.mkdtempSync(path.join(os.tmpdir(), `cluster-${member.id}-`));
     if (initial[member.id]) fs.writeFileSync(path.join(dir, 'panel-cluster-state.json'), JSON.stringify(initial[member.id]));
-    clusters[member.id] = createCluster({ dir, config: { clusterId: 'c', nodeId: member.id, members: spec }, network: networks[member.id], gateway, heartbeatMs: 30, electionMinMs: 60, leaseMs: 100, random: () => ids.indexOf(member.id) / 10 });
+    clusters[member.id] = createCluster({ dir, config: { clusterId: 'c', nodeId: member.id, members: spec }, network: networks[member.id], gateway, now: () => Date.now() + (clocks[member.id] || 0), heartbeatMs: 30, electionMinMs: 60, leaseMs: 100, random: () => ids.indexOf(member.id) / 10 });
   }
   return { clusters, gateways, networks, dirs };
 }
@@ -85,4 +85,17 @@ test('a stale member with a high term rejoins without preventing the freshest ma
   assert.notEqual(leaders[0].status().nodeId, 'a');
   assert.ok(Object.values(f.clusters).every(c => c.status().leader === leaders[0].status().nodeId));
   assert.equal(Object.values(f.gateways).filter(g => g.active).length, 1);
+});
+
+for (const jump of [-60000, 60000]) test(`wall clock jump ${jump}ms cannot keep an isolated gateway leader alive`, async t => {
+  const clocks = {}, f = fixture([{id:'a'},{id:'b'},{id:'c'}], {}, clocks);
+  t.after(async () => { await Promise.all(Object.values(f.clusters).map(c => c.stop())); for (const dir of Object.values(f.dirs)) fs.rmSync(dir,{recursive:true,force:true}); });
+  await Promise.all(Object.values(f.clusters).map(c => c.start())); await sleep(220);
+  const leader = Object.keys(f.clusters).find(id => f.clusters[id].status().role === 'leader'); assert.ok(leader);
+  clocks[leader] = jump;
+  for (const other of Object.keys(f.clusters).filter(id => id !== leader)) f.networks[leader].block(other);
+  await sleep(300);
+  assert.equal(f.gateways[leader].active, false);
+  assert.equal(Object.values(f.gateways).filter(g => g.active).length, 1);
+  assert.equal(f.clusters[leader].canStart(), false);
 });
