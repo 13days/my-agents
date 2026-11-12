@@ -33,7 +33,7 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
     if (matches.length > 1) {
       // A suspended shell window still publishes the same session ID. It is
       // not the conversational inbox when exactly one other window is ready.
-      const conversational = matches.filter(row => ['idle', 'working'].includes(row.status));
+      const conversational = matches.filter(row => ['idle', 'working', 'busy'].includes(row.status));
       if (conversational.length === 1 && matches.every(row => row === conversational[0] || row.status === 'shell')) return conversational[0];
       throw new Error('这条会话同时在多个 Claude Code 对话窗口打开（进程 ' + matches.map(row => row.pid).join('、') + '）。请关闭不需要接续的窗口，再从飞书发送；本次尚未投递，也未复制或关闭原会话');
     }
@@ -76,6 +76,8 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
       close();
     };
     const textOf = message => typeof message?.content === 'string' ? message.content : (message?.content || []).filter(block => block.type === 'text').map(block => block.text || '').join('\n');
+    const backgroundState = () => emit('warning', { messageId: active.id, kind: active.background.size ? 'native_background' : 'native_summary', warning: active.background.size ? `原会话仍有 ${active.background.size} 个后台任务执行中；当前内容是阶段回复，完成通知和最终汇总会继续同步。` : '后台任务已结束，正在等待原会话汇总结果。' });
+    const finishTurn = () => { emit('done', { messageId: active.id }); active = null; if (!pending.length) onIdle(); };
     const consume = row => {
       if (!active || row.isSidechain) return;
       const message = row.message || {};
@@ -91,20 +93,40 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
         active.confirmed = true; emit('turn', { id: active.id, messageId: active.id });
       }
       if (!active.confirmed) return;
+      // A task notification belongs to this request only when the CLI identifies
+      // its system origin and its task ID was launched by a tool we observed.
+      const notification = row.type === 'user' && (row.origin?.kind === 'task-notification' || row.turnOrigin === 'task_notification');
+      if (notification) {
+        const text = textOf(message), taskId = text.match(/<task-id>([^<]+)<\/task-id>/)?.[1], status = text.match(/<status>([^<]+)<\/status>/)?.[1];
+        if (active.background.has(taskId) && ['completed', 'failed', 'stopped', 'cancelled'].includes(status)) {
+          const toolId = active.background.get(taskId); active.background.delete(taskId);
+          active.endCandidate = false; active.turnEnded = false; active.needsSeparator = active.text.size > 0;
+          emit('tool_result', { messageId: active.id, id: toolId, output: status === 'completed' ? '后台任务已完成，等待原会话汇总' : '后台任务已结束：' + status, isError: status === 'failed' });
+          backgroundState();
+        }
+      }
+      if (row.type === 'system' && row.subtype === 'turn_duration') active.turnEnded = true;
       if (row.type === 'assistant') {
+        active.endCandidate = false; active.turnEnded = false;
         for (const [index, block] of (message.content || []).entries()) {
           if (block.type === 'text') {
             const key = `${row.uuid || message.id}:${index}`, previous = active.text.get(key) || '';
             const text = block.text || ''; active.text.set(key, text);
-            if (text.startsWith(previous) && text.length > previous.length) emit('text', { messageId: active.id, text: text.slice(previous.length) });
+            if (text.startsWith(previous) && text.length > previous.length) { emit('text', { messageId: active.id, text: (active.needsSeparator ? '\n\n' : '') + text.slice(previous.length) }); active.needsSeparator = false; }
           }
           if (block.type === 'tool_use' && !active.tools.has(block.id)) {
             active.tools.add(block.id); emit('tool', { messageId: active.id, id: block.id, name: block.name, input: block.input });
           }
         }
-        if (['end_turn', 'stop_sequence'].includes(message.stop_reason)) { emit('done', { messageId: active.id }); active = null; if (!pending.length) onIdle(); }
+        if (['end_turn', 'stop_sequence'].includes(message.stop_reason)) { active.endCandidate = true; if (active.background.size) backgroundState(); }
       } else if (row.type === 'user' && Array.isArray(message.content)) {
-        for (const block of message.content) if (block.type === 'tool_result' && active.tools.has(block.tool_use_id)) emit('tool_result', { messageId: active.id, id: block.tool_use_id, output: block.content, isError: block.is_error });
+        for (const block of message.content) if (block.type === 'tool_result' && active.tools.has(block.tool_use_id) && !active.results.has(block.tool_use_id)) {
+          active.results.add(block.tool_use_id);
+          const result = row.toolUseResult, taskId = result?.isAsync === true && result?.status === 'async_launched' ? result.agentId || result.taskId : result?.backgroundTaskId;
+          if (!block.is_error && typeof taskId === 'string' && /^[\w-]{1,128}$/.test(taskId)) {
+            active.background.set(taskId, block.tool_use_id); backgroundState();
+          } else emit('tool_result', { messageId: active.id, id: block.tool_use_id, output: block.content, isError: block.is_error });
+        }
       }
     };
     async function poll() {
@@ -122,6 +144,9 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
           while ((end = fragments.indexOf('\n')) >= 0) { const line = fragments.slice(0, end); fragments = fragments.slice(end + 1); try { consume(JSON.parse(line)); } catch {} }
           if (fragments.length > 8 * 1024 * 1024) throw new Error('原会话单条记录过大，IM 已停止同步；请在原窗口查看');
         }
+        // end_turn ends a model response. A native turn can still run stop hooks
+        // or async agents, so wait for its terminal record and drain the transcript.
+        if (active?.confirmed && active.endCandidate && active.turnEnded && !active.background.size && current.status === 'idle' && offset >= size && !fragments) finishTurn();
         if (active && !active.confirmed && !active.held && !active.deliveryPending
             && offset >= size && now() - active.sentAt > deliveryTimeoutMs) {
           active.deliveryPending = true;
@@ -150,8 +175,8 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
         }
         const marker = `my-agents-im:${id}`, body = `[来自飞书 · ${marker}]\n${context}\n\n${input.prompt || ''}`;
         if (Buffer.byteLength(body) > 512 * 1024) throw new Error('发送给原终端的消息过长');
-        seen.add(id); pending.push({ id, marker, body, text: new Map(), tools: new Set() }); accept?.();
-        emit('warning', { messageId: id, kind: 'native_attachment', warning: '已连接原来打开的 Claude Code 窗口。飞书消息会由这个窗口处理，回到终端可以直接接着聊；断开 IM 同步不会关闭原窗口。' });
+        seen.add(id); pending.push({ id, marker, body, text: new Map(), tools: new Set(), background: new Map(), results: new Set(), endCandidate: false, turnEnded: false }); accept?.();
+        emit('warning', { messageId: id, kind: 'native_attachment', nativeSession: { id: sessionId, name: record.name || '', pid: record.pid }, warning: '已连接原来打开的 Claude Code 窗口。飞书消息会由这个窗口处理，回到终端可以直接接着聊；断开 IM 同步不会关闭原窗口。' });
         if (!timer && !polling) { timer = setTimeout(poll, 0); timer.unref?.(); }
       },
       stop: close, close,

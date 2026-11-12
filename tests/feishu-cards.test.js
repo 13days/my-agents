@@ -202,3 +202,12 @@ test('historical conversation settings cannot offer controls for a different cur
   assert.deepEqual(actions(controls).map(a => a.action), ['models', 'route', 'nodes', 'engine']);
   assert.ok(actions(controls).every(a => a.expectedSessionId === 'current'));
 });
+
+test('native background work stays orange with synchronization controls and an identifiable original session', () => {
+ const view = { phase: '等待后台任务', done: false, nativeAttached: true, nativeSession: { id: 'original-session-id', name: 'Original terminal title' }, text: 'The query is still running.', warning: 'One background task is running.', tools: new Map([['agent', { name: 'Agent', state: '执行中' }]]), permissions: new Map() };
+ const output = cards.task({ ...context, binding: { id: 'original-session-id', cwd: '/project', engine: 'claude' }, title: 'Inspect rollout', elapsed: 60000, view });
+ assert.equal(output.header.title.content, '等待后台任务'); assert.equal(output.header.template, 'orange');
+ assert.match(JSON.stringify(output), /Original terminal title/); assert.match(JSON.stringify(output), /断开飞书同步/);
+ assert.ok(actions(output).some(a => a.action === 'stop')); assert.equal(actions(output).some(a => a.action === 'continue_task'), false);
+ view.phase = '等待原会话汇总'; assert.equal(cards.task({ ...context, binding: { id: 'original-session-id', cwd: '/project' }, title: 'Task', elapsed: 61000, view }).header.template, 'orange');
+});

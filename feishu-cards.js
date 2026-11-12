@@ -200,7 +200,7 @@ function task({ binding, title, view, elapsed, nodeLabel = '', model = '默认�
   const done = tools.filter(item => item.state === '已完成').length;
   const failed = view.phase === '失败';
   const disconnected = ['连接已结束', '进度同步已中断', '结果待核对'].includes(view.phase);
-  const template = failed ? 'red' : disconnected || requests.length || ['等待原窗口确认', '投递待确认', '结果待核对', '等待节点重连'].includes(view.phase) ? 'orange' : view.done ? 'green' : 'blue';
+  const template = failed ? 'red' : disconnected || requests.length || ['等待原窗口确认', '投递待确认', '结果待核对', '等待节点重连', '等待后台任务', '等待原会话汇总'].includes(view.phase) ? 'orange' : view.done ? 'green' : 'blue';
   if (context.detailed === false) {
     const elements = [muted(`${Math.max(0, Math.floor(elapsed / 1000))} 秒${tools.length ? ` · 工具 ${done}/${tools.length}` : ''}`)];
     if (tools.length) elements.push(markdown(tools.slice(-8).map(tool => `🔧 ${escape(clip(tool.name, 60))} · ${escape(tool.state)}`).join('\n')));
@@ -211,6 +211,7 @@ function task({ binding, title, view, elapsed, nodeLabel = '', model = '默认�
   const elements = [muted(`${context.location ? context.location + ' · ' : ''}${catalogOf(context).label(binding.engine || 'claude')} · ${escape(path.basename(binding.cwd) || '项目')} · ${Math.max(0, Math.floor(elapsed / 1000))} 秒${tools.length ? ` · 工具 ${done}/${tools.length}` : ''}`)];
   elements.push(muted(`模型：${escape(model)}`));
   if (nodeLabel) elements.push(muted(`执行机器：${escape(nodeLabel)}`));
+  if (view.nativeSession?.name) elements.push(muted(`原终端会话：${escape(clip(view.nativeSession.name, 80))} · ${escape(String(view.nativeSession.id || binding.id).slice(0, 8))}`));
   if (binding.handoff) elements.push(markdown(`**${binding.handoff.from === binding.handoff.to ? '已创建接续会话 · ' + escape(binding.handoff.to) : '执行位置已切换：' + escape(binding.handoff.from) + ' → ' + escape(binding.handoff.to)}**\n${binding.handoff.reason === 'offline' ? '原机器离线，接管机器已接续新一轮。' : '已按手动选择创建接续会话。'}${binding.handoff.context === 'checkpoint' ? '上下文来自有限的对话检查点，文件和工具状态需核对。' : '没有可恢复的对话检查点，请补充必要上下文。'}`));
   if (disconnected) elements.push(markdown('进度同步已中断，执行结果尚未确认。请先查看最近对话；不要直接重复提交原任务。'));
   if (view.warning && !view.done) elements.push(muted(clip(view.warning, 500)));
