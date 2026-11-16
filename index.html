@@ -3615,6 +3615,35 @@ async function renderProxyTab() {
 
 // ---------- 全站内容窗口 ----------
 let expandedWindow = null;
+function codeCopyButton(node) {
+  const button = document.createElement('button'); button.type = 'button'; button.className = 'btn code-copy';
+  button.textContent = ui('复制', 'Copy'); button.title = ui('复制完整代码', 'Copy complete code');
+  button.setAttribute('aria-label', button.title); button.setAttribute('aria-live', 'polite');
+  button.onclick = async e => {
+    e.stopPropagation();
+    const text = (node.querySelector('code') || node).textContent;
+    try {
+      try { await navigator.clipboard.writeText(text); }
+      catch {
+        // Remote HTTP panels may not have Clipboard API access. Copy only on
+        // this explicit click, using a temporary field inside the active dialog.
+        const focus = document.activeElement, selection = getSelection();
+        const ranges = Array.from({ length: selection?.rangeCount || 0 }, (_, i) => selection.getRangeAt(i).cloneRange());
+        const field = document.createElement('textarea'); field.value = text;
+        field.style.cssText = 'position:fixed;left:0;top:0;opacity:0;pointer-events:none';
+        (node.closest('dialog') || document.body).append(field);
+        try { field.select(); if (!document.execCommand('copy')) throw new Error('copy failed'); }
+        finally {
+          field.remove(); focus?.focus({ preventScroll: true });
+          if (selection) { selection.removeAllRanges(); ranges.forEach(range => selection.addRange(range)); }
+        }
+      }
+      button.textContent = ui('已复制', 'Copied');
+      setTimeout(() => { button.textContent = ui('复制', 'Copy'); }, 1500);
+    } catch { toast(ui('复制失败，请选中代码手动复制', 'Copy failed. Select the code and copy manually.'), false); }
+  };
+  return button;
+}
 function closeExpandedWindow() {
   if (!expandedWindow) return;
   const { dialog, node, marker, focus, scrollTop, scrollLeft } = expandedWindow;
@@ -3635,7 +3664,9 @@ function expandWindow(node, focus) {
   const hint = document.createElement('span'); hint.textContent = ui('Ctrl / ⌘ + F 搜索全文', 'Ctrl / ⌘ + F to search');
   const close = document.createElement('button'); close.type = 'button'; close.className = 'btn';
   close.textContent = ui('收起 · Esc', 'Restore · Esc'); close.onclick = closeExpandedWindow;
-  bar.append(hint, close);
+  const actions = document.createElement('div'); actions.className = 'expanded-dialog-actions';
+  if (node.matches('pre')) actions.append(codeCopyButton(node));
+  actions.append(close); bar.append(hint, actions);
   const content = document.createElement('div'); content.className = 'expanded-dialog-content';
   expandedWindow = { dialog, node, marker, focus, scrollTop: node.scrollTop, scrollLeft: node.scrollLeft };
   node.classList.add('is-expanded-window');
@@ -3665,6 +3696,7 @@ function installWindowControls() {
     button.textContent = '⛶'; button.title = ui('放大窗口', 'Expand window'); button.setAttribute('aria-label', button.title);
     button.onclick = e => { e.stopPropagation(); expandWindow(node, button); };
     host.append(button);
+    if (node.matches('pre')) { const copy = codeCopyButton(node); copy.classList.add('window-copy'); host.append(copy); }
     node.windowExpandButton = button;
   });
 }
