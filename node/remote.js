@@ -56,6 +56,7 @@ async function attachRemoteNode({ peer, registry, transport = 'ws', pin = null, 
       detect: () => engine.cli,
       validModel: model => MODEL.test(model),
       owns: sessionId => peer.call('engine.owns', { engine: engine.id, id: sessionId }).catch(() => false),
+      nativeSessionAvailable: sessionId => connection.peer.call('engine.nativeSession', { engine: engine.id, id: sessionId }, { timeout: 5000 }),
       async open(options) {
         const existing = options.resume && info.runtimeCapabilities?.sessionRecovery ? await connection.peer.call('session.find', { engine: engine.id, sessionId: options.sessionId }) : null;
         if (existing && (existing.model || '') !== (options.model || '')) throw new Error('执行器保留的任务使用其他模型，请先连接原任务并结束当前执行后再切换模型');
@@ -71,7 +72,7 @@ async function attachRemoteNode({ peer, registry, transport = 'ws', pin = null, 
         let opened;
         try {
           if (existing) { opened = await connection.peer.call('session.attach', { sid, after: 0 }); if (opened.sessionId) proxy.resolveReady(opened.sessionId); if (opened.state) Object.assign(proxy.state, opened.state); } else {
-          const nativeOnly = !!options.resume && !!options.sessionId && await peer.call('engine.nativeSession', { engine: engine.id, id: options.sessionId }, { timeout: 5000 }).catch(() => false);
+          const nativeOnly = options.nativeOnly || (!!options.resume && !!options.sessionId && await connection.peer.call('engine.nativeSession', { engine: engine.id, id: options.sessionId }, { timeout: 5000 }));
           const env = routeEnv && !nativeOnly ? await routeEnv(options) : null;
           opened = await peer.call('session.open', { sid, engine: engine.id, sessionId: options.sessionId, resume: options.resume, cwd: options.cwd, model: options.model, nativeOnly, ...(env ? { routeEnv: env } : {}) }, { timeout: 60000 });
           }

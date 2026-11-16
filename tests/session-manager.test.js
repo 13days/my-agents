@@ -194,3 +194,22 @@ test('restart retains the newest native-session alias after repeated handoffs', 
  const latest=store.begin({requestedId:'original-native',conversationId:'stable-conversation'},{messageId:'second-message'});store.update(latest.id,{sessionId:'newest-native',state:'completed'});
  const {registry}=setup(),manager=createSessionManager({registry,history:{},runStore:store});assert.equal(manager.resolveId('original-native'),'newest-native');
 });
+
+test('old implicit forks do not redirect durable originals, while explicit handoffs retain their aliases', t => {
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'original-alias-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const store=require('../core/run-store').createRunStore({dir});
+ const fork=store.begin({requestedId:'original-thread',conversationId:'original-thread',engine:'codex'},{messageId:'old-fork-message'});store.update(fork.id,{sessionId:'forked-thread',state:'completed'});
+ const handoff=store.begin({requestedId:'moved-thread',conversationId:'moved-thread',engine:'codex'},{messageId:'handoff-message'});store.update(handoff.id,{sessionId:'new-machine-thread',state:'completed',jobMeta:{handoff:{from:'one',to:'two'}}});
+ const {registry}=setup(),manager=createSessionManager({registry,history:{isOriginal:()=>true},runStore:store});
+ assert.equal(manager.resolveId('original-thread'),'original-thread');assert.equal(manager.get('original-thread'),null);assert.equal(manager.resolveId('moved-thread'),'new-machine-thread');
+});
+
+test('native attachment skips pool model resolution and records inherited settings', async () => {
+ const {registry,opened}=setup();const adapter=registry.adapter('discovered','local'),open=adapter.open;
+ adapter.nativeSessionAvailable=async()=>true;
+ adapter.open=async options=>({...await open(options),nativeAttached:true});
+ const manager=createSessionManager({registry,resolveModel:()=>{throw new Error('native must not consult account models');},history:{ownerOf:()=>null,messages:()=>({messages:[]}),touch(){}}});
+ const {run}=await manager.start({engine:'discovered',sessionId:'existing-thread',prompt:'continue',cwd:os.tmpdir(),model:'different-model'});
+ assert.equal(opened[0].nativeOnly,true);assert.equal(opened[0].model,'');assert.equal(run.job.meta.model,'');assert.equal(run.job.meta.nativeAttached,true);
+ await settle();manager.shutdown();
+});

@@ -45,12 +45,13 @@ function createClaudeEngine({ accounts = null, transcripts, nativeBusy = null, n
     owns: id => !!transcripts.path(id),
     nativeSessionAvailable: id => !!nativeSessions?.find(id),
     // `routeEnv` comes from a hub when this adapter runs inside a remote node.
-    async open({ host, sessionId, resume, cwd, model, accountId, routeEnv, emit, onIdle, onClosed }) {
+    async open({ host, sessionId, resume, nativeOnly = false, cwd, model, accountId, routeEnv, emit, onIdle, onClosed }) {
       const options = { host, sessionId, resume, cwd, model, accountId, routeEnv, emit, onIdle, onClosed };
       if (resume && nativeSessions) {
         const record = nativeSessions.find(sessionId);
         if (record) return nativeSessions.open({ record, sessionId, emit, onIdle, onClosed });
       }
+      if (nativeOnly) throw new Error('原终端会话已退出或切换，未另起执行进程');
       if (handovers.has(sessionId)) throw Object.assign(new Error('这条会话已在等待 IM 接续，请在原任务卡片查看进展'), { status: 409 });
       if (resume && nativeBusy && await nativeBusy(sessionId)) {
         if (handovers.has(sessionId)) throw Object.assign(new Error('这条会话已在等待 IM 接续'), { status: 409 });

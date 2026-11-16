@@ -43,7 +43,9 @@ function createSessionDirectory({ local, selfId, peers, ttl = 3000, timeout = 80
     if (pending) await pending;
     return { sessions: searchSessions(snapshot(), query), unavailable };
   }
-  return { list, snapshot, find: id => snapshot().find(row => row.id === id) };
+  // Ownership checks used by manager.busy must not call snapshot(): the local
+  // listing itself asks manager.busy and would recurse.
+  return { list, snapshot, find: id => snapshot().find(row => row.id === id), hasCachedNative: id => cache.some(row => row.id === id && row.native) };
 }
 function liveSessionMetadata(meta, item) {
   return item?.native && !item.sourceUnavailable && meta.machineId === item.machineId && item.project ? { ...meta, project: item.project } : meta;

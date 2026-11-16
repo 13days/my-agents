@@ -13,10 +13,15 @@ const httpError = (status, message) => Object.assign(new Error(message), { statu
 // replayable job so a reconnecting client resumes where it left off.
 function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, retentionMs = 5 * 60 * 1000, readyTimeoutMs = 90000, ensureNode = async () => {}, resolveLocation = null, resolveModel = null, runStore = null, log = console }) {
   const runs = new Map();
-  const aliases = new Map(), preparations = new Map();
+  const aliases = new Map(), handoffAliases = new Set(), preparations = new Map();
   runStore?.recover();
-  for (const row of runStore?.list() || []) if (row.requestedId && row.sessionId && !aliases.has(row.requestedId)) aliases.set(row.requestedId, row.sessionId);
-  const resolveId = id => aliases.get(id) || id;
+  for (const row of runStore?.list() || []) if (row.requestedId && row.sessionId && !aliases.has(row.requestedId)) {
+    aliases.set(row.requestedId, row.sessionId);
+    if (row.jobMeta?.handoff) handoffAliases.add(row.requestedId);
+  }
+  // Older Codex adapters silently forked occupied terminal threads. A durable
+  // original remains canonical, even if an old run recorded a different id.
+  const resolveId = id => !handoffAliases.has(id) && history.isOriginal?.(id) ? id : aliases.get(id) || id;
   const live = run => run && !run.job.closed;
 
   const validateInput = input => {
@@ -33,6 +38,7 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
   function get(id) {
     const current = runs.get(resolveId(id)); if (current) return current;
     const saved = runStore?.find(resolveId(id)); if (!saved?.sessionId) return null;
+    if (!handoffAliases.has(id) && history.isOriginal?.(id) && saved.sessionId !== id) return null;
     const job = createChatJob(saved.jobMeta || { sessionId: saved.sessionId, jobId: saved.id, conversationId: saved.conversationId }, { journal: runStore.journal(saved.id), recovered: true });
     const run = { id: saved.sessionId, engine: saved.engine, node: saved.node, job, recovered: true };
     runs.set(run.id, run); return run;
@@ -86,8 +92,10 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
       if (worktree) cwd = worktree.cwd;
     }
     const sessionId = engine.capabilities.sessionId === 'discovered' ? (known ? requested : '') : (location?.handoff ? crypto.randomUUID() : requested || crypto.randomUUID());
+    const nativeOnly = known && !!await engine.nativeSessionAvailable?.(sessionId);
     let model = typeof input.model === 'string' && input.model.trim() && engine.validModel(input.model.trim()) ? input.model.trim() : '';
-    if (!model && resolveModel) model = await resolveModel({ engine: engineId, sessionId: requested, accountId: input.accountId || '', node: nodeId }) || '';
+    if (nativeOnly) model = '';
+    else if (!model && resolveModel) model = await resolveModel({ engine: engineId, sessionId: requested, accountId: input.accountId || '', node: nodeId }) || '';
     const baseHistory = known || location?.handoff ? await history.messages(requested) : null;
     if (location?.handoff) {
       const checkpoint = (baseHistory?.messages || []).slice(-12).map(item => `${item.role}: ${String(item.text || '').slice(0,1500)}`).join('\n').slice(-7500);
@@ -119,7 +127,7 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
     };
     let session;
     cancelled();
-    session = await engine.open({ host, sessionId, resume: known, cwd, model, accountId: input.accountId, emit, onIdle: armIdle, onClosed });
+    session = await engine.open({ host, sessionId, resume: known, nativeOnly, cwd, model, accountId: input.accountId, emit, onIdle: armIdle, onClosed });
     if (preparation.controller.signal.aborted) { session.close(); cancelled(); }
     const cancelLaunch = () => session.stop(); preparation.controller.signal.addEventListener('abort', cancelLaunch, { once: true });
     emit('input', { id: turn.messageId, prompt: turn.prompt, images: turn.images });
@@ -134,10 +142,10 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
     }
     preparation.controller.signal.removeEventListener('abort', cancelLaunch);
     cancelled();
-    if (requested && realId !== requested) aliases.set(requested, realId);
+    if (requested && realId !== requested) { aliases.set(requested, realId); if (location?.handoff) handoffAliases.add(requested); }
     history.touch(realId, { engine: engineId, node: host.id, ...(location?.machineId ? { machineId: location.machineId } : {}), cwd, worktree, workspaceId: location?.workspaceId, handoff: location?.handoff, prompt: turn.prompt, created: !known });
 
-    const jobMeta = { conversationId: record?.conversationId || realId, routed: !!session.routed, engine: engineId, node: host.id, machineId: location?.machineId, workspaceId: location?.workspaceId, handoff: location?.handoff, cwd, worktree, model, sessionId: realId, jobId: record?.id || crypto.randomUUID() };
+    const jobMeta = { conversationId: record?.conversationId || realId, routed: !!session.routed, nativeAttached: !!session.nativeAttached, engine: engineId, node: host.id, machineId: location?.machineId, workspaceId: location?.workspaceId, handoff: location?.handoff, cwd, worktree, model: session.nativeAttached ? '' : model, sessionId: realId, jobId: record?.id || crypto.randomUUID() };
     if (record) runStore.update(record.id, { state: 'running', sessionId: realId, engine: engineId, node: host.id, jobMeta });
     const job = createChatJob(jobMeta, { journal: record ? runStore.journal(record.id) : null });
     run = { id: realId, engine: engineId, node: host.id, job, session, baseHistory, baseMessages: baseHistory?.messages || [], stopped: false, requestedId: requested };

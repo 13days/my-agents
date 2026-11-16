@@ -2826,11 +2826,14 @@ function paintChatAttachments(v) {
 function updateChatSendState(v) {
   if (chatView !== v || !$('#chat-send')) return;
   const running = !!v.run && Array.from(v.run.turns.values()).some(turn => !turn.finished);
+  const native = !!(v.run?.nativeAttached || v.run?.taskState?.nativeAttached);
   $('#chat-send').disabled = !!v.readingImages;
-  $('#chat-send').textContent = running ? rt('引导', 'Steer') : rt('发送', 'Send');
-  $('#chat-send').title = running ? rt('中断当前轮，按补充消息继续', 'Interrupt the current turn and continue with your input') : '';
-  $('#chat-queue').hidden = !running; $('#chat-queue').disabled = !!v.readingImages;
+  $('#chat-send').textContent = running ? native ? rt('排队发送', 'Queue message') : rt('引导', 'Steer') : rt('发送', 'Send');
+  $('#chat-send').title = running ? native ? rt('加入原终端会话队列，保留当前执行', 'Queue in the original terminal session') : rt('中断当前轮，按补充消息继续', 'Interrupt the current turn and continue with your input') : '';
+  $('#chat-queue').hidden = !running || native; $('#chat-queue').disabled = !!v.readingImages;
   $('#chat-stop').hidden = !running;
+  $('#chat-stop').textContent = native ? rt('断开同步', 'Disconnect sync') : rt('停止', 'Stop');
+  $('#chat-stop').title = native ? rt('原终端继续运行，已投递消息不会撤回', 'The original terminal continues; delivered messages remain queued') : '';
 }
 function registerChatInSidebar(v, prompt) {
   if (!v.sessionId) v.sessionId = crypto.randomUUID();
@@ -2940,11 +2943,13 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
       updateChatSendState(v); return;
     }
     if (kind === 'stopped') {
-      run.turns.forEach(item => { if (!item.finished) item.finish(rt('已停止', 'Stopped', '停止しました'), payload); });
-      run.activeId = ''; run.lastStatus = rt('已停止', 'Stopped', '停止しました'); updateChatSendState(v); updateStatus(); return;
+      const status = run.nativeAttached || run.taskState?.nativeAttached ? rt('同步已断开，原终端继续运行', 'Sync disconnected; original terminal continues') : rt('已停止', 'Stopped', '停止しました');
+      run.turns.forEach(item => { if (!item.finished) item.finish(status, payload); });
+      run.activeId = ''; run.lastStatus = status; updateChatSendState(v); updateStatus(); return;
     }
     if (kind === 'meta') {
       run.metaSeen = true;
+      run.nativeAttached = !!payload.nativeAttached;
       // Engines may mint the thread id on the CLI side: replace the id the browser pre-allocated for a new chat.
       if (payload.sessionId && v.sessionId !== payload.sessionId) {
         const previous = v.sessionId, item = state.items.find(entry => entry.key === previous);
@@ -2984,7 +2989,7 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
       updateChatSendState(v); updateStatus(); return;
     }
     if (kind === 'idle') { run.activeId = ''; updateChatSendState(v); updateStatus(); return; }
-    if (kind === 'warning') { const active = run.turns.get(payload.messageId || run.activeId); if (active && !active.finished) { active.phase = rt(run.taskState.phase, ...ConversationState.labels(run.taskState.phase)); active.label.textContent = active.phase; } if (shown) toast(payload.warning, false); updateStatus(); return; }
+    if (kind === 'warning') { const active = run.turns.get(payload.messageId || run.activeId); if (active && !active.finished) { active.phase = rt(run.taskState.phase, ...ConversationState.labels(run.taskState.phase)); active.label.textContent = active.phase; } if (shown) toast(payload.warning, false); updateChatSendState(v); updateStatus(); return; }
     if (kind === 'permission') {
       if (run.permissions.has(payload.id) || !shown) return;
       const card = document.createElement('section'); card.className = 'chat-permission';

@@ -119,28 +119,21 @@ test('steering interrupts the running Codex turn and continues with the new inpu
   assert.equal(events.find(([event]) => event === 'text')[1].text, 'steered');
 });
 
-test('resuming a thread held by another Codex process forks it into a new session', async () => {
-  const { spawnImpl, spawned } = fakeSpawn(({ child }, n) => {
-    if (n === 1) {
-      child.stderr.write('ERROR thread-store conflict: thread busy-1 already has an active writer\n');
-      child.stdout.end(); setImmediate(() => child.emit('close', 1, null)); return;
-    }
-    emitLines(child, [{ type: 'thread.started', thread_id: 'forked-1' }, { type: 'item.completed', item: { id: 'i', type: 'agent_message', text: `ok ${n}` } }, { type: 'turn.completed', usage: null }]);
-    child.stdout.end(); setImmediate(() => child.emit('close', 0, null));
+test('an occupied Codex thread is never silently forked or replayed', async () => {
+  const { spawnImpl, spawned } = fakeSpawn(({ child }) => {
+    child.stderr.write('ERROR thread-store conflict: thread busy-1 already has an active writer\n');
+    child.stdout.end(); setImmediate(() => child.emit('close', 1, null));
   });
-  const events = []; let idle; let idled = new Promise(resolve => { idle = resolve; });
+  const events = []; let idle;
+  const idled = new Promise(resolve => { idle = resolve; });
   const runner = createCodexRunner({ cli: 'codex', cwd: '/work', threadId: 'busy-1', spawnImpl, emit: (event, data) => events.push([event, data]), onIdle: () => idle() });
   runner.submit('first-turn', { prompt: 'hello' });
-  assert.equal(await runner.ready, 'forked-1');
+  await assert.rejects(runner.ready, /未复制会话/);
   await idled;
-  assert.deepEqual(spawned.slice(0, 2).map(s => s.args[1]), ['resume', 'fork']);
-  assert.equal(spawned[1].args.at(-2), 'busy-1'); assert.equal(spawned[1].input, 'hello');
-  assert.ok(events.some(([event, data]) => event === 'warning' && /新会话/.test(data.warning)));
-  assert.ok(!events.some(([event]) => event === 'error'));
-  idled = new Promise(resolve => { idle = resolve; });
-  runner.submit('second-turn', { prompt: 'again' });
-  await idled;
-  assert.deepEqual([spawned[2].args[1], spawned[2].args.at(-2)], ['resume', 'forked-1']);
+  assert.equal(spawned.length, 1);
+  assert.equal(spawned[0].args[1], 'resume');
+  assert.equal(spawned[0].args.at(-2), 'busy-1');
+  assert.ok(events.some(([event]) => event === 'error'));
 });
 
 test('Codex Responses captures expose system prompt, flattened tools, transcript, reply and usage', () => {

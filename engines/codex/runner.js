@@ -46,8 +46,8 @@ function toolResult(item) {
 }
 
 function createCodexRunner({ cli, cwd, threadId = '', model = '', config = [], env = process.env, emit, onIdle, onThread, spawnImpl = spawn, tmpDir = path.join(os.tmpdir(), 'my-agents-codex') }) {
-  // 续接时先不认定线程：等 CLI 确认（thread.started）后再就绪；被终端占用时自动 fork 成新会话
-  let resumeId = threadId, forked = false;
+  // Wait for CLI confirmation; an occupied thread must never silently fork.
+  const resumeId = threadId;
   threadId = '';
   let child = null, stopped = false, stderr = '';
   let resolveReady, rejectReady;
@@ -66,8 +66,7 @@ function createCodexRunner({ cli, cwd, threadId = '', model = '', config = [], e
     stderr = '';
     emit('turn', { id: entry.id });
     const files = writeImages(entry.payload.images);
-    const fork = !threadId && !!resumeId && forked;
-    const args = codexArgs({ threadId: threadId || resumeId, cwd, model, config, images: files, fork });
+    const args = codexArgs({ threadId: threadId || resumeId, cwd, model, config, images: files });
     let proc;
     try { proc = spawnImpl(cli, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }); }
     catch (e) { finish({ error: `无法启动 Codex：${e.message}` }); return; }
@@ -78,7 +77,7 @@ function createCodexRunner({ cli, cwd, threadId = '', model = '', config = [], e
     const line = text => {
       let msg; try { msg = JSON.parse(text); } catch { return; }
       if (msg.type === 'thread.started' && msg.thread_id) {
-        if (!threadId) { threadId = msg.thread_id; onThread?.(threadId); resolveReady(threadId); if (fork) emit('warning', { warning: `原会话正在别处打开（通常是终端里的 codex），已复制完整历史为新会话继续` }); }
+        if (!threadId) { threadId = msg.thread_id; onThread?.(threadId); resolveReady(threadId); }
       } else if (msg.type === 'item.started' || msg.type === 'item.updated' || msg.type === 'item.completed') {
         const item = msg.item || {};
         if (item.type === 'agent_message' && msg.type === 'item.completed' && item.text) {
@@ -124,9 +123,6 @@ function createCodexRunner({ cli, cwd, threadId = '', model = '', config = [], e
       if (buffer.trim()) line(buffer.trim());
       for (const file of files) fs.rm(file, { force: true }, () => {});
       child = null;
-      if (!threadId && resumeId && !forked && !stopped && !entry.interrupted && /already has an active writer/.test(failed + stderr)) {
-        forked = true; return run(entry);
-      }
       if (!threadId) rejectReady(new Error(explainCodexError(failed || spawnError || stderr.trim().slice(-2000)) || `Codex 未能创建会话（${signal || `状态码 ${code}`}）`));
       if (entry.interrupted || stopped) return finish({ interrupted: true });
       if (failed) return finish({ error: failed });
@@ -170,7 +166,7 @@ function createCodexRunner({ cli, cwd, threadId = '', model = '', config = [], e
 }
 // CLI 原始报错前补一句能操作的中文说明
 const ERROR_HINTS = [
-  [/already has an active writer/, '这个 Codex 会话正在别处打开（通常是终端里的 codex 还没退出）。先在那边退出（/quit 或 Ctrl+C），再回来续聊；或者新开一个对话。'],
+  [/already has an active writer/, '这个 Codex 会话正在别处打开，但当前节点未连接到它的原生 daemon。请检查原会话所在机器的 Codex daemon；本次未复制会话，也未关闭原终端。'],
   [/modelProviderMismatch|your current provider is/, '这个会话创建时用的模型提供方与当前不同，无法续接。请新开一个对话。'],
   [/\b401\b|Unauthorized|not logged in/i,'Codex 登录可能已失效，请在终端运行 codex login 后重试。'],
 ];

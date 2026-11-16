@@ -1846,6 +1846,7 @@ registry.register(createClaudeEngine({
 }));
 registry.register(createCodexEngine({
   sessions: codexSessions, accounts: true,
+  nativeSessions: require('./engines/codex/native').createCodexNativeSessions({ home: CODEX_HOME }),
   // Panel-started Codex runs go through the capture proxy unless disabled; resumed threads keep their provider.
   capture: ({ provider, accountId }) => (provider ? provider === 'panel' : codexCaptureEnabled()) ? { config: require('./engines/codex/proxy').codexRelayConfig(`http://127.0.0.1:${PROXY_PORT}${codexAuthMode() === 'apikey' ? '/codex-openai/v1' : '/backend-api/codex'}`, { accountId }), env: { [RELAY_TOKEN_ENV]: codexRelayToken } } : null,
 }));
@@ -1912,6 +1913,7 @@ const manager = createSessionManager({
   resolveLocation: (input, owner) => workspaceStore.resolve(input, owner),
   resolveModel: async input => input.engine === 'codex' ? (await codexPoolModels(input)).defaultModel : '',
   history: {
+    isOriginal: id => !!codexSessions.pathFor(id) || sessionDirectory.hasCachedNative(id),
     ownerOf: id => resolveSessionReference(id),
     messages: id => conversationHistory(id),
     record: (id,event,data) => conversations.record(id,event,data),
@@ -2753,7 +2755,7 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
     const self = clusterConfig.members.find(item => item.id === clusterConfig.nodeId);
     if (self?.witness) return;
     const oldRuntime = registry.node(id); if (oldRuntime?.info.transport === 'cluster' && oldRuntime.peer !== peer) { registry.removeNode(id); clusterRuntimePending.delete(id); }
-    require('./node/agent').serveNode({ peer, runtime: executionRuntime, ownerId: id, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listSessions, messages: id => sessionMessages(id), previews: items => historyWorker.read('sessionPreviews', items), userPage: input => historyWorker.read('sessionUserPage', input) }, beforeOpen: (id, options) => { const native = options.engine === 'claude' && id && claudeNativeSessions.find(id); if (id && manager.busy(id) && !native) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed && !manager.busy(id)) previous.session.close(); } });
+    require('./node/agent').serveNode({ peer, runtime: executionRuntime, ownerId: id, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listSessions, messages: id => sessionMessages(id), previews: items => historyWorker.read('sessionPreviews', items), userPage: input => historyWorker.read('sessionUserPage', input) }, beforeOpen: async (id, options) => { const native = id && await registry.adapter(options.engine, 'local')?.nativeSessionAvailable?.(id); if (id && manager.busy(id) && !native) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed && !manager.busy(id)) previous.session.close(); } });
     setImmediate(() => attachClusterRuntime(id, peer).catch(error => console.warn('集群执行连接：' + error.message)));
   } });
   cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: feishuGateway, canTransfer: () => manager.running().length === 0 && executionRuntime.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });

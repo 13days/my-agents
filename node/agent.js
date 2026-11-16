@@ -71,7 +71,7 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id, before
     let session = null;
     const notify = (method, extra = {}) => { const data = { sid, ...extra, state: state(session) }; if (runtime) runtime.emit(ownerId, sid, method, data); else peer.notify(method, data); };
     try { session = await engine.open({
-      host, sessionId, resume, cwd: host.resolveDir(cwd), model: model && engine.validModel(model) ? model : '', routeEnv: routeEnv || null,
+      host, sessionId, resume, nativeOnly, cwd: host.resolveDir(cwd), model: model && engine.validModel(model) ? model : '', routeEnv: routeEnv || null,
       emit: (event, data) => notify('session.event', { event, data }),
       onIdle: () => notify('session.idle'),
       onClosed: () => { if (!runtime) sessions.delete(sid); notify('session.closed'); },
