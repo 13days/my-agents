@@ -2404,7 +2404,7 @@ async function refreshOpenChat() {
   try {
     const d = await api('GET', `sessions/${encodeURIComponent(v.sessionId)}/messages?limit=${Math.max(80, v.messages.length)}${v.revision ? '&since=' + encodeURIComponent(v.revision) : ''}`);
     if (chatView !== v || state.type !== 'sessions' || v.run || !$('#chat-messages')) return;
-    if (d.unchanged) return;
+    if (d.unchanged || !Array.isArray(d.messages)) return;
     if (d.liveReplay && d.jobId === v.lastReplayJobId) return;
     if (v.readingImages || v.loadingOlder || document.querySelector('.panel-select-menu:popover-open')) return;
     v.revision = d.revision;
@@ -2637,6 +2637,7 @@ async function openSessionChat(id) {
   try {
     const d = await api('GET', `sessions/${encodeURIComponent(id)}/messages`);
     if (state.type !== 'sessions' || state.current !== id || revision !== detailRevision) return;
+    if (!Array.isArray(d.messages)) throw new Error(rt('会话数据暂未就绪，请稍后重试', 'Session data is not ready. Please try again.'));
     chatView = { sessionId: id, cwd: d.project || '', worktree: d.worktree, messages: d.messages, truncated: d.truncated, historyBefore: d.historyBefore, revision: d.revision, machineId: d.machineId, engine: d.engine || LEGACY_ENGINE };
     const first = d.messages.find(m => m.role === 'user');
     chatChrome(state.items.find(item => item.key === id)?.name || (first ? first.text.replace(/\s+/g, ' ').slice(0, 60) : id.slice(0, 8)), (d.project || '').replace(/^\/Users\/[^/]+/, '~'));
