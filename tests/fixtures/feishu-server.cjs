@@ -54,6 +54,13 @@ async function receive(content, extra = {}) { const before = sent.length; handle
  assert.equal(log.filter(x => x.type === 'user').length, 4); assert(log.some(x => x.type === 'control_request' && x.request.subtype === 'interrupt'));
  await receive('/sessions'); assert.match(JSON.stringify(sent.at(-1)), /我的远程项目/);
  await receive('/history'); assert.match(JSON.stringify(sent.at(-1)), /完成：排队消息/); assert.doesNotMatch(JSON.stringify(sent.at(-1)), /飞书发送上下文|feishu\/reply/);
+ // A retained panel/IM stream must not hide later turns written by the CLI.
+ assert.equal((await api('sessions/'+id+'/messages')).liveReplay,true);
+ const transcript=path.join(dir,'projects','mock',id+'.jsonl');
+ fs.appendFileSync(transcript,[{type:'user',message:{content:'CLI continuation'}},{type:'assistant',message:{content:[{type:'text',text:'CLI continuation reply'}]}}].map(JSON.stringify).join('\n')+'\n');
+ const followed=await api('sessions/'+id+'/messages?source=transcript');
+ assert.equal(followed.liveReplay,undefined);assert.equal(followed.messages.at(-1).text,'CLI continuation reply');
+ assert.equal(log.filter(x=>x.type==='start').length,1,'passive follow never starts a second CLI');
  const forbidden = await fetch(base + 'feishu', { headers: { Origin: 'https://example.com' } }); assert.equal(forbidden.status, 403);
  const safe = await api('feishu'); assert.equal(JSON.stringify(safe).includes('test-secret'), false);
  const labelled = await api('feishu/contacts/label', 'POST', { id: 'ou_owner', label: 'Integration user' }); assert.equal(labelled.inbox.users.find(item => item.id === 'ou_owner').displayName, 'Integration user');

@@ -2782,6 +2782,63 @@ function renderChat() {
   $('#chat-attach').onclick = () => $('#chat-image-file').click();
   $('#chat-image-file').onchange = e => { addImages(Array.from(e.target.files)); e.target.value = ''; };
   $('#chat-prompt').focus();
+  startChatHistoryFollow(v);
+}
+let stopChatHistoryFollow = () => {};
+function mergeFollowedMessages(current, incoming) {
+  // Keep explicitly loaded older history. Prefer a user boundary: an assistant
+  // message can grow or acquire tools while its CLI turn is still running.
+  const anchor = incoming.findIndex(message => message.role === 'user');
+  if (anchor < 0) return incoming;
+  const first = incoming[anchor];
+  const at = current.findIndex(message => message.role === first.role && message.text === first.text
+    && (!first.timestamp || !message.timestamp || first.timestamp === message.timestamp));
+  return at < 0 ? incoming : [...current.slice(0, at), ...incoming.slice(anchor)];
+}
+function startChatHistoryFollow(v) {
+  stopChatHistoryFollow();
+  let stopped = false, timer;
+  stopChatHistoryFollow = () => { stopped = true; clearTimeout(timer); };
+  const busy = () => v.loadingOlder || v.changingModel || Array.from(v.run?.turns.values() || []).some(turn => !turn.finished);
+  const visible = () => chatView === v && state.type === 'sessions' && !!$('#chat-messages');
+  async function tick() {
+    if (stopped || !visible()) return;
+    try {
+      // Do not disturb text being selected, expanded content, or a streamed
+      // panel reply. The next idle poll reconciles against the native history.
+      const selection = getSelection();
+      if (!v.sessionId || document.hidden || expandedWindow || busy() || (selection && !selection.isCollapsed)) return;
+      const id = v.sessionId, seq = v.run?.lastSeq;
+      const data = await api('GET', `sessions/${encodeURIComponent(id)}/messages?source=transcript&limit=${Math.max(80, v.messages.length)}${v.followRevision ? '&since=' + encodeURIComponent(v.followRevision) : ''}`);
+      if (stopped || !visible() || v.sessionId !== id || busy() || v.run?.lastSeq !== seq || data.unchanged || !Array.isArray(data.messages)) return;
+      // A CLI may flush its transcript after its completion event. Never let
+      // that lag erase a just-submitted web message or its completed answer.
+      const pending = v.historyPendingTurn;
+      if (pending) {
+        const at = data.messages.findLastIndex(message => message.role === 'user' && String(message.text).trim().endsWith(pending.user.text.trim()));
+        const newerTurn = pending.finished && data.messages.some((message, index) => message.role === 'user' && (at >= 0 ? index > at : Date.parse(message.timestamp) > Date.parse(pending.user.timestamp)));
+        const expected = pending.transcriptText ?? pending.answer.text;
+        if (!newerTurn && (at < 0 || (expected && !data.messages.slice(at + 1).some(message => message.role === 'assistant' && message.text.includes(expected))))) return;
+        v.historyPendingTurn = null;
+      }
+      const messages = mergeFollowedMessages(v.messages, data.messages);
+      v.followRevision = data.revision || '';
+      if (JSON.stringify(messages) === JSON.stringify(v.messages)) return;
+      const box = $('#chat-messages'), follow = box.scrollHeight - box.scrollTop - box.clientHeight < 60, top = box.scrollTop;
+      const historyBefore = Math.max(0, (data.messageCount || messages.length) - messages.length);
+      const rendered = document.createElement('div');
+      if (historyBefore > 0) {
+        const older = document.createElement('button'); older.type = 'button'; older.id = 'chat-older'; older.className = 'btn chat-older';
+        older.textContent = rt('加载更早的消息', 'Load earlier messages'); older.onclick = () => loadOlderChat(v); rendered.append(older);
+      }
+      messages.forEach(message => { const body = appendChatMessage(rendered, message.role, message.text, message); paintChatImages(body, message.images || []); paintChatReasoning(body, message.reasoning || []); (message.tools || []).forEach(tool => paintChatTool(body, tool)); });
+      box.replaceChildren(...rendered.childNodes);
+      v.messages = messages; v.truncated = historyBefore > 0; v.historyBefore = historyBefore;
+      box.scrollTop = follow ? box.scrollHeight : top; box.updateScrollControls?.();
+    } catch { /* Read-only observation retries; it never replays input. */ }
+    finally { if (!stopped && visible()) timer = setTimeout(tick, 1500); }
+  }
+  timer = setTimeout(tick, 0);
 }
 async function loadOlderChat(v) {
   const button = $('#chat-older');
@@ -2865,6 +2922,7 @@ function createChatTurn(v, prompt, images, id = crypto.randomUUID()) {
   for (let i = 0; i < 3; i++) dots.append(document.createElement('i'));
   activity.append(label, dots); article.append(activity); box.scrollTop = box.scrollHeight; box.updateScrollControls?.();
   const turn = { id, user, userNode: userBody, answer, node, article, activity, label, box, finished: false, phase: rt('正在思考', 'Thinking'), startedAt: Date.now() };
+  v.historyPendingTurn = turn;
   let paintFrame = 0;
   const paintNow = () => { paintFrame = 0; if (node.isConnected) updateChatContent(box, () => { node.innerHTML = md(answer.text); article.classList.toggle('is-waiting', !answer.text && !turn.finished); }); };
   turn.paint = () => { if (!paintFrame) paintFrame = requestAnimationFrame(paintNow); };
@@ -2875,6 +2933,7 @@ function createChatTurn(v, prompt, images, id = crypto.randomUUID()) {
     if (turn.finished) return;
     if (paintFrame) { cancelAnimationFrame(paintFrame); paintFrame = 0; }
     turn.finished = true; article.classList.remove('is-streaming', 'is-waiting'); article.removeAttribute('aria-busy'); activity.remove();
+    turn.transcriptText = answer.text; // Status/error notices below are not native assistant text.
     answer.tools.forEach(tool => { if (tool.state === 'running') { tool.state = 'interrupted'; paintChatTool(node, tool); } });
     if (reason) answer.text += (answer.text ? '\n\n' : '') + reason;
     else if (!answer.text && !answer.tools.length) answer.text = rt('本轮已结束', 'Turn ended');

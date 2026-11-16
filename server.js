@@ -2494,7 +2494,9 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'GET' && parts.length === 4 && parts[3] === 'messages') {
         res.setHeader('Cache-Control', 'no-store');
         const id = decodeURIComponent(parts[2]), running = manager.get(id);
-        if (running && !url.searchParams.has('before')) return sendJSON(res, 200, { ...running.baseHistory, id: running.id, project: running.job.meta.cwd, worktree: running.job.meta.worktree, messages: running.baseMessages, liveReplay: true, jobId: running.job.meta.jobId });
+        // Passive CLI followers read the current transcript, even while an idle
+        // panel connection retains its launch-time baseHistory for SSE replay.
+        if (running && url.searchParams.get('source') !== 'transcript' && !url.searchParams.has('before')) return sendJSON(res, 200, { ...running.baseHistory, id: running.id, project: running.job.meta.cwd, worktree: running.job.meta.worktree, messages: running.baseMessages, liveReplay: true, jobId: running.job.meta.jobId });
         const fp = transcriptPathFor(id) || codexSessions.pathFor(id);
         let revision = '';
         if (fp) { const st = fs.statSync(fp); revision = `${st.mtimeMs}:${st.size}`; }
