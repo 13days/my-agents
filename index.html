@@ -2836,7 +2836,7 @@ function startChatHistoryFollow(v) {
       v.messages = messages; v.truncated = historyBefore > 0; v.historyBefore = historyBefore;
       box.scrollTop = follow ? box.scrollHeight : top; box.updateScrollControls?.();
     } catch { /* Read-only observation retries; it never replays input. */ }
-    finally { if (!stopped && visible()) timer = setTimeout(tick, 1500); }
+    finally { if (!stopped && visible()) timer = setTimeout(tick, 500); }
   }
   timer = setTimeout(tick, 0);
 }

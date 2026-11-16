@@ -52,6 +52,51 @@ function records(fp) {
   return out;
 }
 
+// Each reader retains parsed state, not raw rollout records. Re-read only the
+// appended bytes; preserve an incomplete UTF-8/JSON line until the next append.
+function updateRecords(fp, cached, initialize, consume) {
+  let fd;
+  try { fd = fs.openSync(fp, 'r'); } catch { return null; }
+  try {
+    const stat = fs.fstatSync(fd);
+    let extendedEof = false;
+    if (cached?.eof && stat.size > cached.offset) {
+      const first = Buffer.alloc(1); fs.readSync(fd, first, 0, 1, cached.offset); extendedEof = first[0] !== 10;
+    }
+    if (!cached || extendedEof || cached.ino !== stat.ino || cached.dev !== stat.dev || stat.size < cached.offset || (stat.size === cached.offset && stat.mtimeMs !== cached.mtime)) {
+      cached = { ...initialize(), ino: stat.ino, dev: stat.dev, offset: 0, mtime: stat.mtimeMs, pending: '', decoder: new (require('string_decoder').StringDecoder)('utf8') };
+    }
+    const consumeLine = line => {
+      let row; try { row = JSON.parse(line); } catch { return false; }
+      if (!row || typeof row !== 'object') return true;
+      const record = row.payload && typeof row.payload === 'object' ? { ts: row.timestamp, kind: row.type, p: row.payload }
+        : typeof row.type === 'string' ? { ts: row.timestamp, kind: row.type === 'message' || row.type.endsWith('call') || row.type.endsWith('output') || row.type === 'reasoning' ? 'response_item' : row.type, p: row }
+        : row.id && 'instructions' in row ? { ts: row.timestamp, kind: 'session_meta', p: row } : null;
+      if (record) consume(cached, record);
+      return true;
+    };
+    const buffer = Buffer.alloc(Math.min(1024 * 1024, stat.size - cached.offset));
+    if (stat.size > cached.offset) cached.eof = false;
+    while (cached.offset < stat.size) {
+      const n = fs.readSync(fd, buffer, 0, Math.min(buffer.length, stat.size - cached.offset), cached.offset);
+      if (!n) break;
+      cached.offset += n;
+      const text = cached.pending + cached.decoder.write(buffer.subarray(0, n));
+      let start = 0, end;
+      while ((end = text.indexOf('\n', start)) >= 0) {
+        const line = text.slice(start, end); start = end + 1;
+        consumeLine(line);
+      }
+      cached.pending = text.slice(start);
+    }
+    // Historical exports may omit the final newline. Consume a complete JSON
+    // record once, but rebuild if a later write extends that same line.
+    if (cached.pending && consumeLine(cached.pending)) { cached.pending = ''; cached.eof = true; }
+    cached.mtime = stat.mtimeMs;
+    return cached;
+  } finally { fs.closeSync(fd); }
+}
+
 function createCodexSessions({ home } = {}) {
   const root = () => path.join(home || process.env.CODEX_HOME || path.join(require('os').homedir(), '.codex'), 'sessions');
   let fileCache = { at: 0, files: new Map() };
@@ -88,27 +133,25 @@ function createCodexSessions({ home } = {}) {
   }
   const summaryCache = new Map();
   function summary(id, fp) {
-    let st; try { st = fs.statSync(fp); } catch { return null; }
-    const cached = summaryCache.get(fp);
-    if (cached?.mtime === st.mtimeMs && cached.size === st.size) return cached.value;
-    let cwd = '', first = 0, firstTitle = '', title = '', promptAt = 0, count = 0, model = '';
-    for (const { ts, kind, p } of records(fp)) {
+    const state = updateRecords(fp, summaryCache.get(fp), () => ({ cwd: '', first: 0, firstTitle: '', title: '', promptAt: 0, count: 0, model: '' }), (state, { ts, kind, p }) => {
       const at = Date.parse(ts || p.timestamp) || 0;
-      if (at && !first) first = at;
-      if (kind === 'session_meta' && !cwd) cwd = p.cwd || '';
-      if (kind === 'turn_context') { if (p.cwd) cwd = cwd || p.cwd; if (p.model) model = p.model; }
-      if (kind === 'event_msg' && p.type === 'thread_settings_applied' && p.thread_settings?.model) model = p.thread_settings.model;
+      if (at && !state.first) state.first = at;
+      if (kind === 'session_meta' && !state.cwd) state.cwd = p.cwd || '';
+      if (kind === 'turn_context') { if (p.cwd) state.cwd = state.cwd || p.cwd; if (p.model) state.model = p.model; }
+      if (kind === 'event_msg' && p.type === 'thread_settings_applied' && p.thread_settings?.model) state.model = p.thread_settings.model;
       if (kind === 'response_item' && p.type === 'message' && p.role === 'user') {
         const text = codexUserText(p.content);
-        if (!text) continue;
-        count++;
+        if (!text) return;
+        state.count++;
         const line = text.replace(/\s+/g, ' ').slice(0, 200);
-        if (!firstTitle) firstTitle = line;
-        title = line; promptAt = at || promptAt;
+        if (!state.firstTitle) state.firstTitle = line;
+        state.title = line; state.promptAt = at || state.promptAt;
       }
-    }
-    const value = { id, engine: 'codex', title: title || firstTitle || id.slice(0, 8), firstTitle, project: cwd, count, first: first || st.mtimeMs, last: st.mtimeMs, promptAt, model, path: fp };
-    summaryCache.set(fp, { mtime: st.mtimeMs, size: st.size, value });
+    });
+    if (!state) return null;
+    summaryCache.set(fp, state);
+    const { title, firstTitle, cwd, count, first, promptAt, model, mtime } = state;
+    const value = { id, engine: 'codex', title: title || firstTitle || id.slice(0, 8), firstTitle, project: cwd, count, first: first || mtime, last: mtime, promptAt, model, path: fp };
     return value;
   }
   function list() {
@@ -116,41 +159,42 @@ function createCodexSessions({ home } = {}) {
     for (const [id, fp] of files()) { const s = summary(id, fp); if (s && (s.count || s.project)) out.push(s); }
     return out.sort((a, b) => b.last - a.last);
   }
+  const messageCache = new Map();
   function messages(id) {
     const fp = pathFor(id);
     if (!fp) return null;
-    const out = [], tools = new Map();
-    let project = '';
-    const assistant = () => {
-      const prev = out[out.length - 1];
-      if (prev?.role === 'assistant') return prev;
-      const msg = { role: 'assistant', text: '', tools: [] }; out.push(msg); return msg;
-    };
-    for (const { ts, kind, p } of records(fp)) {
-      if (kind === 'session_meta' && !project) project = p.cwd || '';
-      if (kind === 'turn_context' && !project) project = p.cwd || '';
+    const state = updateRecords(fp, messageCache.get(fp), () => ({ out: [], tools: new Map(), project: '', explicitDuration: new WeakSet() }), (state, { ts, kind, p }) => {
+      const { out, tools } = state;
+      const assistant = () => {
+        const prev = out[out.length - 1];
+        if (prev?.role === 'assistant') return prev;
+        const msg = { role: 'assistant', text: '', tools: [] }; out.push(msg); return msg;
+      };
+      if (kind === 'session_meta' && !state.project) state.project = p.cwd || '';
+      if (kind === 'turn_context' && !state.project) state.project = p.cwd || '';
       const timestamp = messageTimestamp(ts || p.timestamp);
       if (kind === 'event_msg' && p.type === 'task_complete') {
         const last = out.at(-1);
         if (last?.role === 'assistant') {
           if (timestamp) last.timestamp = timestamp;
-          if (typeof p.duration_ms === 'number' && p.duration_ms >= 0) last.durationMs = p.duration_ms;
+          if (typeof p.duration_ms === 'number' && p.duration_ms >= 0) { last.durationMs = p.duration_ms; state.explicitDuration.add(last); }
         }
       }
-      if (kind !== 'response_item') continue;
+      if (kind !== 'response_item') return;
       if (p.type === 'message' && p.role === 'user') {
         const text = codexUserText(p.content), images = codexImages(p.content);
         if (text || images.length) out.push({ role: 'user', text, images, ...(timestamp ? { timestamp } : {}) });
       } else if (p.type === 'message' && p.role === 'assistant') {
         const text = (p.content || []).filter(b => b?.type === 'output_text').map(b => b.text || '').join('');
-        if (!text) continue;
+        if (!text) return;
         const msg = assistant(); msg.text += (msg.text ? '\n\n' : '') + text; if (timestamp) msg.timestamp = timestamp;
+        if (!state.explicitDuration.has(msg)) delete msg.durationMs;
       } else if (p.type === 'reasoning') {
         const text = reasoningText(p);
         if (text) { const message = assistant(); (message.reasoning ||= []).push({ id: p.id || `reasoning-${message.reasoning?.length || 0}`, text }); }
       } else if (p.type === 'function_call' || p.type === 'custom_tool_call' || p.type === 'local_shell_call') {
         const id = p.call_id || p.id;
-        if (!id || tools.has(id)) continue;
+        if (!id || tools.has(id)) return;
         const name = p.namespace && p.namespace !== 'functions' ? `${p.namespace}.${p.name}` : p.name || p.type;
         const tool = { id, name, input: p.type === 'custom_tool_call' ? { input: p.input } : parseArgs(p.arguments ?? p.action), state: 'interrupted' };
         tools.set(id, tool); assistant().tools.push(tool);
@@ -162,9 +206,15 @@ function createCodexSessions({ home } = {}) {
         const tool = { id, name: 'web_search', input: p.action || {}, state: 'done' };
         tools.set(id, tool); assistant().tools.push(tool);
       }
-    }
-    return { id, engine: 'codex', project, messages: annotateMessageTimings(out) };
+    });
+    if (!state) { messageCache.delete(fp); return null; }
+    messageCache.delete(fp); messageCache.set(fp, state);
+    while (messageCache.size > 3) messageCache.delete(messageCache.keys().next().value);
+    // Callers retain launch-time replay snapshots. Later appends must not
+    // mutate those snapshots through shared cached message/tool objects.
+    return { id, engine: 'codex', project: state.project, messages: structuredClone(annotateMessageTimings(state.out)) };
   }
+
   // Token usage per day/model plus the most recent subscription quota snapshot.
   const statsCache = new Map();
   function fileStats(fp) {

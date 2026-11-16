@@ -10,6 +10,13 @@ test('live native sessions are aggregated from machines and outrank copied check
   assert.equal(sessions[0].repository, '/repo'); assert.equal(sessions[0].workspaceLabel, 'isolated-task');
   assert.equal(directory.find('active').project, '/repo/.claude/worktrees/isolated-task');
 });
+test('passive history reads use cached ownership without rescanning all local transcripts', async () => {
+  let scans = 0;
+  const directory = createSessionDirectory({ selfId: () => 'self', local: () => { scans++; return [{ id: 'local', native: true, project: '/local' }]; }, peers: () => [{ id: 'remote', peer: { call: async () => [{ id: 'other', native: true, project: '/remote' }] } }] });
+  await directory.list(); const before = scans;
+  assert.equal(directory.findCached('local').project, '/local'); assert.equal(directory.findCached('other').project, '/remote');
+  assert.equal(directory.findCached('missing'), undefined); assert.equal(scans, before);
+});
 test('name, machine, branch and recent question share case-insensitive multiword search', () => {
   const rows = [{ id: 'one', title: 'project-plugin-recommendations', machineId: 'mac', gitBranch: 'worktree-isolated-task', latestPrompt: '需要新建表吗', project: '/repo/mino_server', last: 10 }, { id: 'two', title: 'other', last: 20 }];
   for (const q of ['PROJECT-plugin', 'mac mino', 'isolated-task', '新建表']) assert.equal(searchSessions(rows, q)[0].id, 'one');

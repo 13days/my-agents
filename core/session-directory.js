@@ -15,6 +15,7 @@ function normalize(row, source, native = false) {
 function createSessionDirectory({ local, selfId, peers, ttl = 3000, timeout = 8000, now = Date.now }) {
   let cache = [], unavailable = [], at = 0, pending;
   const remoteCache = new Map();
+  let localCache = [];
   function merge(localRows, remoteRows) {
     const all = new Map();
     for (const row of [...localRows, ...remoteRows]) {
@@ -23,7 +24,7 @@ function createSessionDirectory({ local, selfId, peers, ttl = 3000, timeout = 80
     }
     return searchSessions([...all.values()]);
   }
-  const snapshot = () => merge(local().map(row => normalize(row, selfId(), row.native)), cache);
+  const snapshot = () => { localCache = local().map(row => normalize(row, selfId(), row.native)); return merge(localCache, cache); };
   async function list({ refresh = false, query = '' } = {}) {
     if (!pending && (refresh || now() - at >= ttl || !at)) pending = (async () => {
       const connected = peers(), failed = [];
@@ -45,7 +46,7 @@ function createSessionDirectory({ local, selfId, peers, ttl = 3000, timeout = 80
   }
   // Ownership checks used by manager.busy must not call snapshot(): the local
   // listing itself asks manager.busy and would recurse.
-  return { list, snapshot, find: id => snapshot().find(row => row.id === id), hasCachedNative: id => cache.some(row => row.id === id && row.native) };
+  return { list, snapshot, find: id => snapshot().find(row => row.id === id), findCached: id => merge(localCache.filter(row => row.id === id), cache.filter(row => row.id === id))[0], hasCachedNative: id => cache.some(row => row.id === id && row.native) };
 }
 function liveSessionMetadata(meta, item) {
   return item?.native && !item.sourceUnavailable && meta.machineId === item.machineId && item.project ? { ...meta, project: item.project } : meta;

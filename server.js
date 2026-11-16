@@ -826,11 +826,20 @@ function listSessions() {
 }
 
 // 按 session id 找 transcript 文件路径（history 无记录时兜底）
+const transcriptPaths = new Map();
+let transcriptPathsAt = 0;
 function transcriptPathFor(id) {
+  const cached = transcriptPaths.get(id);
+  if (cached && fs.existsSync(cached)) return cached;
+  // Negative caching is only useful for known Codex IDs. A newly-created
+  // Claude transcript must be discoverable immediately after its first turn.
+  if (Date.now() - transcriptPathsAt < 2000 && codexSessions.pathFor(id)) return '';
+  transcriptPaths.clear();
   for (const fp of transcriptFiles().sessionFiles) {
-    if (path.basename(fp, '.jsonl') === id) return fp;
+    transcriptPaths.set(path.basename(fp, '.jsonl'), fp);
   }
-  return '';
+  transcriptPathsAt = Date.now();
+  return transcriptPaths.get(id) || '';
 }
 
 function codexSessionDetail(id, lang) {
@@ -1865,16 +1874,17 @@ const sessionDirectory = require('./core/session-directory').createSessionDirect
   local: listSessions, selfId: machineId,
   peers: () => registry.nodes().filter(node => node.id !== 'local' && node.peer).map(node => ({ id: node.id, peer: clusterNetwork?.peer(node.id) || node.peer })),
 });
-async function conversationHistory(id, sourceMachine) {
+async function conversationHistory(id, sourceMachine, { cachedDirectory = false } = {}) {
+  const directoryItem = () => cachedDirectory ? sessionDirectory.findCached(id) : sessionDirectory.find(id);
   const saved = conversations.get(id), meta = sessionStore.read()[id] || saved || {};
-  const source = sourceMachine || meta.machineId || meta.node || sessionDirectory.find(id)?.machineId || machineId();
+  const source = sourceMachine || meta.machineId || meta.node || directoryItem()?.machineId || machineId();
   let result;
   if (source === machineId() || source === 'local') result = sessionMessages(id);
   else {
     const peer = clusterNetwork?.peer(source) || registry.node(source)?.peer;
     if (peer) { try { result = await peer.call('history.messages', { id }, { timeout: 5000 }); } catch {} }
   }
-  if (result && !result.checkpoint) { const item = sessionDirectory.find(id); if (item?.machineId === source && item.project) result = { ...result, project: item.project }; }
+  if (result && !result.checkpoint) { const item = directoryItem(); if (item?.machineId === source && item.project) result = { ...result, project: item.project }; }
   return result || (saved ? { id, project: saved.project, engine: saved.engine, machineId: saved.machineId, messages: saved.messages || [], checkpoint: true } : null);
 }
 
@@ -2493,17 +2503,19 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'GET' && parts.length === 4 && parts[3] === 'messages') {
         res.setHeader('Cache-Control', 'no-store');
-        const id = decodeURIComponent(parts[2]), running = manager.get(id);
+        const id = decodeURIComponent(parts[2]), following = url.searchParams.get('source') === 'transcript', running = following ? null : manager.get(id);
         // Passive CLI followers read the current transcript, even while an idle
         // panel connection retains its launch-time baseHistory for SSE replay.
         if (running && url.searchParams.get('source') !== 'transcript' && !url.searchParams.has('before')) return sendJSON(res, 200, { ...running.baseHistory, id: running.id, project: running.job.meta.cwd, worktree: running.job.meta.worktree, messages: running.baseMessages, liveReplay: true, jobId: running.job.meta.jobId });
+        const directoryItem = following ? sessionDirectory.findCached(id) : sessionDirectory.find(id);
+        const metadata = sessionStore.read()[id];
         const fp = transcriptPathFor(id) || codexSessions.pathFor(id);
         let revision = '';
         if (fp) { const st = fs.statSync(fp); revision = `${st.mtimeMs}:${st.size}`; }
         if (revision && url.searchParams.get('since') === revision) return sendJSON(res, 200, { unchanged: true, revision });
-        const remote = sessionStore.read()[id] || conversations.get(id) || sessionDirectory.find(id);
-        const r = remote?.machineId && remote.machineId !== machineId() ? await conversationHistory(id, remote.machineId) : sessionMessages(id, { before: url.searchParams.has('before') ? url.searchParams.get('before') : undefined, limit: Math.max(1, Number(url.searchParams.get('limit')) || 80) });
-        return r ? sendJSON(res, 200, { ...r, project: sessionDirectory.find(id)?.project || r.project, machineId: remote?.machineId || remote?.node || machineId(), worktree: sessionStore.read()[id]?.worktree || null, revision }) : sendJSON(res, 404, { error: T(lang, 'errNotFound') });
+        const remote = metadata || conversations.get(id) || directoryItem;
+        const r = remote?.machineId && remote.machineId !== machineId() ? await conversationHistory(id, remote.machineId, { cachedDirectory: following }) : sessionMessages(id, { before: url.searchParams.has('before') ? url.searchParams.get('before') : undefined, limit: Math.max(1, Number(url.searchParams.get('limit')) || 80) });
+        return r ? sendJSON(res, 200, { ...r, project: directoryItem?.project || r.project, machineId: remote?.machineId || remote?.node || machineId(), worktree: metadata?.worktree || null, revision }) : sendJSON(res, 404, { error: T(lang, 'errNotFound') });
       }
       if (req.method === 'GET' && parts.length === 4 && parts[3] === 'replay') {
         const r = sessionReplay(decodeURIComponent(parts[2]));
