@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { routeRecord, updateRoutes } = require('./core/proxy-observation');
 
 function captureMetadata(rec) {
   let payload = {};
@@ -31,22 +32,23 @@ function compareCaptures(a, b) {
 
 // Keep only byte offsets and list metadata in memory. Bodies remain complete on disk.
 function createCaptureStore(file) {
-  const records = new Map(), messages = new Map();
+  const records = new Map(), messages = new Map(), proxyRoutes = new Map();
   let sequence = 0, needsNewline = false, revision = 0, loading = null, loadError = '', generation = 0;
   function index(rec, offset, length) {
     const meta = {};
-    for (const key of ['id', 'ts', 'path', 'status', 'durationMs', 'model', 'messagesCount', 'respMsgId', 'clientVersion', 'upstreamId', 'upstreamName', 'usage', 'requestOrder', 'routing', 'method', 'incomplete', 'engine']) meta[key] = rec[key];
+    for (const key of ['id', 'ts', 'path', 'status', 'durationMs', 'model', 'messagesCount', 'respMsgId', 'clientVersion', 'upstreamId', 'upstreamName', 'usage', 'requestOrder', 'routing', 'method', 'incomplete', 'engine', 'observation', 'responseModel', 'streamOutcome']) meta[key] = rec[key];
     Object.assign(meta, captureMetadata(rec));
     const start = Date.parse(rec.ts);
     meta.startedAt = rec.startedAt || (Number.isFinite(start) ? new Date(start - (Number(rec.durationMs) || 0)).toISOString() : '');
     meta.hasThinking = !!rec.thinking;
     meta.toolCount = rec.tools?.length || 0;
     records.set(String(rec.id), { meta, offset, length });
+    updateRoutes(proxyRoutes, routeRecord(meta));
     if (rec.respMsgId) messages.set(rec.respMsgId, String(rec.id));
     sequence = Math.max(sequence, Number(rec.id) || 0);
   }
   function load({ limit = Infinity } = {}) {
-    records.clear(); messages.clear(); sequence = 0; needsNewline = false;
+    records.clear(); messages.clear(); proxyRoutes.clear(); sequence = 0; needsNewline = false;
     if (!fs.existsSync(file)) return;
     const fd = fs.openSync(file, 'r'), chunk = Buffer.alloc(1024 * 1024);
     let offset = 0, fragments = [], length = 0;
@@ -125,6 +127,7 @@ function createCaptureStore(file) {
     indexEntries: () => [...records],
     status: () => ({ loading: !!loading, error: loadError, records: records.size }),
     metadata: id => records.get(String(id))?.meta || null,
+    latestProxyRoute: sessionId => proxyRoutes.get(sessionId) || null,
     linkSessions(byMessage) {
       let changed = false;
       for (const { meta } of records.values()) {
@@ -145,7 +148,7 @@ function createCaptureStore(file) {
       return { sessionId: current.sessionId, position: index + 1, total: items.length, previousId: index > 0 ? String(items[index - 1].id) : null, nextId: index < items.length - 1 ? String(items[index + 1].id) : null };
     },
     getByMessageId: id => get(messages.get(id)),
-    clear() { generation++; fs.writeFileSync(file, ''); records.clear(); messages.clear(); revision++; },
+    clear() { generation++; fs.writeFileSync(file, ''); records.clear(); messages.clear(); proxyRoutes.clear(); revision++; },
   };
 }
-module.exports = { createCaptureStore };
+module.exports = { createCaptureStore, captureMetadata, compareCaptures };

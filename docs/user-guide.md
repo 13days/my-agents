@@ -130,6 +130,16 @@ Claude 原生凭证从 macOS 钥匙串或对应配置目录的 `.credentials.jso
 
 模型下拉框取决于当前引擎与账号。Codex 的默认模型从账号实时可见模型目录中选择；手填模型 ID 优先，但上游可能拒绝。账号池汇集已有权限，不增加模型权限或订阅配额。不要将过时模型名写死在所有机器配置中。
 
+### Claude 代理账号的模型列表
+
+在 Claude 代理账号卡片点击「选择模型」，可从该账号的实时目录选择固定模型，也可刷新目录。选择会写入 `modelMap["*"]`，覆盖客户端 `/model`，更具体的精确 ID / 家族映射仍优先；「不固定」只移除 `*`，不会删除高级映射。目录查询失败不会清空已保存的模型，未保存或停用的账号须先保存 / 启用。
+
+### Claude Code 底部代理状态
+
+仓库内 `scripts/proxy-statusline.py` 可用作 Claude Code 的 `statusLine.command`（`python3 -I <仓库绝对路径>/scripts/proxy-statusline.py`）。本机默认端口为面板 4321、代理 4322；macOS 的 `io.my-agents.gateway.plist` 可提供实际端口。
+
+状态栏区分客户端模型与代理实际发送模型：有本会话请求证据时显示代理、发送模型和结果，Codex 桥接还显示实际订阅账号；没有证据时仅显示配置目标和「待捕获」。代理不可达时明确降级，不引用其他会话请求。显示的是发往上游的模型 ID / 别名，不推断供应商内部模型。接口为 `GET /api/proxy/statusline?sessionId=<Claude UUID>`，只返回路由摘要，不返回凭证和对话正文。
+
 ## 5. 接入飞书 / Lark
 
 当前内置 IM 渠道为飞书和 Lark，企业微信等尚需适配。

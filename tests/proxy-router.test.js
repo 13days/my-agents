@@ -10,7 +10,7 @@ async function listen(server) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   return `http://127.0.0.1:${server.address().port}`;
 }
-async function fixture(t, handlers) {
+async function fixture(t, handlers, options = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'panel-router-'));
   const servers = handlers.map(fn => http.createServer(async (req, res) => {
     const chunks = []; for await (const c of req) chunks.push(c);
@@ -18,7 +18,7 @@ async function fixture(t, handlers) {
   }));
   const urls = await Promise.all(servers.map(listen));
   const captures = []; let sequence = 0;
-  const router = createRouter({ dir, port: 4322, record: (...args) => captures.push(args), reserveCapture: () => ({ id: ++sequence, startedAt: new Date().toISOString() }) });
+  const router = createRouter({ dir, port: 4322, record: (...args) => captures.push(args), reserveCapture: () => ({ id: ++sequence, startedAt: new Date().toISOString() }), ...options });
   const proxy = http.createServer(router.handle);
   const url = await listen(proxy);
   t.after(async () => {
@@ -64,7 +64,7 @@ test('model picker discovers the selected or pinned account and shares its cache
   f.router.save({ mode: 'manual', selected: 'a0', accounts: f.accounts });
   const sid = '11111111-1111-4111-8111-111111111111';
   f.router.setSessionRoute(sid, 'a1');
-  assert.deepEqual(await f.router.models({ sessionId: sid }), { accountName: 'Account 1', forcedModel: 'fixed-model', models: [{ id: 'claude-sonnet-6', name: 'Model 1' }] });
+  assert.deepEqual(await f.router.models({ sessionId: sid }), { accountName: 'Account 1', forcedModel: 'fixed-model', available: true, models: [{ id: 'claude-sonnet-6', name: 'Model 1' }] });
   const global = await f.router.models();
   assert.equal(global.models[0].id, 'claude-sonnet-5');
   await f.router.modelEnvForSession('');
@@ -354,4 +354,26 @@ test('Anthropic proxy base URLs ending in /v1 do not duplicate the version segme
  const f=await fixture(t,[(req,res)=>{assert.equal(req.url,'/v1/messages');res.end('{"ok":true}');}]);
  f.accounts[0].url+='/v1';f.router.save({mode:'manual',selected:'a0',accounts:f.accounts});
  const response=await f.send();assert.equal(response.status,200);await response.text();
+});
+
+test('route observations use the mapped model and strip untrusted correlation headers', async t => {
+  const observed = [];
+  const f = await fixture(t, [(req, res, raw) => {
+    assert.equal(req.headers['x-my-agents-route-observation'], undefined);
+    res.end(JSON.stringify({ model: JSON.parse(raw).model }));
+  }], { observeRoute: rec => observed.push(rec) });
+  f.accounts[0].modelMap = { '*': 'ferry-model' };
+  f.router.save({ mode: 'manual', selected: 'a0', accounts: f.accounts });
+  const sid = '11111111-1111-4111-8111-111111111111';
+  const response = await f.send({ model: 'claude-opus', messages: [], metadata: { user_id: 'user_session_' + sid } }, { headers: { 'x-my-agents-route-observation': 'forged' } });
+  await response.text();
+  assert.equal(observed[0].model, 'ferry-model');
+  assert.equal(observed[0].observation.sessionId, sid);
+  assert.equal(f.router.configuredTarget(sid, 'claude-opus').model, 'ferry-model');
+});
+test('model discovery distinguishes an empty catalog from an unreachable provider', async t => {
+  const f = await fixture(t, [(req, res) => res.end('{"data":[]}'), (req, res) => { res.writeHead(503); res.end('{}'); }]);
+  f.router.save({ mode: 'manual', selected: 'a0', accounts: f.accounts });
+  assert.equal((await f.router.models({ accountId: 'a0' })).available, true);
+  assert.equal((await f.router.models({ accountId: 'a1' })).available, false);
 });

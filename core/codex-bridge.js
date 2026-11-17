@@ -1,5 +1,6 @@
 'use strict';
 const crypto = require('crypto');
+const { TRACE_HEADER } = require('./proxy-observation');
 const { StringDecoder } = require('string_decoder');
 const PREFIX = '/codex-subscription';
 const invalid = message => Object.assign(new Error(message), { status: 400 });
@@ -113,7 +114,7 @@ function createOutput(body, res) {
   }
   return { event, done: () => terminal, ping: () => { if (body.stream) { start(); send('ping', {}); } }, fail(error) { if (terminal || res.destroyed || res.writableEnded) return; terminal = true; const value = { type: 'error', error: { type: 'api_error', message: error.message } }; if (res.headersSent) { send('error', { error: value.error }); res.end(); } else { res.writeHead(error.status || 502, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(value)); } } };
 }
-function createCodexBridge({ token, port, relayToken, models, version = () => '0.167.0', http = require('http') }) {
+function createCodexBridge({ token, port, relayToken, models, version = () => '0.167.0', http = require('http'), observation = null }) {
   const live = new Map();
   async function handle(req, res) {
     const reply = (status, data) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(data)); };
@@ -141,7 +142,8 @@ function createCodexBridge({ token, port, relayToken, models, version = () => '0
       output = createOutput(body, res);
       ping = setInterval(() => output.ping(), 15000); ping.unref?.();
       const data = Buffer.from(JSON.stringify(request));
-      upstream = http.request({ hostname: '127.0.0.1', port, path: '/codex-subscription/internal/responses', method: 'POST', headers: { authorization: 'Bearer ' + relayToken, 'content-type': 'application/json', 'content-length': data.length, 'session-id': session, originator: 'codex_cli_rs', version: version() } }, response => {
+      const traceKey = observation?.resolve(req.headers[TRACE_HEADER]) ? req.headers[TRACE_HEADER] : '';
+      upstream = http.request({ hostname: '127.0.0.1', port, path: '/codex-subscription/internal/responses', method: 'POST', headers: { authorization: 'Bearer ' + relayToken, 'content-type': 'application/json', 'content-length': data.length, 'session-id': session, originator: 'codex_cli_rs', version: version(), ...(traceKey ? { [TRACE_HEADER]: traceKey } : {}) } }, response => {
         let pending = '', total = 0; const decoder = new StringDecoder('utf8');
         const fail = err => { output.fail(err); cancel(); };
         response.on('error', () => fail(new Error('Codex 上游连接中断')));

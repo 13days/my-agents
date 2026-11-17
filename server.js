@@ -27,6 +27,7 @@ const crypto = require('crypto');
 const { chooseFolder } = require('./folder-picker');
 const { createSessionStore, normalizeTitle, isManualTitle, autoTitlePatch } = require('./session-store');
 const { createCaptureStore } = require('./capture-store');
+const { TRACE_HEADER, createProxyObservation, streamOutcome } = require('./core/proxy-observation');
 const { resolveCodex } = require('./engines/codex/cli');
 const { resolveClaude } = require('./engines/claude/cli');
 const { createCodexSessions } = require('./engines/codex/sessions');
@@ -1595,6 +1596,7 @@ function readBody(req, limit = 5 * 1024 * 1024) {
 // 面板即可看到每个请求的完整 payload（系统提示词、工具定义、消息、流式响应含 thinking）
 const CAPTURES_FILE = path.join(DATA_DIR, 'panel-captures.jsonl');
 const captureStore = createCaptureStore(CAPTURES_FILE);
+const proxyObservation = createProxyObservation({ lastCapture: id => captureStore.latestProxyRoute(id) });
 function loadCaptures() { captureStore.load(); }
 // Recover legacy captures only through exact response IDs; copied history stays ambiguous.
 let captureLinkPromise, captureLinkRevision = -1, captureLinkAt = 0;
@@ -1627,7 +1629,7 @@ function captureNavigationFor(id) {
   const session = navigation.sessionId ? listSessions().find(item => item.id === navigation.sessionId) : null;
   return { ...navigation, sessionTitle: session?.title || '' };
 }
-function persistCapture(rec) { captureStore.append(rec); }
+function persistCapture(rec) { captureStore.append(rec); proxyObservation.complete(captureStore.metadata(rec.id)); }
 
 function sseExtract(raw) {
   // 从流式响应里抽取：输出文本、thinking、usage、响应消息 id（用于和 transcript 关联）
@@ -1703,6 +1705,7 @@ function recordExchange(reqPath, status, durationMs, reqBody, resBody, isStream,
     id: requestInfo.id ?? captureStore.nextId(), ts: new Date().toISOString(), path: reqPath, status, durationMs,
     ...(requestInfo.id != null ? { requestOrder: requestInfo.requestOrder ?? requestInfo.id, startedAt: requestInfo.startedAt } : {}),
     sessionId: requestInfo.sessionId || '', method: requestInfo.method || 'POST', routing: requestInfo.routing || null, incomplete: !!requestInfo.incomplete,
+    observation: requestInfo.observation || null, streamOutcome: isStream || /^\s*(event|data):/.test(resBody.toString('utf8', 0, 200)) ? streamOutcome(resBody.toString()) : null,
     model: '', system: '', tools: [], messagesCount: 0, lastUser: '', respMsgId: '',
     userAgent: ua, clientVersion: parseClientVersion(ua),
     anthropicVersion: (reqHeaders && reqHeaders['anthropic-version']) || '',
@@ -1743,12 +1746,14 @@ function recordExchange(reqPath, status, durationMs, reqBody, resBody, isStream,
       rec.thinking = s.thinking;
       rec.usage = s.usage;
       rec.respMsgId = s.msgId;
+      rec.responseModel = s.model || '';
       if (!rec.model) rec.model = s.model;
     } else {
       const r = JSON.parse(rtext);
       rec.outText = extractText(r.content);
       rec.usage = r.usage || null;
       rec.respMsgId = r.id || '';
+      rec.responseModel = r.model || '';
       if (!rec.model) rec.model = r.model || '';
     }
   } catch {}
@@ -1759,6 +1764,12 @@ function recordExchange(reqPath, status, durationMs, reqBody, resBody, isStream,
 const accountRouter = require('./proxy-router').createRouter({
   dir: DATA_DIR, claudeDir: CLAUDE_DIR, port: PROXY_PORT, record: recordExchange,
   reserveCapture: () => ({ id: captureStore.nextId(), startedAt: new Date().toISOString() }),
+  observeRoute: rec => proxyObservation.begin(rec),
+  associateBridge: (account, trace) => {
+    const url = new URL(account.url);
+    if (!trace.sessionId || trace.purpose !== 'model_request' || account.token !== bridgeToken || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || Number(url.port) !== Number(PORT) || url.pathname.replace(/\/$/, '') !== '/codex-subscription') return '';
+    return proxyObservation.associate(trace);
+  },
 });
 // Codex sessions (remote nodes, panel-launched, and terminal Codex when routed through the pool) authenticate
 // with this token; the proxy swaps it for a pool account. Persisted so the terminal config survives restarts.
@@ -1771,6 +1782,7 @@ if (!HISTORY_WORKER) {
 const readCodexAuth = () => { try { return JSON.parse(fs.readFileSync(path.join(CODEX_HOME, 'auth.json'), 'utf8')); } catch { return null; } };
 let accountPool;
 const codexProxy = createCodexProxy({
+  observation: proxyObservation,
   record: recordExchange, reserveCapture: () => ({ id: captureStore.nextId(), startedAt: new Date().toISOString() }),
   relay: { token: codexRelayToken, credentials: mode => codexCredentials(readCodexAuth(), mode), resolve: (mode, sessionId, excluded, forced) => accountPool.resolveCodex(mode, sessionId, excluded, forced), egress: excluded => accountPool.egress(excluded), accepted: (route, id) => accountPool.accepted(route, id), rejected: (route, status, retryAfter) => accountPool.rejected(route, status, retryAfter) },
 });
@@ -1783,6 +1795,7 @@ if (!HISTORY_WORKER) {
   catch (error) { if (error.code !== 'ENOENT') throw error; bridgeToken = crypto.randomBytes(32).toString('hex'); fs.writeFileSync(bridgeTokenFile, bridgeToken, { flag: 'wx', mode: 0o600 }); }
 }
 const subscriptionProxy = createCodexProxy({
+  observation: proxyObservation,
   record: recordExchange, reserveCapture: () => ({ id: captureStore.nextId(), startedAt: new Date().toISOString() }),
   relay: { token: codexRelayToken, resolve: (mode, sessionId, excluded, forced) => accountPool.resolveCodex(mode, sessionId, excluded, forced, { subscriptionOnly: true }), egress: excluded => accountPool.egress(excluded), accepted: (route, id) => accountPool.accepted(route, id), rejected: (route, status, retryAfter) => accountPool.rejected(route, status, retryAfter) },
 });
@@ -1793,7 +1806,7 @@ async function subscriptionModels() {
   if (!accountId) throw new Error('没有可用 Codex 订阅账号，请先登录或重新授权');
   return codexPoolModels({ accountId });
 }
-const codexBridge = createCodexBridge({ token: bridgeToken, port: PROXY_PORT, relayToken: codexRelayToken, models: subscriptionModels, version: () => String(resolveCodex().version || '').match(/\d+\.\d+\.\d+/)?.[0] || '0.167.0' });
+const codexBridge = createCodexBridge({ observation: proxyObservation, token: bridgeToken, port: PROXY_PORT, relayToken: codexRelayToken, models: subscriptionModels, version: () => String(resolveCodex().version || '').match(/\d+\.\d+\.\d+/)?.[0] || '0.167.0' });
 const upstreams = createUpstreams();
 upstreams.add({ id: 'anthropic', engine: 'claude', handle: accountRouter.handle }, { isDefault: true });
 upstreams.add({
@@ -2289,6 +2302,10 @@ const server = http.createServer(async (req, res) => {
     // Account credentials are only available through same-origin JSON management requests.
     if (type === 'proxy') {
       res.setHeader('Cache-Control', 'no-store');
+      if (req.method === 'GET' && parts[2] === 'statusline' && parts.length === 3) {
+        const sessionId = url.searchParams.get('sessionId') || '', clientModel = (url.searchParams.get('clientModel') || '').slice(0, 100);
+        return sendJSON(res, 200, proxyObservation.status(sessionId, accountRouter.configuredTarget(sessionId, clientModel)));
+      }
       if (req.method === 'GET' && parts.length === 2) return sendJSON(res, 200, { ...accountRouter.status(), pool: accountPool?.status() || [] });
       if (req.method === 'GET' && parts[2] === 'sessions') return sendJSON(res, 200, combinedAccountSessions());
       if (req.method === 'GET' && parts[2] === 'models' && parts.length === 3) {
