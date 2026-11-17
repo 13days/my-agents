@@ -196,3 +196,13 @@ test('images sent to the original terminal arrive as private local files the win
  assert.equal(fs.statSync(file).mode&0o777,0o600);assert.equal(fs.statSync(path.dirname(file)).mode&0o777,0o700);
  assert.throws(()=>session.submit('bad-type',{prompt:'x',images:[{mimeType:'image/bmp',data:'AAAA'}]}),/格式不受支持/);
 });
+
+test('a window waiting for input while its own background shells run still receives IM messages',async t=>{
+ const f=await fixture(t),events=[];
+ f.append({type:'assistant',message:{content:[{type:'text',text:'pulling logs in the background'}],stop_reason:'end_turn'}});
+ f.row.status='shell';fs.writeFileSync(f.record,JSON.stringify(f.row),{mode:0o600});
+ const session=f.native.open({record:f.row,sessionId:f.row.sessionId,emit:(event,data)=>events.push({event,data}),onIdle(){},onClosed(){}});t.after(()=>session.close());
+ session.submit('during-shell',{prompt:'tell me when done'});
+ await until(()=>f.frames.some(x=>x.type==='user'));
+ assert.match(f.frames.find(x=>x.type==='user').message.content,/tell me when done/);
+});

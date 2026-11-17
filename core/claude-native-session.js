@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const net = require('net');
 const { StringDecoder } = require('string_decoder');
+const { nativeTurnBusy } = require('./native-turn-state');
 
 // Claude's native inbox feeds its already-open interactive process. Never
 // confuse this with spawning `claude -p --resume` against the same transcript.
@@ -166,13 +167,15 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
         }
         // end_turn ends a model response. A native turn can still run stop hooks
         // or async agents, so wait for its terminal record and drain the transcript.
-        if (active?.confirmed && active.endCandidate && active.turnEnded && !active.background.size && current.status === 'idle' && offset >= size && !fragments) finishTurn();
+        // "shell" = prompt waiting while the window's own background shells run: still ready for input.
+        const waiting = current.status === 'idle' || current.status === 'shell' && !nativeTurnBusy(file);
+        if (active?.confirmed && active.endCandidate && active.turnEnded && !active.background.size && waiting && offset >= size && !fragments) finishTurn();
         if (active && !active.confirmed && !active.held && !active.deliveryPending
             && offset >= size && now() - active.sentAt > deliveryTimeoutMs) {
           active.deliveryPending = true;
           emit('warning', { messageId: active.id, kind: 'native_delivery_pending', warning: '原终端尚未确认接收，投递状态待确认。IM 会继续跟踪，请检查原窗口是否需要授权；不要重复提交。/stop 只断开同步，不会撤回已发送的消息。' });
         }
-        if (!active && pending.length && current.status === 'idle' && offset >= size) {
+        if (!active && pending.length && waiting && offset >= size) {
           active = pending.shift(); active.sentAt = now();
           await deliver(record, active.body);
         }
