@@ -1760,8 +1760,14 @@ const accountRouter = require('./proxy-router').createRouter({
   dir: DATA_DIR, claudeDir: CLAUDE_DIR, port: PROXY_PORT, record: recordExchange,
   reserveCapture: () => ({ id: captureStore.nextId(), startedAt: new Date().toISOString() }),
 });
-// Codex on remote nodes authenticates with this per-process token; the proxy swaps it for this machine's login.
-const codexRelayToken = crypto.randomBytes(24).toString('hex');
+// Codex sessions (remote nodes, panel-launched, and terminal Codex when routed through the pool) authenticate
+// with this token; the proxy swaps it for a pool account. Persisted so the terminal config survives restarts.
+const codexRelayTokenFile = path.join(DATA_DIR, 'codex-relay-token');
+let codexRelayToken = crypto.randomBytes(24).toString('hex');
+if (!HISTORY_WORKER) {
+  let saved = ''; try { saved = fs.readFileSync(codexRelayTokenFile, 'utf8').trim(); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (/^[a-f0-9]{48}$/.test(saved)) codexRelayToken = saved; else fs.writeFileSync(codexRelayTokenFile, codexRelayToken, { mode: 0o600 });
+}
 const readCodexAuth = () => { try { return JSON.parse(fs.readFileSync(path.join(CODEX_HOME, 'auth.json'), 'utf8')); } catch { return null; } };
 let accountPool;
 const codexProxy = createCodexProxy({
@@ -1806,6 +1812,10 @@ upstreams.add({ id: 'codex-subscription-relay', engine: 'codex', match: url => u
 const proxyServer = http.createServer(upstreams.handle);
 // Panel-started Codex runs go through the capture proxy unless disabled.
 const codexCaptureEnabled = () => process.env.CCP_CODEX_CAPTURE !== '0' && readPanelConfig().codexCapture !== false;
+const codexTerminal = require('./core/codex-terminal').createCodexTerminal({
+  home: () => CODEX_HOME, token: () => codexRelayToken,
+  base: () => `http://127.0.0.1:${PROXY_PORT}${codexAuthMode() === 'apikey' ? '/codex-openai/v1' : '/backend-api/codex'}`,
+});
 function codexAuthMode() {
   try {
     const auth = JSON.parse(fs.readFileSync(path.join(CODEX_HOME, 'auth.json'), 'utf8'));
@@ -2233,14 +2243,18 @@ const server = http.createServer(async (req, res) => {
       const status = () => engine === 'codex' ? accountPool.codexStatus() : accountPool.claudeStatus();
       try {
         if (req.method === 'GET' && parts.length === 3) {
-          if (url.searchParams.get('refresh')==='1') { await syncRuntimeLogins();await accountPool.refresh(); }
+          if (url.searchParams.get('refresh')==='1') { await syncRuntimeLogins();await accountPool.refresh(); if (engine === 'codex') await accountPool.refreshCodexUsage({ maxAge: 30 * 1000 }).catch(() => {}); }
           return sendJSON(res,200,status());
         }
         await accountPool.refresh();
         if (!String(req.headers['content-type'] || '').startsWith('application/json')) return sendJSON(res,415,{error:'需要 application/json'});
         const input = JSON.parse(await readBody(req,256*1024) || '{}');
         if (req.method === 'POST' && operation === 'check') {
-          if (engine === 'codex') { const checked = await checkCodexPool(input.accountId); return sendJSON(res,200,{ok:checked.ok,models:checked.models}); }
+          if (engine === 'codex') {
+            const usage = input.accountId ? await accountPool.checkCodexUsage(input.accountId).catch(() => null) : null;
+            if (usage?.revoked) throw new Error('凭证已被官方撤销（' + (usage.code || 'HTTP ' + usage.status) + '），请点「重新授权」');
+            const checked = await checkCodexPool(input.accountId); return sendJSON(res,200,{ok:checked.ok,models:checked.models,usage});
+          }
           await accountPool.prepareClaude();
           const result = await accountRouter.models({accountId:input.accountId,refresh:true});
           if (!result.models.length) throw new Error('账号未返回可用模型，请检查登录、代理地址或上游权限');
@@ -2297,8 +2311,10 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'GET' && parts.length === 2) return sendJSON(res, 200, codexStatus());
       if (req.method === 'GET' && parts[2] === 'accounts') { await accountPool.refresh(); return sendJSON(res, 200, accountPool.codexStatus()); }
       if (req.method === 'GET' && parts[2] === 'stats') return sendJSON(res, 200, await codexStats.read());
+      if (parts[2] === 'terminal' && req.method === 'GET') { try { return sendJSON(res, 200, codexTerminal.status()); } catch (error) { return sendJSON(res, 500, { error: error.message }); } }
       if (!String(req.headers['content-type'] || '').startsWith('application/json')) return sendJSON(res, 415, { error: '需要 application/json' });
       let body; try { body = JSON.parse(await readBody(req) || '{}'); } catch { return sendJSON(res, 400, { error: 'JSON 格式无效' }); }
+      if (parts[2] === 'terminal' && req.method === 'PUT') { try { return sendJSON(res, 200, body.enabled ? codexTerminal.enable() : codexTerminal.disable()); } catch (error) { return sendJSON(res, 400, { error: error.message }); } }
       if (parts[2] === 'accounts') {
         try {
           if (req.method === 'POST' && parts[3] === 'check') { const result = await checkCodexPool(body.accountId || ''); return sendJSON(res, 200, { ok: result.ok, status: result.status, models: result.models }); }
@@ -2763,6 +2779,9 @@ async function syncRuntimeLogins() {
   }));
 }
 const poolTimer = HISTORY_WORKER ? null : setInterval(() => { for (const id of clusterNetwork?.connected() || []) if (!registry.node(id) && !clusterRuntimePending.has(id)) attachClusterRuntime(id, clusterNetwork.peer(id)).catch(error => console.warn('集群执行连接：' + error.message)); return syncRuntimeLogins().then(()=>accountPool.refresh()).catch(() => console.warn('共享账号池同步失败，请检查集群连接')); }, 5000); poolTimer?.unref();
+// Provider quota per Codex subscription (replicated, so peers skip accounts checked recently).
+const usageTimer = HISTORY_WORKER ? null : setInterval(() => accountPool.refreshCodexUsage().catch(() => {}), 60 * 1000); usageTimer?.unref();
+if (!HISTORY_WORKER) { setTimeout(() => accountPool.refreshCodexUsage().catch(() => {}), 10 * 1000).unref(); try { codexTerminal.sync(); } catch (error) { console.warn('终端 Codex 配置同步失败：' + error.message); } }
 
 if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token && Array.isArray(clusterConfig.members)) {
   clusterNetwork = require('./node/cluster-peer').createClusterNetwork({ token: clusterConfig.token, selfId: clusterConfig.nodeId, members: clusterConfig.members, onPeer: async (id, peer) => {
