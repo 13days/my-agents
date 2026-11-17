@@ -46,3 +46,22 @@ test('cancelling during an asynchronous native-state check cannot spawn another 
  const session=createDeferredSession({sessionId:'native',pollMs:2,quietMs:0,busy:()=>{checking=true;return new Promise(r=>release=r)},emit(){},onClosed(){},open:async()=>{opened++;throw Error('must not open')}});
  session.submit('query',{prompt:'continue'});await until(()=>checking);session.stop();release(false);await sleep(10);assert.equal(opened,0);
 });
+
+test('a transcript left mid-turn by a killed process does not block IM handover forever', () => {
+  const { nativeTurnLive } = require('../core/native-turn-state');
+  const os = require('os'), path = require('path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'native-live-')), file = path.join(dir, 'sess-1.jsonl');
+  try {
+    fs.writeFileSync(file, JSON.stringify({ type: 'user', cwd: dir, message: { content: [{ type: 'tool_result' }] } }) + '\n');
+    const run = (ps, lsof = '') => ({ run: cmd => cmd === 'ps' ? ps : lsof });
+    assert.equal(nativeTurnLive(file, run('10 /usr/bin/node /x/bin/claude -p --resume sess-1\n')), true, 'panel process still owns the session');
+    assert.equal(nativeTurnLive(file, run('10 /bin/zsh\n')), false, 'no process left: stop waiting');
+    if (process.platform !== 'linux') {
+      assert.equal(nativeTurnLive(file, run('11 claude\n', 'p11\nn' + fs.realpathSync(dir) + '\n')), true, 'interactive terminal in the same directory');
+      assert.equal(nativeTurnLive(file, run('11 claude\n', 'p11\nn/elsewhere\n')), false);
+    }
+    assert.equal(nativeTurnLive(file, { run: () => { throw new Error('no ps'); } }), true, 'unknown stays conservative');
+    fs.writeFileSync(file, JSON.stringify({ type: 'assistant', message: { stop_reason: 'end_turn', content: [] } }) + '\n');
+    assert.equal(nativeTurnLive(file, run('10 /x/bin/claude -p --resume sess-1\n')), false, 'finished turns are idle regardless');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

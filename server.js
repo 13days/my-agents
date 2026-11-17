@@ -1874,7 +1874,7 @@ const claudeNativeSessions = require('./core/claude-native-session').createClaud
 registry.register(createClaudeEngine({
   accounts: accountRouter, nativeSessions: claudeNativeSessions,
   transcripts: { path: transcriptPathFor, messages: id => sessionMessages(id, { limit: 0 })?.messages || [] },
-  nativeBusy: id => accountRouter.sessions().items.some(item => item.id === id && item.running) || require('./core/native-turn-state').nativeTurnBusy(transcriptPathFor(id)),
+  nativeBusy: id => accountRouter.sessions().items.some(item => item.id === id && item.running) || require('./core/native-turn-state').nativeTurnLive(transcriptPathFor(id)),
 }));
 registry.register(createCodexEngine({
   sessions: codexSessions, accounts: true,
