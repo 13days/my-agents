@@ -188,7 +188,7 @@ function currentSession({ binding, item, switched = false, exists = false, runni
     elements.push(buttons(actions));
     elements.push(collapse('更改模型、账号或执行机器', [
       muted('模型是回答问题的 AI；Claude Code / Codex 是运行它的聊天程序。切换程序会进入另一条会话，两边分别保留上下文。'),
-      buttons([button('更换 AI 模型', action(context, { action: 'models', id: binding.id })), button('账号与连接', action(context, { action: 'route', id: binding.id })), button('切换执行机器', action(context, { action: 'nodes', id: binding.id })), button('切换聊天程序', action(context, { action: 'engine', id: binding.id }))]),
+      buttons([button('更换 AI 模型', action(context, { action: 'models', id: binding.id })), button('账号与连接', action(context, { action: 'route', id: binding.id })), button('切换执行机器', action(context, { action: 'nodes', id: binding.id })), button('切换聊天程序', action(context, { action: 'engine', id: binding.id })), button(context.replyFormat === 'markdown' ? '回复形式：Markdown（改回卡片）' : '回复形式：卡片（改用 Markdown）', action(context, { action: 'reply_format', format: context.replyFormat === 'markdown' ? 'card' : 'markdown' }))]),
     ]));
   } else elements.push(markdown('这不是本话题当前绑定的会话。可先查看对话；切换到此会话后再修改设置。'), buttons(actions));
   elements.push(muted('直接发送消息可继续当前会话。群和话题内已授权成员共用绑定；卡片操作限发起人。'));
@@ -233,6 +233,7 @@ function task({ binding, title, view, elapsed, nodeLabel = '', model = '默认�
   elements.push(collapse('会话信息', [markdown(`**${escape(clip(title, 80))}**\n${escape(binding.cwd)}\n\`${binding.id}\``, true)]));
   if (binding.worktree) elements.push(muted(`独立工作区 · ${escape(binding.worktree.branch)}`));
   const actions = [button('查看最近对话', action(context, { action: 'history', id: binding.id })), button('会话设置', action(context, { action: 'view', id: binding.id }))];
+  if (view.done) actions.push(button('改用 Markdown 回复', action(context, { action: 'reply_format', format: 'markdown' })));
   if (view.accepted && view.done && failed) actions.push(button('继续未完成任务', action(context, { action: 'continue_task', id: binding.id }), 'primary'));
   if (!view.done) actions.push(button(view.nativeAttached ? '断开飞书同步' : '停止当前任务', action(context, { action: 'stop', id: binding.id, ...(context.taskMessageId ? { taskMessageId: context.taskMessageId } : {}) }), 'danger'));
   if (view.nativeAttached && !view.done) elements.push(muted('当前正在接续原终端；断开飞书同步后，终端中的任务仍会运行。'));

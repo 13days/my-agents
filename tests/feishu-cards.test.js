@@ -199,7 +199,7 @@ test('historical conversation settings cannot offer controls for a different cur
   const active = cards.currentSession({ ...context, binding: { id: 'current', cwd: '/project' }, exists: true, running: false });
   const controls = nodes(active).find(n => n.tag === 'collapsible_panel' && n.header?.title?.content === '更改模型、账号或执行机器');
   assert.ok(controls && controls.expanded === false);
-  assert.deepEqual(actions(controls).map(a => a.action), ['models', 'route', 'nodes', 'engine']);
+  assert.deepEqual(actions(controls).map(a => a.action), ['models', 'route', 'nodes', 'engine', 'reply_format']);
   assert.ok(actions(controls).every(a => a.expectedSessionId === 'current'));
 });
 

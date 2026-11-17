@@ -22,6 +22,7 @@ function helpText(engines) {
     '/model [模型 ID|default] 查看或切换当前会话模型，default 恢复默认', '/use 引擎 切换引擎（支持别名）', '/engine 查看当前引擎和切换选项', '/current 查看当前位置的绑定会话', '/history 查看最近对话',
     '/rename 新名称 固定会话名称', '/queue 内容 排队处理', '/steer 内容 立即引导', '/stop 停止当前任务',
     '/route 代理路由：/route 序号切账号、auto 故障转移、rr 轮询、reset 清除冷却、pin 序号|off 固定当前会话、codex direct|proxy',
+    '/reply [card|markdown] 回复形式：任务卡片，或宽屏友好的普通 Markdown 消息（按聊天保存）',
     '/status 网关状态', '/ask 内容 将内容作为正文发给当前引擎',
   ].join('\n');
 }
@@ -51,10 +52,10 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   const configFile = path.join(dir, 'panel-feishu.json'), stateFile = path.join(dir, 'panel-feishu-state.json');
   const inbox = createFeishuInbox(dir);
   const defaults = { allowAllUsers: false, allowAllGroups: false, enabled: false, appId: '', appSecret: '', domain: 'feishu', allowedUserIds: [], disabledUserIds: [], allowedChatIds: [], defaultProject: '', defaultMachine: '', defaultEngine: 'claude', worktree: true, model: '', keepAwake: false, nativeAutoAccept: false };
-  const emptyState = () => ({ bindings: {}, engineBindings: {}, cards: {}, sessionRefs: {}, taskCards: {}, sessionModels: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} });
+  const emptyState = () => ({ replyFormats: {}, bindings: {}, engineBindings: {}, cards: {}, sessionRefs: {}, taskCards: {}, sessionModels: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} });
   let config = defaults, state = emptyState(), phase = 'disabled', lastError = '', channel = null, connecting = null, pairing = null;
   function reloadFiles() {
-    try { config = { ...defaults, ...load(configFile, {}) }; state = { ...emptyState(), ...load(stateFile, {}) }; state.taskCards ||= {}; state.sessionRefs ||= {}; state.sessionModels ||= {}; state.drafts ||= {}; }
+    try { config = { ...defaults, ...load(configFile, {}) }; state = { ...emptyState(), ...load(stateFile, {}) }; state.taskCards ||= {}; state.sessionRefs ||= {}; state.sessionModels ||= {}; state.drafts ||= {}; state.replyFormats ||= {}; }
     catch (e) { lastError = e.message; phase = 'error'; }
   }
   reloadFiles();
@@ -74,6 +75,17 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   const allowed = msg => !config.disabledUserIds.includes(msg.senderId) && (msg.chatType === 'p2p' ? config.allowAllUsers || config.allowedUserIds.includes(msg.senderId) : config.allowAllGroups || config.allowedChatIds.includes(msg.chatId));
   const detailed = msg => msg.chatType === 'p2p' || config.allowedChatIds.includes(msg.chatId);
   const managementNotice = msg => send(msg, { text: '此群使用普通文字回复，处理时显示思考表情。请在「IM 接入」逐项授权此群后使用会话管理功能。/new 在默认项目新建会话；/stop 停止当前任务。' });
+  // Detailed chats choose task cards (default) or plain Markdown messages, per chat.
+  const replyFormat = msg => state.replyFormats?.[msg.chatId] === 'markdown' ? 'markdown' : 'card';
+  const REPLY_FORMATS = { card: 'card', '卡片': 'card', markdown: 'markdown', md: 'markdown', text: 'markdown', '文本': 'markdown' };
+  async function setReplyFormat(msg, input) {
+    const format = REPLY_FORMATS[String(input || '').trim().toLowerCase()];
+    if (!detailed(msg)) return send(msg, { text: '此群使用简洁模式，已是普通文字回复。' });
+    if (!format) return send(msg, { text: `当前回复形式：${replyFormat(msg) === 'markdown' ? '普通 Markdown 消息' : '任务卡片'}\n/reply markdown 改为普通 Markdown 消息（宽屏友好，结束后发送完整结果）\n/reply card 改回任务卡片（实时进度和执行详情）` });
+    if (format === 'markdown') state.replyFormats[msg.chatId] = 'markdown'; else delete state.replyFormats[msg.chatId];
+    persist();
+    return send(msg, { text: format === 'markdown' ? '已改为普通 Markdown 消息回复：处理中在原消息上显示思考表情，结束后发送完整结果。/reply card 可改回卡片。' : '已改回任务卡片回复。/reply markdown 可改为普通 Markdown 消息。' });
+  }
   const scope = msg => {
     const key = contextKey(msg);
     // Migrate only this exact conversation, never inherit the group's main
@@ -257,7 +269,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   async function currentCard(msg, binding, switched = false, resolvedItem = null) {
     const node = nodeOf(binding), where = node === 'local' ? '' : ` · ${nodeLabel(node)}`;
     if (!detailed(msg)) return send(msg, { text: `${contextLabel(msg)} · ${catalog().label(engineOf(binding))}${where} · 模型：${modelLabel(binding)} 已就绪。直接发送消息继续。\n${catalog().switchHint(engineOf(binding))} 切换；各自保留上下文。/node 切换运行位置。/model 查看或切换模型。` });
-    const result = await send(msg, { card: cards.currentSession({ forms: !!panel.workspaces, engines: catalog(), owner: msg.senderId, key: contextKey(msg), location: contextLabel(msg), nodeLabel: nodeLabel(node), model: modelLabel(binding), binding, switched, isCurrent: referenceId(state.bindings[contextKey(msg)]?.id) === referenceId(binding.id), exists: !!session(binding.id) || !!binding.started, item: session(binding.id) || resolvedItem, running: panel.running(binding.id), requests: panel.pendingPermissions?.(binding.id) || [] }) });
+    const result = await send(msg, { card: cards.currentSession({ replyFormat: replyFormat(msg), forms: !!panel.workspaces, engines: catalog(), owner: msg.senderId, key: contextKey(msg), location: contextLabel(msg), nodeLabel: nodeLabel(node), model: modelLabel(binding), binding, switched, isCurrent: referenceId(state.bindings[contextKey(msg)]?.id) === referenceId(binding.id), exists: !!session(binding.id) || !!binding.started, item: session(binding.id) || resolvedItem, running: panel.running(binding.id), requests: panel.pendingPermissions?.(binding.id) || [] }) });
     rememberCard(result, msg, binding);
   }
   async function historyReply(msg, binding) {
@@ -494,8 +506,8 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     }
     if (!prompt && !images.length) throw new Error('请发送文字或图片');
     const id = msg.turnId || messageUUID(msg.messageId), view = { text: '', tools: new Map(), reasoning: new Map(), permissions: new Map(), phase: mode === 'queue' ? '已排队' : '正在处理', done: false, accepted: false };
-    if (!detailed(msg)) {
-      const reply = createSimpleReply({ channel, msg: { ...msg, threadId: threadOf(msg) }, messageId: id, footer: () => `${nodeLabel(nodeOf(binding))} · ${catalog().label(engineOf(binding))} · ${catalog().switchHint(engineOf(binding))} 切换引擎 · 模型：${modelLabel(binding)} · /model 切换模型`, onError: rememberError, onClose: () => monitors.delete(reply.close) });
+    if (!detailed(msg) || replyFormat(msg) === 'markdown') {
+      const reply = createSimpleReply({ channel, msg: { ...msg, threadId: threadOf(msg) }, messageId: id, footer: () => `${nodeLabel(nodeOf(binding))} · ${catalog().label(engineOf(binding))} · ${catalog().switchHint(engineOf(binding))} 切换引擎 · 模型：${modelLabel(binding)} · /model 切换模型${detailed(msg) ? ' · /reply card 改回卡片' : ''}`, onError: rememberError, onClose: () => monitors.delete(reply.close) });
       monitors.add(reply.close);
       try {
         await reply.start();
@@ -609,6 +621,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       return useEngine(msg, target);
     }
     if (command === 'model') return arg ? setModel(msg, arg) : modelsCard(msg);
+    if (command === 'reply') return setReplyFormat(msg, arg);
     if (command === 'help') return send(msg, { text: helpText(engines) });
     if (command === 'node' || command === 'nodes') {
       if (!arg) return nodesCard(msg);
@@ -724,6 +737,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (['models','engine','nodes','route','use_node','use_engine','set_model','stop','permission','continue_task'].includes(value.action) && origin?.sessionId && state.bindings[key]?.id !== origin.sessionId) throw new Error('会话已切换，请发送 /current 获取最新操作卡片');
       if (['models','engine','nodes','route'].includes(value.action) && value.id && referenceId(state.bindings[key]?.id) !== referenceId(value.id)) throw new Error('此卡片不是当前会话，请先切换到该会话再修改设置');
       if (['models','engine','nodes','route','use_node','use_engine','set_model','stop','permission','continue_task'].includes(value.action) && value.expectedSessionId && referenceId(state.bindings[key]?.id) !== referenceId(value.expectedSessionId)) throw new Error('会话已切换，请发送 /current 获取最新操作卡片');
+      if (value.action === 'reply_format') return setReplyFormat(msg, value.format);
       if (value.action === 'new_submit') return submitNewForm(msg, key, value);
       if (value.action === 'new_form') return panel.workspaces ? newForm(msg, '', catalog().fallback(value.engine, defaultEngine()), value) : projectsCard(msg, 0, value.engine);
       if (value.action === 'models') return await modelsCard(msg, '', value.refresh === true);
@@ -846,7 +860,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (next.defaultProject) { if (panel.resolveDirectory) next.defaultProject = await panel.resolveDirectory(next.defaultMachine, next.defaultProject); else { next.defaultProject = fs.realpathSync(next.defaultProject); if (!fs.statSync(next.defaultProject).isDirectory()) throw new Error('默认项目必须是文件夹'); } }
     }
     if (next.model && !/^[\w.\/:\[\]-]{1,100}$/.test(next.model)) throw new Error('模型名称无效');
-    if (next.appId !== config.appId || next.domain !== config.domain) { next.cardCallbacksReady = input.cardCallbacksReady || false; next.allowAllUsers = input.allowAllUsers || false; next.allowAllGroups = input.allowAllGroups || false; next.allowedUserIds = input.allowedUserIds || []; next.disabledUserIds = input.disabledUserIds || []; pairing = null; state = { bindings: {}, engineBindings: {}, cards: {}, sessionRefs: {}, taskCards: {}, sessionModels: {}, listings: {}, receipts: [], projects: [], nodeProjects: {}, drafts: {} }; persist(); }
+    if (next.appId !== config.appId || next.domain !== config.domain) { next.cardCallbacksReady = input.cardCallbacksReady || false; next.allowAllUsers = input.allowAllUsers || false; next.allowAllGroups = input.allowAllGroups || false; next.allowedUserIds = input.allowedUserIds || []; next.disabledUserIds = input.disabledUserIds || []; pairing = null; state = { replyFormats: {}, bindings: {}, engineBindings: {}, cards: {}, sessionRefs: {}, taskCards: {}, sessionModels: {}, listings: {}, receipts: [], projects: [], nodeProjects: {}, drafts: {} }; persist(); }
     const reconnect = next.enabled !== config.enabled || next.appId !== config.appId || next.appSecret !== config.appSecret || next.domain !== config.domain;
     if (reconnect) await stop();
     config = next; atomic(configFile, config); applyRuntime();

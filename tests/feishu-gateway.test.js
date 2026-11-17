@@ -1178,3 +1178,31 @@ test('native receive opt-in is explicit, persisted, and restored independently o
  try { assert.equal(applied.at(-1), true); await restored.configure({ nativeAutoAccept: false }); assert.equal(applied.at(-1), false); }
  finally { await restored.stop(); }
 });
+
+test('detailed chats can switch between task cards and plain Markdown replies from a card or /reply', async t => {
+  const f = await fixture(t); await f.pair();
+  const settle = async (check, label) => { for (let i = 0; i < 100 && !check(); i++) await new Promise(resolve => setTimeout(resolve, 10)); assert.ok(check(), label); };
+  const findButton = (card, text) => JSON.stringify(card).includes(text) && (function walk(node) { if (!node || typeof node !== 'object') return null; if (node.tag === 'button' && JSON.stringify(node.text).includes(text)) return node; for (const value of Object.values(node)) { const found = walk(value); if (found) return found; } return null; })(card);
+  await f.gateway.receive(f.msg('/new'));
+  await f.gateway.receive(f.msg('First question'));
+  const taskCard = f.sent.at(-1);
+  assert.ok(taskCard.content.card, 'cards are the default in detailed chats');
+  await settle(() => f.updated.some(item => item.id === taskCard.messageId && JSON.stringify(item.card).includes('改用 Markdown 回复')), 'finished task card offers Markdown replies');
+  const finished = f.updated.filter(item => item.id === taskCard.messageId).at(-1).card;
+  const button = findButton(finished, '改用 Markdown 回复');
+  await f.gateway.action({ messageId: taskCard.messageId, chatId: 'oc_private', operator: { openId: 'ou_owner' }, action: { tag: 'button', value: button.behaviors?.[0]?.value || button.value } });
+  assert.match(JSON.stringify(f.sent.at(-1).content), /已改为普通 Markdown 消息回复/);
+  const before = f.sent.length;
+  await f.gateway.receive(f.msg('Second question'));
+  await settle(() => f.sent.slice(before).some(item => JSON.stringify(item.content).includes('A complete response.')), 'final Markdown message is sent');
+  const replies = f.sent.slice(before);
+  assert.ok(replies.every(item => !item.content.card), 'no task card in Markdown mode');
+  assert.match(JSON.stringify(replies.at(-1).content), /\/reply card 改回卡片/);
+  assert.ok(f.reactions.some(item => item.action === 'add'), 'thinking reaction shows progress');
+  await f.gateway.receive(f.msg('/reply'));
+  assert.match(JSON.stringify(f.sent.at(-1).content), /当前回复形式：普通 Markdown 消息/);
+  await f.gateway.receive(f.msg('/reply card'));
+  await f.gateway.receive(f.msg('Third question'));
+  assert.ok(f.sent.at(-1).content.card, 'back to task cards');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json'))).replyFormats.oc_private, undefined);
+});
