@@ -1,6 +1,7 @@
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
+const { TRACE_HEADER } = require('../../core/proxy-observation');
 const { retryableStatus } = require('../../core/route-policy');
 const { upstreamNetwork } = require('../../upstream-network');
 
@@ -104,6 +105,7 @@ function extractResponses(reqText, resText, isStream) {
       }
     } else response = JSON.parse(resText);
     if (response) {
+      rec.responseModel = response.model || '';
       rec.usage = normalizeUsage(response.usage);
       rec.respMsgId = response.id || '';
       rec.model = rec.model || response.model || '';
@@ -114,7 +116,7 @@ function extractResponses(reqText, resText, isStream) {
 }
 
 // `relay`: { token, credentials(mode) → headers | null } for remote-node Codex (see above).
-function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), request = { http, https }, relay = null } = {}) {
+function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), request = { http, https }, relay = null, observation = null } = {}) {
   const live = new Map();
   let directUnavailableUntil = 0;
   async function handle(req, res) {
@@ -140,6 +142,8 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
       }
     }
     const info = reserveCapture();
+    const trace = relay?.token && sameSecret(req.headers.authorization || '', `Bearer ${relay.token}`) ? observation?.resolve(req.headers[TRACE_HEADER]) : null;
+    if (trace) info.observation = { ...trace, hop: 1 };
     const sessionId = String(req.headers['session-id'] || req.headers['thread-id'] || '').slice(0, 100);
     Object.assign(info, { sessionId, method: req.method, routing: { mode: 'passthrough', reason: route.mode === 'chatgpt' ? 'codex_subscription' : 'codex_api_key', attempt: 1, requestedModel: '', actualModel: '' } });
     const chunks = [];
@@ -152,7 +156,7 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
       const turn = req.method === 'POST' && /\/responses(\?|$)/.test(req.url);
       if (turn && sessionId) { const e = live.get(sessionId) || { inflight: 0 }; e.inflight++; e.lastAt = Date.now(); live.set(sessionId, e); res.on('close', () => { e.inflight = Math.max(0, e.inflight - 1); e.lastAt = Date.now(); }); }
       const headers = {};
-      for (const [k, v] of Object.entries(req.headers)) if (!HOP.has(k.toLowerCase())) headers[k] = v;
+      for (const [k, v] of Object.entries(req.headers)) if (!HOP.has(k.toLowerCase()) && k.toLowerCase() !== TRACE_HEADER) headers[k] = v;
       delete headers['x-my-agents-local-account'];
       delete headers['x-my-agents-codex-account'];
       delete headers['x-my-agents-egress-hop'];
@@ -190,6 +194,7 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
       const directURL = upstreamURL ? upstreamURL.replace(/\/$/,'') + '/' + tail.pathname.slice(route.prefix.length) + tail.search : route.origin + req.url.slice(route.strip.length);
       const target = new URL(delegatedURL ? delegatedURL + req.url : directURL);
       const attemptInfo = attemptCount++ ? { ...reserveCapture(), sessionId, method: req.method, requestOrder: info.id, routing: { ...info.routing, attempt: attemptCount } } : info;
+      observation?.begin({ ...attemptInfo, purpose: trace?.purpose || (turn ? 'model_request' : 'other'), upstreamId: selectedAccount?.accountId || '', upstreamName: selectedAccount?.label || '', model: info.routing.actualModel });
       let saved = false, connectTimer;
       const save = (code, responseBody, stream, encoding, incomplete) => {
         if (saved) return; saved = true;

@@ -7,6 +7,8 @@ const https = require('https');
 const { upstreamNetwork } = require('./upstream-network');
 const crypto = require('crypto');
 const { modelDefaults } = require('./model-defaults');
+const { captureMetadata } = require('./capture-store');
+const { TRACE_HEADER } = require('./core/proxy-observation');
 const HOP = new Set(['host', 'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade', 'content-length']);
 const ROUTED_ENV = new Set(['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL']);
 function parseEnvInput(input) {
@@ -48,7 +50,7 @@ function sessionIdOf(parsed) {
   return m ? m[1].toLowerCase() : '';
 }
 const SESSION_ROUTES_MAX = 500, LIVE_TTL = 30 * 60 * 1000;
-function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCapture = () => ({}) }) {
+function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCapture = () => ({}), observeRoute = () => {}, associateBridge = () => '' }) {
   const file = path.join(dir, 'panel-proxy.json');
   let config = { mode: 'manual', selected: '', accounts: [], localToken: crypto.randomBytes(32).toString('hex') };
   if (fs.existsSync(file)) config = { ...config, ...JSON.parse(fs.readFileSync(file, 'utf8')) };
@@ -269,6 +271,14 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
           }
         } catch {}
         const headers = cleanHeaders(req.headers);
+        delete headers[TRACE_HEADER];
+        const purpose = captureMetadata({ path: req.url, requestBody: body.toString() }).purpose;
+        const trace = { sessionId, requestOrder: attemptInfo.requestOrder ?? requestInfo.id, parentAttempt: index, hop: 0, purpose,
+          proxyName: account.name, requestedModel: model };
+        attemptInfo.observation = trace;
+        const association = associateBridge(account, trace);
+        if (association) headers[TRACE_HEADER] = association;
+        observeRoute({ ...attemptInfo, purpose, upstreamId: account.id, upstreamName: account.name, model: attemptInfo.routing.actualModel });
         delete headers['x-my-agents-account'];
         if (account.delegateAccount) headers['x-my-agents-account'] = account.delegateAccount;
         delete headers['accept-encoding'];
@@ -349,7 +359,7 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
     if (!account || account.authType === 'passthrough' || account.modelMap['*']) return {};
     const explicit = { ...(process.env || {}), ...(account.env || {}) };
     for (const family of ['OPUS', 'SONNET', 'HAIKU']) if (account.modelMap[family.toLowerCase()]) explicit[`ANTHROPIC_DEFAULT_${family}_MODEL`] = account.modelMap[family.toLowerCase()];
-    return modelDefaults((await discoverModels(account, sessionId, !!pinned)).map(model => model.id), explicit);
+    return modelDefaults((await discoverModels(account, sessionId, !!pinned)).models.map(model => model.id), explicit);
   }
   async function discoverModels(account, sessionId = '', pinned = false) {
     const cacheKey = account.id + account.url + account.token;
@@ -364,11 +374,13 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
           const startedAt = Date.now(), info = { ...reserveCapture(), sessionId, method: 'GET', routing: { mode: config.mode, reason: pinned ? 'session_pin' : 'model_discovery', attempt: 1, requestedModel: '', actualModel: '' } };
           let response, text;
           try { response = await fetch(url, { headers, signal: AbortSignal.timeout(3000) }); text = await response.text(); }
-          catch { try { record(new URL(url).pathname, 502, Date.now() - startedAt, Buffer.alloc(0), Buffer.from('{"error":"model discovery failed"}'), false, {}, '', account.id, account.name, info); } catch {} return []; }
+          catch { try { record(new URL(url).pathname, 502, Date.now() - startedAt, Buffer.alloc(0), Buffer.from('{"error":"model discovery failed"}'), false, {}, '', account.id, account.name, info); } catch {} return { models: [], available: false }; }
           try { record(new URL(url).pathname, response.status, Date.now() - startedAt, Buffer.alloc(0), Buffer.from(text), false, {}, '', account.id, account.name, info); } catch {}
-          if (!response.ok) return [];
-          const body = JSON.parse(text); return (Array.isArray(body.data) ? body.data : []).filter(model => model && typeof model.id === 'string' && model.id.trim()).map(model => ({ id: model.id, name: typeof (model.display_name || model.name) === 'string' ? (model.display_name || model.name) : model.id }));
-        } catch { return []; }
+          if (!response.ok) return { models: [], available: false };
+          const body = JSON.parse(text);
+          if (!Array.isArray(body.data)) return { models: [], available: false };
+          return { available: true, models: body.data.filter(model => model && typeof model.id === 'string' && model.id.trim()).map(model => ({ id: model.id, name: typeof (model.display_name || model.name) === 'string' ? (model.display_name || model.name) : model.id })) };
+        } catch { return { models: [], available: false }; }
       })();
       entry = { at: Date.now(), request }; modelCache.set(cacheKey, entry);
     }
@@ -378,9 +390,17 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
     const pinned = config.sessionRoutes[String(sessionId).toLowerCase()];
     const account = accountId ? accountsOf().find(a => a.enabled && a.id === accountId) : accountsOf().find(a => a.enabled && a.id === (pinned || config.selected)) || accountsOf().find(a => a.enabled);
     if (accountId && !account) throw new Error('账号不存在或已禁用');
-    if (!account || account.authType === 'passthrough') return { models: [], accountName: account?.name || '', forcedModel: '' };
+    if (!account || account.authType === 'passthrough') return { models: [], available: false, accountName: account?.name || '', forcedModel: '' };
     if (refresh) modelCache.delete(account.id + account.url + account.token);
-    return { models: await discoverModels(account, sessionId, !!pinned), accountName: account.name, forcedModel: account.modelMap['*'] || '' };
+    return { ...await discoverModels(account, sessionId, !!pinned), accountName: account.name, forcedModel: account.modelMap['*'] || '' };
+  }
+
+  function configuredTarget(sessionId = '', clientModel = '') {
+    const id = String(sessionId).toLowerCase(), pinned = config.sessionRoutes[id];
+    const account = accountsOf().find(a => a.enabled && a.id === (pinned || config.selected)) || (config.mode !== 'manual' ? accountsOf().find(a => a.enabled) : null);
+    if (!account) return null;
+    const map = account.modelMap || {}, key = clientModel && Object.keys(map).find(k => k !== '*' && clientModel.toLowerCase().includes(k.toLowerCase()));
+    return { accountName: account.name, model: map[clientModel] || map[key] || map['*'] || clientModel, mode: config.mode, pinned: !!pinned };
   }
 
   // Live view of sessions that recently went through the proxy, plus per-session account pins.
@@ -411,6 +431,6 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
     if (!accountsOf().some(a => a.id === selected && a.enabled)) selected = '';
     return save({ mode, selected, accounts: accountsOf().map(({ token, env, delegateAccount, ...a }) => a) });
   }
-  return { requirePool: value => { poolRequired=!!value; }, setRoutingObserver: fn => { routeObserver = fn; }, applyPoolRouting: input => { if (config.mode === input.mode && config.selected === input.selected) return; config={...config,mode:input.mode,selected:input.selected};atomicJSON(file,config); }, setPreparation: fn => { prepare = fn; }, exportAccounts: () => JSON.parse(JSON.stringify(config.accounts)), sharedCatalog: () => ({ token: config.localToken, accounts: config.accounts.filter(a => a.enabled && a.authType !== 'passthrough').map(({ id, name, modelMap }) => ({ id, name, modelMap })) }), setShared: accounts => { for (const account of accounts) {const old=shared.find(row=>row.id===account.id);if(old&&old.token!==account.token)health.delete(account.id);} shared = accounts; }, status, save, route, importSettings, setup, handle, clientEnv, modelEnvForSession, models, sessions, setSessionRoute, reset: () => { health.clear(); return status(); } };
+  return { requirePool: value => { poolRequired=!!value; }, setRoutingObserver: fn => { routeObserver = fn; }, applyPoolRouting: input => { if (config.mode === input.mode && config.selected === input.selected) return; config={...config,mode:input.mode,selected:input.selected};atomicJSON(file,config); }, setPreparation: fn => { prepare = fn; }, exportAccounts: () => JSON.parse(JSON.stringify(config.accounts)), sharedCatalog: () => ({ token: config.localToken, accounts: config.accounts.filter(a => a.enabled && a.authType !== 'passthrough').map(({ id, name, modelMap }) => ({ id, name, modelMap })) }), setShared: accounts => { for (const account of accounts) {const old=shared.find(row=>row.id===account.id);if(old&&old.token!==account.token)health.delete(account.id);} shared = accounts; }, status, save, route, importSettings, setup, handle, clientEnv, modelEnvForSession, models, configuredTarget, sessions, setSessionRoute, reset: () => { health.clear(); return status(); } };
 }
 module.exports = { createRouter, parseEnvInput };

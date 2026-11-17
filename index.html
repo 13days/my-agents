@@ -2332,10 +2332,76 @@ $('#langSel').onchange = e => setLang(e.target.value);
 // 新建对话（＋）或打开已有会话后在此接续；每条消息由本机 `claude -p [--resume]` 执行。
 let chatAbort = null, chatModel = '';
 function modelPreference(engine) { const legacy = 'claude', id = engine || legacy; return localStorage.getItem('panel-chat-model-' + id) ?? (id === legacy ? localStorage.getItem('panel-chat-model') || '' : ''); } // the unsuffixed key predates multi-engine support and belonged to Claude
-function chatModelOptions(models, current) {
+function chatModelOptions(models, current, defaultLabel = rt('默认（跟随账号）', 'Default (account)')) {
   const unique = new Map(models.map(model => [model.id, model]));
   if (current && !unique.has(current)) unique.set(current, { id: current, name: current });
-  return `<option value="">${esc(rt('默认（跟随账号）', 'Default (account)'))}</option>` + Array.from(unique.values(), model => `<option value="${esc(model.id)}" title="${esc(model.id)}"${model.id === current ? ' selected' : ''}>${esc(model.name || model.id)}</option>`).join('');
+  return `<option value="">${esc(defaultLabel)}</option>` + Array.from(unique.values(), model => `<option value="${esc(model.id)}" title="${esc(model.id)}"${model.id === current ? ' selected' : ''}>${esc(model.name || model.id)}</option>`).join('');
+}
+function readAccountModelMap(raw) {
+  let map;
+  try { map = JSON.parse(raw || '{}'); } catch {}
+  if (!map || typeof map !== 'object' || Array.isArray(map) || Object.entries(map).some(([key, value]) => !key || typeof value !== 'string' || !value.trim())) {
+    throw new Error(rt('高级设置中的模型映射必须是字符串 JSON 对象', 'Model mapping in advanced settings must be a JSON object of strings'));
+  }
+  return map;
+}
+function accountDefaultModelMap(raw, model) {
+  const map = readAccountModelMap(raw);
+  if (model) map['*'] = model; else delete map['*'];
+  return map;
+}
+function installAccountModelPicker(dialog) {
+  const select = dialog.querySelector('#route-default-model'), mapping = dialog.querySelector('#route-models');
+  const hint = dialog.querySelector('#route-model-hint'), refreshButton = dialog.querySelector('#route-model-refresh');
+  let account, models = [], generation = 0, request = 0, catalogHint = '';
+  const needsSave = () => rt('请先保存并启用账号，再读取模型列表。', 'Save and enable the account before loading models.');
+  const sync = () => {
+    try {
+      const map = readAccountModelMap(mapping.value);
+      select.innerHTML = chatModelOptions(models, map['*'] || '', rt('不固定，使用客户端请求模型', 'Not fixed; use the client-requested model'));
+      select.disabled = false; hint.textContent = catalogHint;
+    } catch (error) { select.disabled = true; hint.textContent = error.message; }
+    enhancePanelSelect(select);
+  };
+  const refresh = async () => {
+    if (!account?.id || !account.enabled) { catalogHint = needsSave(); sync(); return; }
+    const id = account.id, epoch = generation, revision = ++request;
+    const current = () => dialog.isConnected && dialog.open && generation === epoch && account?.id === id && request === revision;
+    refreshButton.disabled = true;
+    catalogHint = rt('正在读取已保存账号的模型列表…', 'Loading models for the saved account…'); sync();
+    try {
+      const data = await api('GET', `proxy/models?accountId=${encodeURIComponent(id)}&refresh=1`);
+      if (!current()) return;
+      if (data.available === false) {
+        catalogHint = rt('模型列表加载失败，已保留当前模型；可重试刷新。', 'Unable to load models. Current models are preserved; retry refresh.');
+      } else if (!data.models?.length && data.available !== true) {
+        // Older servers return an empty list for both failures and genuinely empty catalogs.
+        catalogHint = rt('未获取到模型（服务未说明是否成功），已保留当前模型；可重试刷新。', 'No models returned; availability is unknown. Current models are preserved; retry refresh.');
+      } else {
+        models = data.models || [];
+        catalogHint = models.length ? `${data.accountName || account.name} · ${models.length} ${rt('个可用模型', 'available models')}` : rt('账号模型目录为空，已保留当前固定模型。', 'The account catalog is empty. The current fixed model is preserved.');
+      }
+      sync();
+    } catch (error) {
+      if (current()) { catalogHint = rt('模型列表加载失败，已保留当前模型；可重试刷新。', 'Unable to load models. Current models are preserved; retry refresh.'); sync(); }
+    } finally { if (current()) refreshButton.disabled = false; }
+  };
+  select.onchange = () => {
+    try { mapping.value = JSON.stringify(accountDefaultModelMap(mapping.value, select.value), null, 2); sync(); }
+    catch (error) { hint.textContent = error.message; sync(); }
+  };
+  mapping.addEventListener('input', sync);
+  refreshButton.onclick = refresh;
+  return {
+    sync,
+    reset(savedAccount) {
+      generation++; request++; account = savedAccount; models = [];
+      refreshButton.disabled = !account?.id || !account.enabled;
+      catalogHint = needsSave(); sync();
+      if (account?.id && account.enabled) return refresh();
+    },
+    invalidate() { generation++; request++; },
+  };
 }
 async function loadChatModels(force = false) {
   const select = $('#chat-model');
@@ -3438,7 +3504,7 @@ async function renderEngineAccountPool(engine, { quiet=false, refresh=false } = 
     const quotaNote=[quota,sharedWorkspace?rt('与池中其他账号同一 workspace，共享 workspace credits','Same workspace as another pool account; workspace credits are shared'):''].filter(Boolean).join(' · ');
     const status=!account.enabled?rt('已停用','Disabled'):authFailed?rt('凭证已失效，需重新授权','Credential revoked; sign in again'):exhausted?rt('额度已用完','Limit reached'):cooling?rt('冷却中','Cooling down'):account.available===false?(account.renewable?rt('可自动刷新','Refreshable'):rt('需重新登录','Sign in needed')):rt('可用','Ready');
     const origin=account.origin||account.sourceNode;
-    return `<article class="codex-pool-account" data-engine-account="${esc(account.id)}"><div><h4>${esc(account.name)} ${data.selected===account.id?`<small>${esc(rt('首选','Preferred'))}</small>`:''}</h4><p class="route-muted"><span class="route-badge">${esc(subscription?rt('订阅','Subscription'):rt('代理 / API','Proxy / API'))}</span> · ${esc(status)}${origin?' · '+esc(rt('来源 ','Source ')+origin):''}</p>${!subscription&&account.url?`<small class="route-muted">${esc(account.url)}</small>`:''}${subscription&&account.expiresAt?`<small class="route-muted">${esc(rt('凭证有效期至 ','Credential expires ')+new Date(account.expiresAt).toLocaleString())}</small>`:''}${quotaNote?`<small class="route-muted">${esc(quotaNote)}</small>`:''}${account.unavailableReason?`<p class="route-muted">${esc(account.unavailableReason)}</p>`:''}</div><div class="node-actions"><button class="btn" data-engine-action="check" ${account.enabled?'':'disabled'}>${esc(rt('检查连接','Check connection'))}</button><button class="btn" data-engine-action="use" ${account.enabled?'':'disabled'}>${esc(rt('新会话用此账号','Use for new chats'))}</button>${subscription?`<button class="btn" data-engine-action="login">${esc(rt('重新授权','Sign in again'))}</button>`:''}${!subscription?`<button class="btn" data-engine-action="edit">${esc(rt('编辑','Edit'))}</button>`:''}<button class="btn" data-engine-action="rename">${esc(rt('改名','Rename'))}</button><button class="btn" data-engine-action="toggle">${esc(account.enabled?rt('停用','Disable'):rt('启用','Enable'))}</button><button class="btn" data-engine-action="remove">${esc(rt('移除','Remove'))}</button></div></article>`;
+    return `<article class="codex-pool-account" data-engine-account="${esc(account.id)}"><div><h4>${esc(account.name)} ${data.selected===account.id?`<small>${esc(rt('首选','Preferred'))}</small>`:''}</h4><p class="route-muted"><span class="route-badge">${esc(subscription?rt('订阅','Subscription'):rt('代理 / API','Proxy / API'))}</span> · ${esc(status)}${origin?' · '+esc(rt('来源 ','Source ')+origin):''}</p>${!subscription&&account.url?`<small class="route-muted">${esc(account.url)}</small>`:''}${subscription&&account.expiresAt?`<small class="route-muted">${esc(rt('凭证有效期至 ','Credential expires ')+new Date(account.expiresAt).toLocaleString())}</small>`:''}${quotaNote?`<small class="route-muted">${esc(quotaNote)}</small>`:''}${account.unavailableReason?`<p class="route-muted">${esc(account.unavailableReason)}</p>`:''}</div><div class="node-actions"><button class="btn" data-engine-action="check" ${account.enabled?'':'disabled'}>${esc(rt('检查连接','Check connection'))}</button><button class="btn" data-engine-action="use" ${account.enabled?'':'disabled'}>${esc(rt('新会话用此账号','Use for new chats'))}</button>${subscription?`<button class="btn" data-engine-action="login">${esc(rt('重新授权','Sign in again'))}</button>`:''}${!subscription?`${engine==='claude'?`<button class="btn" data-engine-action="models">${esc(rt('选择模型','Choose model'))}</button>`:''}<button class="btn" data-engine-action="edit">${esc(rt('编辑','Edit'))}</button>`:''}<button class="btn" data-engine-action="rename">${esc(rt('改名','Rename'))}</button><button class="btn" data-engine-action="toggle">${esc(account.enabled?rt('停用','Disable'):rt('启用','Enable'))}</button><button class="btn" data-engine-action="remove">${esc(rt('移除','Remove'))}</button></div></article>`;
   }).join('')||`<p class="route-muted">${esc(rt('暂无账号。完成上方订阅登录，或添加一个代理账号。','No accounts yet. Sign in with a subscription or add a proxy account.'))}</p>`}</div>`;
   const run=async fn=>{try{await fn();await renderEngineAccountPool(engine);}catch(error){const notice=document.getElementById(prefix+'notice');if(notice)notice.textContent=error.message;}};
   document.getElementById(prefix+'refresh').onclick=()=>renderEngineAccountPool(engine,{refresh:true});
@@ -3469,7 +3535,8 @@ async function renderEngineAccountPool(engine, { quiet=false, refresh=false } = 
     if(action==='login')return openPoolSubscriptionLogin(engine,account);
     if(action==='check'){const result=await api('POST',endpoint+'/check',{accountId:id});const u=result.usage;toast(rt('连接正常，可用模型 ','Connected; models ')+result.models+(u&&!u.error?(u.limitReached?rt('；本周额度已用完','; weekly limit reached'):rt('；本周已用 ','; weekly usage ')+Math.round(u.usedPercent)+'%'):''));}
     if(action==='use')await api('PUT',endpoint+'/routing',{mode:'manual',selected:id});
-    if(action==='edit'){if(engine==='claude'&&!account.shared&&!account.managed)return accountPoolEditors.claude(account);return openPoolProxyForm(engine,account);}
+    if(action==='models')return accountPoolEditors.claude(account,{models:true});
+    if(action==='edit'){if(engine==='claude')return accountPoolEditors.claude(account);return openPoolProxyForm(engine,account);}
     if(action==='toggle')await api('PUT',endpoint+'/'+encodeURIComponent(id),{enabled:!account.enabled});
     if(action==='rename'){const name=prompt(rt('账号名称','Account name'),account.name);if(name?.trim())await api('PUT',endpoint+'/'+encodeURIComponent(id),{name:name.trim()});}
     if(action==='remove'&&confirm(rt('从共享账号池移除？不会删除原机器的 CLI 登录；该账号不会被后台自动重新加入，重新显式导入可恢复。','Remove from the shared pool? Native CLI login stays intact. Background discovery will not re-add this account; explicit import can restore it.')))await api('DELETE',endpoint+'/'+encodeURIComponent(id),{});
@@ -3545,11 +3612,13 @@ async function renderProxyTab() {
       <label>${esc(rt('服务地址', 'Service URL'))}<input id="route-url" type="url" placeholder="https://your-gateway.example.com"></label>
       <label>Token<input id="route-token" type="password" autocomplete="new-password" placeholder="${esc(rt('粘贴账号的 Token', 'Paste your account token'))}"></label>
       <details id="route-advanced"><summary>${esc(rt('高级设置', 'Advanced settings'))}</summary><label>${esc(rt('认证方式', 'Authentication'))}<select id="route-auth"><option value="bearer">ANTHROPIC_AUTH_TOKEN (Bearer)</option><option value="api-key">ANTHROPIC_API_KEY (x-api-key)</option><option value="passthrough">${esc(rt('透传客户端凭证', 'Pass through client credentials'))}</option></select></label><label>${esc(rt('模型映射（选填）', 'Model mapping (optional)'))}<textarea id="route-models" rows="3" spellcheck="false" placeholder='{"sonnet":"upstream-model-id"}'>{}</textarea></label></details></details>
+      <div><label for="route-default-model">${esc(rt('固定默认模型', 'Fixed default model'))}</label><select id="route-default-model" aria-describedby="route-model-hint route-model-rules"></select><button class="btn" type="button" id="route-model-refresh">${esc(rt('刷新模型列表', 'Refresh model list'))}</button><p id="route-model-hint" class="route-muted" role="status"></p><p id="route-model-rules" class="route-muted">${esc(rt('固定规则会覆盖客户端 /model；只修改「*」，保留其他映射，更具体的精确 / 家族规则优先。选择后保存账号生效。', 'The fixed mapping overrides client /model. Only changes “*”; other mappings are preserved and more specific exact / family rules take precedence. Save the account to apply.'))}</p><p class="route-muted">${esc(rt('模型列表使用已保存的地址和凭证；修改地址或 Token 后，请先保存并启用账号再刷新。', 'Models are loaded using the saved URL and credentials. After changing the URL or token, save and enable the account before refreshing.'))}</p></div>
       <label>${esc(rt('账号名称', 'Account name'))}<span class="route-muted"> · ${esc(rt('选填，留空自动命名', 'optional, generated automatically'))}</span><input id="route-name" maxlength="100" placeholder="${esc(rt('例如：工作账号、备用账号', 'e.g. Work, Backup'))}"></label>
       <p id="route-env-hint" class="route-muted">${esc(rt('地址、凭证和模型由代理动态切换；其他 env 变量在选择该账号时写入 Claude 配置，重开 Claude 生效。自动故障转移只切换上游。', 'The proxy switches URLs, credentials and models dynamically. Other env variables are applied to Claude settings when you select this account; restart Claude to load them. Automatic failover switches upstreams only.'))}</p>
       <p id="route-form-error" role="alert"></p><div class="route-dialog-footer"><span class="route-muted">${esc(rt('凭证加密同步到可信集群成员', 'Credentials are encrypted and shared with trusted cluster members'))}</span><button class="btn primary" id="route-submit" type="submit">${esc(rt('保存账号', 'Save account'))}</button></div></form>`;
     document.body.appendChild(dialog);
-    let editing = '', busy = false, parsedEnv, parseTimer;
+    let editing = '', editingAccount, busy = false, parsedEnv, parsedEnvText, parseTimer;
+    const accountModelPicker = installAccountModelPicker(dialog);
     const run = async fn => { try { await fn(); } catch (e) { toast(e.message, false); } };
     const save = async next => {
       routeData = { ...await api('PUT', 'proxy', next), pool: routeData.pool }; draw();
@@ -3583,26 +3652,27 @@ async function renderProxyTab() {
         box.innerHTML = data.accounts.length ? data.accounts.map(a => `<article class="account-usage-row"><div class="account-usage-name"><strong>${esc(a.name)}</strong><span>${f(a.requests)} ${esc(rt('次请求', 'requests'))}</span></div><div class="account-usage-metrics"><span><b>${f(a.inputTokens)}</b>${esc(rt('输入', 'in'))}</span><span><b>${f(a.outputTokens)}</b>${esc(rt('输出', 'out'))}</span><span><b>${f(a.cacheReadTokens)}</b>${esc(rt('缓存读取', 'cache read'))}</span><span><b>${f(a.cacheWriteTokens)}</b>${esc(rt('缓存写入', 'cache write'))}</span><span><b>${a.costKnown ? '$' + a.cost.toFixed(2) : '≈ $' + a.cost.toFixed(2) + '*'}</b>${esc(rt('估算费用', 'est. cost'))}</span></div><small>${esc(a.lastUsedAt ? new Date(a.lastUsedAt).toLocaleString() : '')}</small></article>`).join('') : `<div class="route-empty"><p>${esc(rt('还没有抓到用量。使用 Claude Code 或面板对话发起请求后，会按实际路由账号显示。', 'No usage captured yet. Use Claude Code or panel chat to make a request.'))}</p></div>`;
       } catch (e) { box.innerHTML = `<p class="route-muted">${esc(e.message)}</p>`; }
     }
-    function openForm(account) {
+    function openForm(account, focusModel = false) {
       $('#route-form').reset(); $('#route-models').value = '{}'; $('#route-form-error').textContent = '';
       $('#route-manual').open = !!account; $('#route-example').open = $('#route-advanced').open = false;
-      parsedEnv = undefined; clearTimeout(parseTimer); $('#route-preview').hidden = true;
-      editing = account?.id || '';
+      parsedEnv = parsedEnvText = undefined; clearTimeout(parseTimer); $('#route-preview').hidden = true;
+      editing = account?.id || ''; editingAccount = account;
       $('#route-form-title').textContent = account ? rt('编辑账号', 'Edit account') : rt('添加账号', 'Add account');
       $('#route-token').required = false;
       $('#route-token').placeholder = account ? rt('留空保留原 Token', 'Leave blank to keep your token') : rt('粘贴账号的 Token', 'Paste your account token');
-      if (account) { $('#route-name').value = account.name; $('#route-url').value = account.url; $('#route-auth').value = account.authType; $('#route-models').value = JSON.stringify(account.modelMap, null, 2); }
-      dialog.showModal();
-      (account ? $('#route-name') : $('#route-env')).focus();
+      if (account) { $('#route-name').value = account.name; $('#route-url').value = account.url; $('#route-auth').value = account.authType; $('#route-models').value = JSON.stringify(account.modelMap || {}, null, 2); }
+      dialog.showModal(); accountModelPicker.reset(account);
+      (focusModel ? $('#route-default-model').parentElement.querySelector('.panel-select-trigger') : account ? $('#route-name') : $('#route-env')).focus();
     }
-    function closeForm() { clearTimeout(parseTimer); parsedEnv = undefined; $('#route-token').value = ''; $('#route-env').value = ''; dialog.close(); }
+    function closeForm() { accountModelPicker.invalidate(); clearTimeout(parseTimer); parsedEnv = parsedEnvText = undefined; $('#route-token').value = ''; $('#route-env').value = ''; dialog.close(); }
     dialog.addEventListener('cancel', e => { e.preventDefault(); closeForm(); });
-    dialog.addEventListener('close', () => { $('#route-token').value = ''; $('#route-env').value = ''; });
+    dialog.addEventListener('close', () => { if (dialog.open) return; accountModelPicker.invalidate(); $('#route-token').value = ''; $('#route-env').value = ''; });
     dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) closeForm(); } });
-    accountPoolEditors.claude = account => openForm(account);
+    accountPoolEditors.claude = (account, options) => openForm(account, options?.models);
 
     $('#route-cancel').onclick = closeForm;
     function readEnv(showError = true) {
+      const sameEnv = parsedEnv && parsedEnvText === $('#route-env').value;
       parsedEnv = undefined;
       const preview = $('#route-preview'); preview.hidden = true;
       const raw = $('#route-env').value.trim().replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```$/, '').trim();
@@ -3622,8 +3692,8 @@ async function renderProxyTab() {
         const map = {};
         const routing = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'];
         for (const [key, family] of [['ANTHROPIC_DEFAULT_OPUS_MODEL', 'opus'], ['ANTHROPIC_DEFAULT_SONNET_MODEL', 'sonnet'], ['ANTHROPIC_DEFAULT_HAIKU_MODEL', 'haiku'], ['ANTHROPIC_MODEL', '*']]) if (env[key]) map[family] = env[key];
-        $('#route-models').value = JSON.stringify(map, null, 2);
-        parsedEnv = env;
+        if (!sameEnv) $('#route-models').value = JSON.stringify(map, null, 2);
+        parsedEnv = env; parsedEnvText = $('#route-env').value; accountModelPicker.sync();
         const extra = Object.keys(env).filter(k => !routing.includes(k));
         preview.textContent = rt('✓ 已识别：', '✓ Recognized: ') + url.host + ' · ' + $('#route-auth').value + (extra.length ? rt(' · 额外变量：', ' · Additional env: ') + extra.join(', ') : '');
         preview.hidden = false; $('#route-form-error').textContent = '';
@@ -3645,10 +3715,21 @@ async function renderProxyTab() {
         const url = $('#route-url').value.trim();
         let name = $('#route-name').value.trim();
         if (!name) name = new URL(url).hostname + ' · ' + (routeData.accounts.length + 1);
-        let modelMap; try { modelMap = JSON.parse($('#route-models').value || '{}'); } catch { throw new Error(rt('高级设置中的模型映射 JSON 格式有误', 'Invalid model mapping JSON in advanced settings')); }
-        const account = { id, name, url, token: $('#route-token').value.trim(), authType: $('#route-auth').value, modelMap, ...(parsedEnv ? { env: parsedEnv } : {}), enabled: routeData.accounts.find(a => a.id === editing)?.enabled !== false };
-        const accounts = editing ? routeData.accounts.map(a => a.id === editing ? account : a) : [...routeData.accounts, account];
-        await save({ ...routeData, accounts, selected: routeData.selected || accounts.find(a => a.enabled)?.id || '' }); closeForm();
+        const modelMap = readAccountModelMap($('#route-models').value);
+        const account = { id, name, url, token: $('#route-token').value.trim(), authType: $('#route-auth').value, modelMap, ...(parsedEnv ? { env: parsedEnv } : {}), enabled: editingAccount?.enabled !== false };
+        if (editingAccount?.shared || editingAccount?.managed) {
+          // Shared proxy edits must reach their owner rather than the local proxy snapshot.
+          const { id: accountId, ...patch } = account;
+          if (!patch.token) delete patch.token;
+          // Shared URL/auth fields describe a relay; don't write unchanged relay metadata to its owner.
+          if (editingAccount.shared) for (const key of ['name', 'url', 'authType', 'enabled']) if (patch[key] === editingAccount[key]) delete patch[key];
+          await api('PUT', 'accounts/claude/' + encodeURIComponent(accountId), patch);
+          routeData = await api('GET', 'proxy'); draw(); toast(rt('已保存', 'Saved'));
+        } else {
+          const accounts = editing ? routeData.accounts.map(a => a.id === editing ? account : a) : [...routeData.accounts, account];
+          await save({ ...routeData, accounts, selected: routeData.selected || accounts.find(a => a.enabled)?.id || '' });
+        }
+        closeForm();
       } catch (e) { $('#route-form-error').textContent = e.message; }
       finally { busy = false; $('#route-submit').disabled = false; }
     };
