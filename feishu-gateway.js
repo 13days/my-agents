@@ -48,9 +48,11 @@ function errorMessage(value, seen = new Set()) {
   return typeof value.code === 'string' || typeof value.code === 'number' ? '飞书请求失败（' + value.code + '）' : '';
 }
 
-function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '', leadership = null, now = Date.now }) {
-  const configFile = path.join(dir, 'panel-feishu.json'), stateFile = path.join(dir, 'panel-feishu-state.json');
-  const inbox = createFeishuInbox(dir);
+function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '', leadership = null, now = Date.now, files = {}, inboxDir = dir }) {
+  // Additional bots keep their own config, state and inbox; the primary bot keeps the original names.
+  const configFile = path.join(dir, files.config || 'panel-feishu.json'), stateFile = path.join(dir, files.state || 'panel-feishu-state.json');
+  fs.mkdirSync(inboxDir, { recursive: true, mode: 0o700 });
+  const inbox = createFeishuInbox(inboxDir);
   const defaults = { allowAllUsers: false, allowAllGroups: false, enabled: false, appId: '', appSecret: '', domain: 'feishu', allowedUserIds: [], disabledUserIds: [], allowedChatIds: [], defaultProject: '', defaultMachine: '', defaultEngine: 'claude', worktree: true, model: '', keepAwake: false, nativeAutoAccept: false };
   const emptyState = () => ({ replyFormats: {}, bindings: {}, engineBindings: {}, cards: {}, sessionRefs: {}, taskCards: {}, sessionModels: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} });
   let config = defaults, state = emptyState(), phase = 'disabled', lastError = '', channel = null, connecting = null, pairing = null;
@@ -916,6 +918,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     bootstrapRuntime: applyRuntime,
     async reload() { await stop(); reloadFiles(); applyRuntime(); return status(); },
     revealSecret: () => config.appSecret,
+    hasReplyTarget: token => typeof token === 'string' && replyTargets.has(token),
     messages: options => inbox.messages(config.appId, options),
     // Greets the owner after one-scan setup, so they never hunt for pairing or callback settings.
     async welcome(openId, { callbacks = true } = {}) {

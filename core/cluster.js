@@ -15,9 +15,13 @@ function createCluster({ dir, config, network, gateway = { start: async () => {}
   let lastLeaderAt = monotonicNow(), preferred = config.preferred || '', snapshotChecksum = '', heartbeatBusy = false;
   const peerReports = new Map();
   const gatewayPhase = () => gateway.status?.().phase || (gateway.active ? 'connected' : 'disabled');
-  const syncNames = ['panel-feishu.json', 'panel-feishu-state.json', 'panel-workspaces.json', 'panel-conversations.json'];
+  const baseNames = ['panel-feishu.json', 'panel-feishu-state.json', 'panel-workspaces.json', 'panel-conversations.json'];
+  // Additional Feishu bots replicate with the primary one so a new leader brings all of them up.
+  const botName = /^panel-feishu-bot-cli_[\w-]{4,100}(-state)?\.json$/;
+  const syncable = name => baseNames.includes(name) || botName.test(name);
+  const syncNames = () => { let names = []; try { names = fs.readdirSync(dir).filter(name => botName.test(name)); } catch {} return [...baseNames, ...names]; };
   const localSnapshot = () => {
-    const files = Object.fromEntries(syncNames.flatMap(name => { try { return [[name, fs.readFileSync(path.join(dir, name), 'utf8')]]; } catch { return []; } }));
+    const files = Object.fromEntries(syncNames().flatMap(name => { try { return [[name, fs.readFileSync(path.join(dir, name), 'utf8')]]; } catch { return []; } }));
     const checksum = crypto.createHash('sha256').update(JSON.stringify(files)).digest('hex');
     if (checksum !== snapshotChecksum) { snapshotChecksum = checksum; saved.snapshotIndex++; persist(); }
     return { term: saved.term, index: saved.snapshotIndex, checksum, files };
@@ -25,7 +29,8 @@ function createCluster({ dir, config, network, gateway = { start: async () => {}
   const applySnapshot = async snapshot => {
     if (!snapshot || snapshot.term < saved.term || snapshot.index <= saved.snapshotIndex) return false;
     if (crypto.createHash('sha256').update(JSON.stringify(snapshot.files || {})).digest('hex') !== snapshot.checksum) throw new Error('集群快照校验失败');
-    for (const [name, content] of Object.entries(snapshot.files || {})) { if (!syncNames.includes(name) || typeof content !== 'string') throw new Error('集群快照文件无效'); JSON.parse(content); }
+    for (const [name, content] of Object.entries(snapshot.files || {})) { if (!syncable(name) || typeof content !== 'string') throw new Error('集群快照文件无效'); JSON.parse(content); }
+    for (const name of syncNames()) if (botName.test(name) && !(name in (snapshot.files || {}))) fs.rmSync(path.join(dir, name), { force: true });
     for (const [name, content] of Object.entries(snapshot.files || {})) { const tmp = path.join(dir, name + '.cluster.tmp'); fs.writeFileSync(tmp, content, { mode: 0o600 }); fs.renameSync(tmp, path.join(dir, name)); }
     saved.snapshotIndex = snapshot.index; snapshotChecksum = snapshot.checksum; persist(); await gateway.reload?.(); return true;
   };

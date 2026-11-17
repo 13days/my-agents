@@ -1215,3 +1215,8 @@ body { background: radial-gradient(1100px 520px at 75% -200px, #6d6ef01c, transp
   border-color: #8b8cf880; box-shadow: var(--lift), 0 0 0 1px #8b8cf833, 0 20px 50px -24px #6d6ef0aa; }
 .engine-tabs > button[aria-pressed="true"]::after { background: radial-gradient(560px 200px at 0% 0%, #8b8cf826, transparent 70%); }
 .engine-tabs .engine-emblem { box-shadow: 0 0 0 1px #ffffff12 inset; }
+
+.gateway-bots { display: grid; gap: 8px; margin-bottom: 16px; }
+.gateway-bot { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #ffffff04; }
+.gateway-bot .route-muted { flex: 1; min-width: 0; font-size: 12px; }
+.gateway-bot .btn { min-height: 28px; padding: 3px 10px; font-size: 12px; }

@@ -48,7 +48,7 @@ test('one scan creates the app with callbacks, pairs the scanner and greets them
   r.approve({ client_id: 'cli_new_test', client_secret: 'private-app-secret', user_info: { open_id: 'ou_owner_123', tenant_brand: 'lark' } }); await settle();
   assert.deepEqual(steps, [['patch', 'cli_new_test']]);
   assert.deepEqual(f.configured, [{ appId: 'cli_new_test', appSecret: 'private-app-secret', domain: 'lark', enabled: true, cardCallbacksReady: true, allowedUserIds: ['ou_owner_123'] }]);
-  assert.deepEqual(greeted, [['ou_owner_123', { callbacks: true }]]);
+  assert.deepEqual(greeted, [['ou_owner_123', { callbacks: true, appId: 'cli_new_test' }]]);
   const status = f.setup.status();
   assert.equal(status.phase, 'complete'); assert.equal(status.owner, true); assert.equal(status.welcomed, true);
   assert.equal(status.verificationUrl, '');
@@ -63,7 +63,7 @@ test('a new app that is not visible yet is retried; a failed callback patch stil
   r.approve({ client_id: 'cli_slow_app', client_secret: 'secret', user_info: { open_id: 'ou_owner_456' } }); await new Promise(resolve => setTimeout(resolve, 100));
   assert.equal(connects, 3, 'connection retried until the new app is visible');
   assert.equal(f.configured[0].cardCallbacksReady, false);
-  assert.deepEqual(greeted, [{ callbacks: false }], 'the welcome tells the owner how to enable card buttons');
+  assert.deepEqual(greeted, [{ callbacks: false, appId: 'cli_slow_app' }], 'the welcome tells the owner how to enable card buttons');
   assert.equal(f.setup.status().phase, 'complete'); assert.equal(f.setup.status().callbacks, false);
 });
 

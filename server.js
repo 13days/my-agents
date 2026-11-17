@@ -1980,7 +1980,7 @@ function saveClaudeProxy({ id, input, add = false }) {
 
 const clusterLeadership = { canStart: () => !cluster || cluster.canStart() };
 const macRuntime = require('./mac-runtime').createMacRuntime({ dir: DATA_DIR, claudeDir: CLAUDE_DIR, serverPath: path.join(__dirname, 'server.js'), port: PORT, proxyPort: PROXY_PORT, claudeInfo: HISTORY_WORKER ? undefined : resolveClaude() });
-const feishuGateway = require('./feishu-gateway').createFeishuGateway({
+const feishuGateway = require('./feishu-bots').createFeishuBots({
   dir: DATA_DIR, runtime: macRuntime, replyURL: `http://127.0.0.1:${PORT}/api/feishu/reply`, leadership: clusterLeadership,
   panel: {
     machineId,
@@ -2032,7 +2032,8 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
   },
 });
 
-const larkSetup = require('./lark-setup').createLarkSetup({ dir: DATA_DIR, configure: input => feishuGateway.configure(input),
+// Scanning a new bot adds it next to the existing ones; it never replaces the primary bot.
+const larkSetup = require('./lark-setup').createLarkSetup({ dir: DATA_DIR, configure: input => feishuGateway.addOrConfigure(input),
   welcome: (openId, options) => feishuGateway.welcome(openId, options),
   currentApp: () => { const { config } = feishuGateway.status(); const appSecret = feishuGateway.revealSecret(); return config.appId && appSecret ? { appId: config.appId, appSecret, domain: config.domain } : null; } });
 async function sharedGateway(method, input) {
@@ -2139,6 +2140,7 @@ const server = http.createServer(async (req, res) => {
         try { return sendJSON(res, 200, await feishuGateway.sendReply(JSON.parse(await readBody(req)))); }
         catch (e) { return sendJSON(res, 400, { error: e.message }); }
       }
+      if (req.method === 'DELETE' && parts.length === 4 && parts[2] === 'bots') { try { return sendJSON(res, 200, await sharedGateway('removeBot', decodeURIComponent(parts[3]))); } catch (error) { return sendJSON(res, 400, { error: error.message }); } }
       if (req.method === 'POST' && parts.length === 3 && parts[2] === 'secret') return sendJSON(res, 200, { appSecret: await sharedGateway('revealSecret') });
       if (req.method === 'POST' && parts[2] === 'setup') {
         if (cluster.status().enabled && !cluster.canStart()) return sendJSON(res, 409, { error: '扫码创建机器人请打开 IM 主节点的面板；现有连接和共享设置可在当前页面管理' });
@@ -2837,7 +2839,7 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
   clusterNetwork.handle('conversations.put', (_, record) => { if (!cluster.canStart()) throw new Error('当前节点没有共享状态写入租约'); conversations.merge(record); return { ok: true }; });
   clusterNetwork.handle('gateway.invoke', async (_, { method, input }) => {
     if (!cluster.canStart()) throw new Error('当前节点没有 IM 主节点租约');
-    if (!['status', 'configure', 'messages', 'refreshContacts', 'labelContact', 'newPairing', 'start', 'revealSecret', 'repairCard'].includes(method)) throw new Error('未知网关操作');
+    if (!['status', 'configure', 'messages', 'refreshContacts', 'labelContact', 'newPairing', 'start', 'revealSecret', 'repairCard', 'removeBot'].includes(method)) throw new Error('未知网关操作');
     return feishuGateway[method](input);
   });
 } else cluster = require('./core/cluster').createStandalone(feishuGateway);

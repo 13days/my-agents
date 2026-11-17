@@ -21,6 +21,7 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
   $('#render').innerHTML = `${imHeader(data)}
     <div class="gateway-status chart"><div><span id="feishu-phase" class="route-badge"></span><p id="feishu-connection-note" class="route-muted"></p></div><div class="gateway-runtime" id="feishu-runtime"></div></div>
     <div class="gateway-columns"><section class="chart"><h3>${esc(rt('连接机器人', 'Connect your bot'))}</h3>
+      ${(data.bots || []).length ? `<div class="gateway-bots"><p class="route-muted">${esc(rt('同时监听的机器人', 'Bots listening'))}</p>${data.bots.map(bot => `<div class="gateway-bot" data-bot="${esc(bot.appId)}"><span class="status-dot" style="background:${bot.phase === 'connected' ? 'var(--green)' : 'var(--danger)'}"></span><code>${esc(bot.appId)}</code><span class="route-muted">${esc(bot.primary ? rt('主机器人', 'Primary') : rt('附加', 'Additional'))} · ${esc(bot.phase === 'connected' ? rt('已连接', 'Connected') : bot.lastError || bot.phase)} · ${esc(rt('授权用户 ', 'Users ') + bot.users)}</span>${bot.primary ? '' : `<button type="button" class="btn danger" data-remove-bot="${esc(bot.appId)}">${esc(rt('移除', 'Remove'))}</button>`}</div>`).join('')}</div>` : ''}
       <section id="feishu-cli-setup" class="gateway-cli-setup" ${cliSetup.available ? '' : 'hidden'}>
         <p class="route-muted">${esc(rt('已检测到 Lark CLI，扫码创建机器人并自动连接，无需填写 App ID 和 Secret。', 'Lark CLI detected. Scan to create and connect your bot without entering app credentials.'))}</p>
         <div class="gateway-cli-actions"><select id="feishu-cli-brand" aria-label="${esc(rt('扫码创建服务', 'Service for QR setup'))}"><option value="feishu">飞书</option><option value="lark">Lark</option></select><button class="btn primary" type="button" id="feishu-cli-create">${esc(rt('扫码创建机器人', 'Create bot with QR code'))}</button><button class="btn" type="button" id="feishu-cli-callbacks" hidden>${esc(rt('启用卡片按钮（扫码）', 'Enable card buttons (scan)'))}</button><button class="btn" type="button" id="feishu-cli-cancel" hidden>${esc(rt('取消', 'Cancel'))}</button></div>
@@ -64,6 +65,10 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
     </section>
     <details class="chart gateway-setup" ${c.appId || cliSetup.available ? '' : 'open'}><summary>${esc(rt('首次接入：飞书应用配置', 'First-time app setup'))}</summary><ol><li>${esc(rt('在飞书开放平台创建企业自建应用，开启机器人能力，填写上面的 App ID 和 Secret。', 'Create a custom app in the developer console, enable the bot feature, and enter its App ID and Secret above.'))} <a href="https://open.feishu.cn/app" target="_blank" rel="noreferrer">${esc(rt('打开飞书开放平台', 'Open developer console'))}</a></li><li>${esc(rt('开通 im:message:send_as_bot、im:message.p2p_msg:readonly、im:message.reactions:write_only 权限；需要群聊时再添加 im:message.group_at_msg:readonly。', 'Enable im:message:send_as_bot im:message.p2p_msg:readonly and im:message.reactions:write_only; add im:message.group_at_msg:readonly for groups.'))}</li><li>${esc(rt('事件配置选择“长连接”，订阅 im.message.receive_v1；回调配置也选择“长连接”，添加 card.action.trigger。', 'Choose long connection for events and subscribe to im.message.receive_v1. Also choose long connection under callbacks and add card.action.trigger.'))}</li><li>${esc(rt('发布应用版本，确认你在应用可用范围内；保存启用网关后完成配对。', 'Publish the app, include yourself in its availability scope, then enable the gateway and pair your account.'))}</li></ol><p class="route-muted">${esc(rt('Mac 主动连接飞书，不需要公网 IP、端口映射或共享云存储。会话记录仍以这台 Mac 上的 Panel 为准。', 'The Mac connects outbound to Feishu. No public IP, port forwarding or shared cloud store is required. Session records remain on this Mac.'))}</p><p id="feishu-sdk-hint" class="route-muted" ${data.sdkAvailable ? 'hidden' : ''}>${esc(rt('源码运行需先安装可选依赖：npm install', 'For source checkouts, install the optional dependency first: npm install'))}</p></details>`;
   bindIMChannelControls();
+  document.querySelectorAll('[data-remove-bot]').forEach(button => button.onclick = async () => {
+    if (!confirm(rt('停止监听并移除这个附加机器人？飞书里的应用本身不会被删除。', 'Stop listening and remove this bot? The Feishu app itself is kept.'))) return;
+    try { await api('DELETE', 'feishu/bots/' + encodeURIComponent(button.dataset.removeBot)); toast(rt("已移除", "Removed")); renderFeishuGateway(); } catch (error) { toast(error.message); }
+  });
   // Keep the existing form controls and handlers; organize them into focused pages.
   const canvas = $('#render');
   const status = canvas.querySelector('.gateway-status');
@@ -170,7 +175,7 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
     setupWasActive ||= active;
     recoverExisting = !!setup.canRecover && !hasCredentials;
     $('#feishu-cli-create').disabled = active;
-    $('#feishu-cli-create').textContent = recoverExisting ? rt('连接已创建机器人', 'Connect the created bot') : setup.phase === 'complete' ? rt('重新扫码创建', 'Create another bot') : rt('扫码创建机器人', 'Create bot with QR code');
+    $('#feishu-cli-create').textContent = recoverExisting ? rt('连接已创建机器人', 'Connect the created bot') : hasCredentials || setup.phase === 'complete' ? rt('＋ 扫码添加机器人', 'Add a bot with QR code') : rt('扫码创建机器人', 'Create bot with QR code');
     $('#feishu-cli-brand').disabled = active;
     $('#feishu-cli-callbacks').hidden = !hasCredentials;
     $('#feishu-cli-callbacks').disabled = active || callbackReady;

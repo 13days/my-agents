@@ -127,7 +127,7 @@ function createLarkSetup({ dir, configure, findCLI = findLarkCLI, spawnCLI = spa
       if (job !== current || current.phase !== 'completing') return;
       await retry(() => configure({ ...app, enabled: true, cardCallbacksReady: callbacks, ...(owner ? { allowedUserIds: [owner] } : {}) }), 6, settleMs);
       current.owner = !!owner; current.callbacks = callbacks;
-      if (owner) current.welcomed = await retry(() => welcome(owner, { callbacks }), 3, settleMs).then(() => true, () => false);
+      if (owner) current.welcomed = await retry(() => welcome(owner, { callbacks, appId: app.appId }), 3, settleMs).then(() => true, () => false);
       if (current.phase === 'completing') current.phase = 'complete';
       clearTimeout(current.timer);
     }).catch(() => fail('扫码未完成或应用创建失败，请重新扫码创建'));
