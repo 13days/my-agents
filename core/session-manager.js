@@ -11,7 +11,7 @@ const httpError = (status, message) => Object.assign(new Error(message), { statu
 //
 // Every run publishes the same event vocabulary (see core/events.js) into a
 // replayable job so a reconnecting client resumes where it left off.
-function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, retentionMs = 5 * 60 * 1000, readyTimeoutMs = 90000, ensureNode = async () => {}, resolveLocation = null, resolveModel = null, runStore = null, log = console }) {
+function createSessionManager({ registry, history, stallMs = 90 * 1000, idleMs = 3 * 60 * 1000, retentionMs = 5 * 60 * 1000, readyTimeoutMs = 90000, ensureNode = async () => {}, resolveLocation = null, resolveModel = null, runStore = null, log = console }) {
   const runs = new Map();
   const aliases = new Map(), handoffAliases = new Set(), preparations = new Map();
   runStore?.recover();
@@ -23,6 +23,19 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
   // original remains canonical, even if an old run recorded a different id.
   const resolveId = id => !handoffAliases.has(id) && history.isOriginal?.(id) ? id : aliases.get(id) || id;
   const live = run => run && !run.job.closed;
+  // An engine that reports idle while a turn is still open, with no events for a while, lost
+  // that turn (rejected input, crashed writer…). End it rather than let clients wait forever.
+  function sweepStalled() {
+    for (const run of runs.values()) {
+      if (!live(run) || !run.job.openTurns().length) continue;
+      let busy = true; try { busy = !!run.session.busy; } catch {}
+      if (!busy && Date.now() - run.job.lastEventAt >= stallMs) {
+        const error = '引擎已空闲，但本轮没有收到完成结果；请查看最近对话核对后再继续';
+        for (const messageId of run.job.openTurns()) { run.job.publish('error', { messageId, error, abandoned: true }); try { history.record?.(run.id, 'error', { messageId, error }); } catch {} }
+      }
+    }
+  }
+  const stallTimer = setInterval(sweepStalled, Math.max(1000, Math.min(15000, stallMs / 3))); stallTimer.unref?.();
 
   const validateInput = input => {
     const prompt = typeof input.prompt === 'string' ? input.prompt.trim() : '';
@@ -206,11 +219,11 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
   }
 
   return {
-    start, send, stop, respondPermission, pendingPermissions, watch, warn, get, busy, resolveId,
+    start, send, stop, respondPermission, pendingPermissions, watch, warn, get, busy, resolveId, sweepStalled,
     tasks: () => runStore?.list() || [...preparations.values()],
     preparing: () => [...preparations.values()].map(({ controller, ...row }) => row),
     running: () => [...preparations.values()].map(item => item.conversationId).concat([...runs.values()].filter(run => live(run) && (run.session.currentId || run.session.pendingCount)).map(run => run.id)),
-    shutdown() { for (const item of preparations.values()) item.controller.abort(); for (const run of runs.values()) if (live(run)) { try { run.session.stop(); } catch (e) { log.warn?.(e.message); } } },
+    shutdown() { clearInterval(stallTimer); for (const item of preparations.values()) item.controller.abort(); for (const run of runs.values()) if (live(run)) { try { run.session.stop(); } catch (e) { log.warn?.(e.message); } } },
   };
 }
 module.exports = { createSessionManager, httpError };

@@ -215,3 +215,30 @@ test('native attachment skips pool model resolution and records inherited settin
  assert.equal(opened[0].nativeOnly,true);assert.equal(opened[0].model,'');assert.equal(run.job.meta.model,'');assert.equal(run.job.meta.nativeAttached,true);
  await settle();manager.shutdown();
 });
+
+test('every turn ends explicitly: closing a job or a silent idle engine ends open turns with an error', async () => {
+  const { createChatJob } = require('../core/chat-job');
+  const job = createChatJob({}), seen = [];
+  job.listen((event, data) => seen.push([event, data.messageId]));
+  job.publish('input', { id: 'turn-one-1' }); job.publish('input', { id: 'turn-two-2' });
+  job.publish('done', { messageId: 'turn-one-1' });
+  assert.deepEqual(job.openTurns(), ['turn-two-2']);
+  job.close();
+  assert.deepEqual(seen.slice(-2), [['error', 'turn-two-2'], ['end', undefined]], 'the unfinished turn ends before the job does');
+  const stopped = createChatJob({}); stopped.publish('input', { id: 'turn-three' }); stopped.publish('stopped', {});
+  assert.deepEqual(stopped.openTurns(), [], 'stop ends every open turn');
+
+  // An engine that accepts a turn, goes idle and never reports back.
+  const registry = createRegistry({ defaultEngine: 'silent' }); registry.addNode({ id: 'local', host: createLocalHost() });
+  let busy = true;
+  registry.register({ id: 'silent', meta: { label: 'Silent', short: 'Silent' }, capabilities: { sessionId: 'assigned' }, validModel: () => true, owns: async () => false,
+    async open(options) { return { ready: Promise.resolve(options.sessionId), submit() {}, stop() { options.onClosed(); }, close() { options.onClosed(); }, respondPermission() {}, get currentId() { return ''; }, get pendingCount() { return 0; }, get busy() { return busy; } }; } });
+  const manager = createSessionManager({ registry, stallMs: 0, history: { ownerOf: () => null, messages: () => ({ messages: [] }), touch() {} } });
+  const { run } = await manager.start({ cwd: os.tmpdir(), prompt: 'hello', engine: 'silent' });
+  manager.sweepStalled();
+  assert.ok(!run.job.events.some(e => e.event === 'error'), 'a busy engine is left alone');
+  busy = false; manager.sweepStalled();
+  assert.match(run.job.events.find(e => e.event === 'error').data.error, /没有收到完成结果/);
+  assert.deepEqual(run.job.openTurns(), []);
+  manager.shutdown();
+});

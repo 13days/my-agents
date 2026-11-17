@@ -2,7 +2,16 @@
 function createChatJob(meta, { journal = null, recovered = false } = {}) {
   const events = [], subscribers = new Set(), listeners = new Set(), started = new Map();
   let closed = recovered;
-  let sequence = 0, journalHealthy = !!journal, persistenceError = '';
+  let sequence = 0, journalHealthy = !!journal, persistenceError = '', lastEventAt = Date.now();
+  // Every accepted turn must end with done, error or stopped. Track the ones still open so a
+  // closing job or a silent engine can end them explicitly instead of leaving cards spinning.
+  const open = new Map();
+  const track = (event, data) => {
+    const id = data.messageId || data.id;
+    if (event === 'input' && id) open.set(id, Date.parse(data.timestamp) || Date.now());
+    else if (event === 'stopped') open.clear();
+    else if (event === 'done' || event === 'error') { if (id && open.has(id)) open.delete(id); else { const oldest = open.keys().next().value; if (oldest !== undefined) open.delete(oldest); } }
+  };
   const write = (res, event, data, seq) => { if (!res.destroyed && !res.writableEnded) res.write(`${seq ? 'id: ' + (meta.jobId ? meta.jobId + ':' : '') + seq + '\n' : ''}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
   const remember = (event, data, seq) => {
     sequence = Math.max(sequence, seq);
@@ -10,12 +19,16 @@ function createChatJob(meta, { journal = null, recovered = false } = {}) {
     if (event === 'text' && last?.event === 'text' && last.data.messageId === data.messageId) { last.data.text += data.text || ''; last.seq = seq; }
     else events.push({ event, data: { ...data }, seq });
   };
-  if (recovered && journal) for (const row of journal.read()) remember(row.event, row.data, row.seq);
+  if (recovered && journal) for (const row of journal.read()) { remember(row.event, row.data, row.seq); track(row.event, row.data); }
   return {
     meta,
     events,
     get closed() { return closed; },
     get persistenceError() { return persistenceError; },
+    get lastEventAt() { return lastEventAt; },
+    openTurns: () => [...open.keys()],
+    // Ends every open turn with an error; used when the run can no longer finish them.
+    abandon(reason) { for (const messageId of [...open.keys()]) this.publish('error', { messageId, error: reason, abandoned: true }); },
     publish(event, data) {
       if (closed) return;
       data = { ...data, timestamp: data.timestamp || new Date().toISOString() };
@@ -32,7 +45,7 @@ function createChatJob(meta, { journal = null, recovered = false } = {}) {
         for (const listener of listeners) { try { listener('warning', warning); } catch {} }
         seq = ++sequence;
       }
-      remember(event, data, seq);
+      remember(event, data, seq); track(event, data); lastEventAt = Date.now();
       for (const res of subscribers) write(res, event, data, seq);
       for (const listener of listeners) { try { listener(event, data); } catch {} }
     },
@@ -58,6 +71,7 @@ function createChatJob(meta, { journal = null, recovered = false } = {}) {
     },
     close() {
       if (closed) return;
+      this.abandon('会话连接已结束，本轮没有收到完成结果；请查看最近对话核对后再继续');
       this.publish('end', {}); closed = true;
       for (const res of subscribers) if (!res.destroyed) res.end();
       subscribers.clear();
