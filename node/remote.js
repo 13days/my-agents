@@ -86,7 +86,12 @@ async function attachRemoteNode({ peer, registry, transport = 'ws', pin = null, 
             if (proxy.state.currentId) proxy.state.pendingCount++; else proxy.state.currentId = turnId;
             proxy.state.busy = true;
             if (onAccept) proxy.accepts.set(turnId, onAccept);
-            send('session.submit', { turnId, input, steer, accept: !!onAccept }).then(state => { if (state) Object.assign(proxy.state, state); });
+            // A rejected turn (e.g. images sent to a native terminal) must end that turn, not look like a retry.
+            connection.peer.call('session.submit', { sid, turnId, input, steer, accept: !!onAccept }).then(state => { if (state) Object.assign(proxy.state, state); }, e => {
+              proxy.accepts.delete(turnId);
+              if (proxy.state.currentId === turnId) { proxy.state.currentId = ''; proxy.state.busy = proxy.state.pendingCount > 0; } else proxy.state.pendingCount = Math.max(0, proxy.state.pendingCount - 1);
+              if (!done) options.emit('error', { messageId: turnId, error: `${host.label}：${e.message}` });
+            });
           },
           stop: () => send('session.stop'),
           close: () => send('session.close'),

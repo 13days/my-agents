@@ -37,9 +37,8 @@ function echoEngine() {
   };
 }
 
-async function connected() {
+async function connected(engine = echoEngine()) {
   const [hubSide, nodeSide] = pairTransports();
-  const engine = echoEngine();
   serveNode({ peer: createPeer(nodeSide), host: createLocalHost(), engines: [engine], id: 'devbox', label: '云端开发机' });
   const registry = createRegistry({ defaultEngine: 'echo' });
   registry.addNode({ id: 'local', host: createLocalHost() });
@@ -320,4 +319,20 @@ test('a rebuilt controller finds the existing native execution instead of starti
  const original=await first.registry.adapter('retained','retained-node').open(base);original.submit('original-turn',{prompt:'work'});await until(()=>runtime.running().length===1);first.hub.close();
  const second=await connect();t.after(()=>{second.hub.close();runtime.shutdown()});const recovered=await second.registry.adapter('retained','retained-node').open({...base,resume:true});
  assert.equal(await recovered.ready,'retained-native');assert.equal(launches,1);assert.equal(recovered.currentId,'original-turn');
+});
+
+test('a turn the node rejects ends with an error instead of an endless retry', async () => {
+  const engine = echoEngine(), open = engine.open;
+  // Like the native terminal channel: text only, images are refused at submit.
+  engine.open = async options => { const session = await open(options), submit = session.submit; session.submit = (id, input, ...rest) => { if (input.images?.length) throw new Error('原终端消息通道当前只支持文字'); return submit(id, input, ...rest); }; return session; };
+  const { manager } = await connected(engine);
+  const { sessionId, run } = await manager.start({ engine: 'echo', node: 'devbox', prompt: 'hi', cwd: os.tmpdir() });
+  await until(() => !manager.busy(sessionId));
+  const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a4930000000049454e44ae426082', 'hex').toString('base64');
+  const { messageId } = manager.send(sessionId, { prompt: 'look', images: [{ mimeType: 'image/png', data: png }], mode: 'queue' });
+  await until(() => run.job.events.some(e => e.event === 'error' && e.data.messageId === messageId));
+  const error = run.job.events.find(e => e.event === 'error');
+  assert.match(error.data.error, /云端开发机：原终端消息通道当前只支持文字/);
+  assert.ok(!run.job.events.some(e => e.event === 'warning'), 'not reported as a retry');
+  await until(() => !manager.busy(sessionId));
 });
