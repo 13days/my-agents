@@ -182,3 +182,17 @@ test('end_turn alone cannot finish before stop hooks and the native terminal tur
  f.ended('Actual final reply'); await until(() => f.events.some(e => e.event === 'done'));
  assert.equal(f.events.filter(e => e.event === 'done').length, 1);
 });
+
+test('images sent to the original terminal arrive as private local files the window can read',async t=>{
+ const f=await fixture(t),events=[];
+ const session=f.native.open({record:f.row,sessionId:f.row.sessionId,emit:(event,data)=>events.push({event,data}),onIdle(){},onClosed(){}});t.after(()=>session.close());
+ const png=Buffer.from('89504e470d0a1a0a','hex');
+ session.submit('with-image',{prompt:'what is in this screenshot',images:[{mimeType:'image/png',data:png.toString('base64')}]});
+ await until(()=>events.some(x=>x.event==='done'));
+ const content=f.frames.find(x=>x.type==='user').message.content,file=content.match(/1\. (\S+\.png)/)?.[1];
+ assert.match(content,/what is in this screenshot/);assert.match(content,/Read 工具/);
+ assert.ok(file&&file.startsWith(path.join(f.home,'my-agents-images')),'saved under the Claude home');
+ assert.deepEqual(fs.readFileSync(file),png);
+ assert.equal(fs.statSync(file).mode&0o777,0o600);assert.equal(fs.statSync(path.dirname(file)).mode&0o777,0o700);
+ assert.throws(()=>session.submit('bad-type',{prompt:'x',images:[{mimeType:'image/bmp',data:'AAAA'}]}),/格式不受支持/);
+});

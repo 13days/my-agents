@@ -65,6 +65,26 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
       });
     });
   }
+  // The terminal inbox carries text only, so images travel as private local files the
+  // original window reads with its own tools. Old files are pruned after a week.
+  const IMAGE_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
+  function saveImages(sessionId, turnId, images = []) {
+    if (!Array.isArray(images) || !images.length) return [];
+    if (images.length > 4) throw new Error('最多附带 4 张图片');
+    const root = path.join(home, 'my-agents-images'), dir = path.join(root, sessionId.replace(/[^\w.-]/g, '_'));
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    for (const target of [root, dir]) { const stat = fs.lstatSync(target); if (stat.isSymbolicLink() || !stat.isDirectory() || stat.uid !== process.getuid?.()) throw new Error('图片暂存目录不安全，未发送'); fs.chmodSync(target, 0o700); }
+    try { for (const name of fs.readdirSync(dir)) { const file = path.join(dir, name); if (now() - fs.statSync(file).mtimeMs > 7 * 24 * 3600 * 1000) fs.rmSync(file, { force: true }); } } catch {}
+    return images.map((image, i) => {
+      const ext = IMAGE_TYPES[image?.mimeType];
+      if (!ext || typeof image.data !== 'string' || !image.data) throw new Error('图片格式不受支持');
+      const data = Buffer.from(image.data, 'base64');
+      if (!data.length || data.length > 5 * 1024 * 1024) throw new Error('图片超过 5 MB，请缩小后重试');
+      const file = path.join(dir, `${String(turnId).replace(/[^\w.-]/g, '_')}-${i + 1}.${ext}`);
+      fs.writeFileSync(file, data, { mode: 0o600, flag: 'w' });
+      return file;
+    });
+  }
   function open({ record, sessionId, emit, onIdle, onClosed }) {
     const file = transcriptPath(sessionId);
     if (!file) throw new Error('原终端的会话记录暂不可读，未另建会话');
@@ -164,7 +184,6 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
       submit(id, input, _steer, accept) {
         if (closed) throw new Error('原终端同步已断开，请重新选择会话');
         if (seen.has(id)) return;
-        if (input.images?.length) throw new Error('原终端消息通道当前只支持文字，请在原窗口发送图片');
         if (pending.length >= 20) throw new Error('等待中的消息太多，请稍后发送');
         const prefix = '[my-agents 飞书发送上下文，本轮有效]\n';
         let context = input.context || '';
@@ -173,7 +192,9 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
           if (lines[0]?.startsWith('当前会话由 my-agents 直接启动')) lines.shift();
           context = prefix + `本轮消息投递到原来已打开的 Claude Code 终端进程，不是 my-agents 新启动的 CLI。原进程版本：${record.version || '未提供'}；模型、登录与工具权限沿用该原窗口。\n` + lines.join('\n');
         }
-        const marker = `my-agents-im:${id}`, body = `[来自飞书 · ${marker}]\n${context}\n\n${input.prompt || ''}`;
+        const files = saveImages(sessionId, id, input.images);
+        const attached = files.length ? `\n\n附带 ${files.length} 张图片，已保存为本机文件，请用 Read 工具查看：\n${files.map((file, i) => `${i + 1}. ${file}`).join('\n')}` : '';
+        const marker = `my-agents-im:${id}`, body = `[来自飞书 · ${marker}]\n${context}\n\n${input.prompt || ''}${attached}`;
         if (Buffer.byteLength(body) > 512 * 1024) throw new Error('发送给原终端的消息过长');
         seen.add(id); pending.push({ id, marker, body, text: new Map(), tools: new Set(), background: new Map(), results: new Set(), endCandidate: false, turnEnded: false }); accept?.();
         emit('warning', { messageId: id, kind: 'native_attachment', nativeSession: { id: sessionId, name: record.name || '', pid: record.pid }, warning: '已连接原来打开的 Claude Code 窗口。飞书消息会由这个窗口处理，回到终端可以直接接着聊；断开 IM 同步不会关闭原窗口。' });
