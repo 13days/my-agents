@@ -22,7 +22,7 @@ function helpText(engines) {
     '/model [模型 ID|default] 查看或切换当前会话模型，default 恢复默认', '/use 引擎 切换引擎（支持别名）', '/engine 查看当前引擎和切换选项', '/current 查看当前位置的绑定会话', '/history 查看最近对话',
     '/rename 新名称 固定会话名称', '/queue 内容 排队处理', '/steer 内容 立即引导', '/stop 停止当前任务',
     '/route 代理路由：/route 序号切账号、auto 故障转移、rr 轮询、reset 清除冷却、pin 序号|off 固定当前会话、codex direct|proxy',
-    '/reply [card|markdown] 回复形式：任务卡片，或宽屏友好的普通 Markdown 消息（按聊天保存）',
+    '/reply [wide|card|markdown] 回复形式：宽屏卡片（保留思考过程）、标准卡片或普通 Markdown 消息（按聊天保存）',
     '/status 网关状态', '/ask 内容 将内容作为正文发给当前引擎',
   ].join('\n');
 }
@@ -76,15 +76,17 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   const detailed = msg => msg.chatType === 'p2p' || config.allowedChatIds.includes(msg.chatId);
   const managementNotice = msg => send(msg, { text: '此群使用普通文字回复，处理时显示思考表情。请在「IM 接入」逐项授权此群后使用会话管理功能。/new 在默认项目新建会话；/stop 停止当前任务。' });
   // Detailed chats choose task cards (default) or plain Markdown messages, per chat.
-  const replyFormat = msg => state.replyFormats?.[msg.chatId] === 'markdown' ? 'markdown' : 'card';
-  const REPLY_FORMATS = { card: 'card', '卡片': 'card', markdown: 'markdown', md: 'markdown', text: 'markdown', '文本': 'markdown' };
+  const replyFormat = msg => ['markdown', 'wide'].includes(state.replyFormats?.[msg.chatId]) ? state.replyFormats[msg.chatId] : 'card';
+  const REPLY_FORMATS = { card: 'card', '卡片': 'card', wide: 'wide', fill: 'wide', '宽屏': 'wide', markdown: 'markdown', md: 'markdown', text: 'markdown', '文本': 'markdown' };
+  const REPLY_LABELS = { card: '任务卡片', wide: '宽屏任务卡片', markdown: '普通 Markdown 消息' };
   async function setReplyFormat(msg, input) {
     const format = REPLY_FORMATS[String(input || '').trim().toLowerCase()];
     if (!detailed(msg)) return send(msg, { text: '此群使用简洁模式，已是普通文字回复。' });
-    if (!format) return send(msg, { text: `当前回复形式：${replyFormat(msg) === 'markdown' ? '普通 Markdown 消息' : '任务卡片'}\n/reply markdown 改为普通 Markdown 消息（宽屏友好，结束后发送完整结果）\n/reply card 改回任务卡片（实时进度和执行详情）` });
-    if (format === 'markdown') state.replyFormats[msg.chatId] = 'markdown'; else delete state.replyFormats[msg.chatId];
+    const options = '/reply wide 宽屏任务卡片（撑满窗口，保留思考过程、工具进度和执行详情）\n/reply card 标准宽度任务卡片\n/reply markdown 普通 Markdown 消息（无实时进度，结束后发送完整结果）';
+    if (!format) return send(msg, { text: `当前回复形式：${REPLY_LABELS[replyFormat(msg)]}\n${options}` });
+    if (format === 'card') delete state.replyFormats[msg.chatId]; else state.replyFormats[msg.chatId] = format;
     persist();
-    return send(msg, { text: format === 'markdown' ? '已改为普通 Markdown 消息回复：处理中在原消息上显示思考表情，结束后发送完整结果。/reply card 可改回卡片。' : '已改回任务卡片回复。/reply markdown 可改为普通 Markdown 消息。' });
+    return send(msg, { text: { markdown: '已改为普通 Markdown 消息回复：处理中在原消息上显示思考表情，结束后发送完整结果。/reply wide 可改为宽屏卡片（保留思考过程）。', wide: '已改为宽屏任务卡片：卡片撑满聊天窗口，保留思考过程、工具进度和执行详情。/reply card 恢复标准宽度。', card: '已改回标准宽度任务卡片。/reply wide 可改为宽屏卡片。' }[format] });
   }
   const scope = msg => {
     const key = contextKey(msg);
@@ -101,7 +103,12 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   }
   async function send(msg, content) {
     if (typeof content.text === 'string' || typeof content.markdown === 'string') return sendMarkdown(channel, { ...msg, threadId: threadOf(msg) }, content.markdown ?? content.text);
-    return channel.send(msg.chatId, content, { replyTo: msg.messageId, replyInThread: !!threadOf(msg) });
+    return channel.send(msg.chatId, widen(msg, content), { replyTo: msg.messageId, replyInThread: !!threadOf(msg) });
+  }
+  // Wide-card chats stretch every card to the window (Card JSON 2.0 width_mode "fill").
+  function widen(msg, content) {
+    if (!content?.card?.config || replyFormat(msg) !== 'wide') return content;
+    return { ...content, card: { ...content.card, config: { ...content.card.config, width_mode: 'fill' } } };
   }
   function cliEnvHint(engine) {
     const meta = catalog().get(engine);
@@ -507,7 +514,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (!prompt && !images.length) throw new Error('请发送文字或图片');
     const id = msg.turnId || messageUUID(msg.messageId), view = { text: '', tools: new Map(), reasoning: new Map(), permissions: new Map(), phase: mode === 'queue' ? '已排队' : '正在处理', done: false, accepted: false };
     if (!detailed(msg) || replyFormat(msg) === 'markdown') {
-      const reply = createSimpleReply({ channel, msg: { ...msg, threadId: threadOf(msg) }, messageId: id, footer: () => `${nodeLabel(nodeOf(binding))} · ${catalog().label(engineOf(binding))} · ${catalog().switchHint(engineOf(binding))} 切换引擎 · 模型：${modelLabel(binding)} · /model 切换模型${detailed(msg) ? ' · /reply card 改回卡片' : ''}`, onError: rememberError, onClose: () => monitors.delete(reply.close) });
+      const reply = createSimpleReply({ channel, msg: { ...msg, threadId: threadOf(msg) }, messageId: id, footer: () => `${nodeLabel(nodeOf(binding))} · ${catalog().label(engineOf(binding))} · ${catalog().switchHint(engineOf(binding))} 切换引擎 · 模型：${modelLabel(binding)} · /model 切换模型${detailed(msg) ? ' · /reply wide 改用宽屏卡片（可看思考过程）' : ''}`, onError: rememberError, onClose: () => monitors.delete(reply.close) });
       monitors.add(reply.close);
       try {
         await reply.start();
@@ -518,7 +525,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       return;
     }
     const startedAt = now(), taskModel = selectedModel(binding) || (engineOf(binding) === 'codex' ? '默认（账号实时推荐）' : '默认（CLI 配置）');
-    const progress = () => cards.task({ nodeLabel: nodeLabel(nodeOf(binding)), model: view.nativeAttached ? '沿用原终端当前模型' : selectedModel(binding) || panel.currentModel?.(binding.id) || taskModel, engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), detailed: detailed(msg), binding, title: session(binding.id)?.title || clip(prompt, 80) || '图片对话', view, taskMessageId: id, elapsed: now() - startedAt });
+    const progress = () => widen(msg, { card: cards.task({ replyFormat: replyFormat(msg), nodeLabel: nodeLabel(nodeOf(binding)), model: view.nativeAttached ? '沿用原终端当前模型' : selectedModel(binding) || panel.currentModel?.(binding.id) || taskModel, engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), detailed: detailed(msg), binding, title: session(binding.id)?.title || clip(prompt, 80) || '图片对话', view, taskMessageId: id, elapsed: now() - startedAt }) }).card;
     const sent = await send(msg, { card: progress() }); rememberCard(sent, msg, binding);
     const transport = channel;
     const saveTask = card => {
