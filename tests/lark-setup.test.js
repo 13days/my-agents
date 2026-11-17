@@ -22,37 +22,59 @@ function fixture(t, options = {}) {
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-test('QR creation streams an unchanged URL, uses isolated config, and imports credentials without exposing secrets', async t => {
-  const f = fixture(t);
-  await f.setup.start('lark'); await f.setup.start('lark');
-  assert.equal(f.children.length, 1);
-  assert.deepEqual(f.spawns[0].args, ['config', 'init', '--new', '--brand', 'lark', '--name', 'my-agents']);
-  assert.equal(f.spawns[0].opts.env.LARKSUITE_CLI_CONFIG_DIR, path.join(f.dir, 'lark-cli'));
-  const url = 'https://accounts.larksuite.com/setup?code=a%2Fb+z&state=x%3Dy';
-  f.children[0].stderr.write('Open:\n  ' + url.slice(0, 35));
-  f.children[0].stderr.write(url.slice(35) + '\nWaiting\n'); await flush();
-  assert.equal(f.setup.status().verificationUrl, url);
-  assert.deepEqual(f.executions[0].args, ['auth', 'qrcode', url, '--output', 'setup-qr.png']);
-  assert.notEqual(f.executions[0].opts.cwd, f.spawns[0].opts.env.LARKSUITE_CLI_CONFIG_DIR);
-  assert.equal(fs.existsSync(f.executions[0].opts.cwd), false, 'temporary QR files are removed after reading');
+// A registration the test approves or rejects by hand.
+function pendingRegistration() {
+  const r = { calls: [] };
+  r.registerApp = options => { r.calls.push(options); options.onQRCodeReady({ url: r.url || 'https://accounts.feishu.cn/setup?opaque=a%2Fb+1', expireIn: 600 }); return new Promise((resolve, reject) => { r.approve = resolve; r.reject = reject; }); };
+  return r;
+}
+const settle = async () => { for (let i = 0; i < 20; i++) await flush(); };
+
+test('one scan creates the app with callbacks, pairs the scanner and greets them, without exposing secrets', async t => {
+  const r = pendingRegistration(), steps = [], greeted = [];
+  r.url = 'https://accounts.larksuite.com/setup?code=a%2Fb+z&state=x%3Dy';
+  const f = fixture(t, { registerApp: r.registerApp, settleMs: 0, patchCallbacks: async app => steps.push(['patch', app.appId]), welcome: async (id, options) => greeted.push([id, options]) });
+  await f.setup.start('lark'); await f.setup.start('lark'); await settle();
+  assert.equal(r.calls.length, 1, 'a running setup is not started twice');
+  const options = r.calls[0];
+  assert.equal(options.createOnly, true); assert.equal(options.domain, 'accounts.larksuite.com');
+  assert.deepEqual(options.addons.callbacks.items, ['card.action.trigger']);
+  assert.ok(options.addons.events.items.tenant.includes('im.message.receive_v1'));
+  assert.ok(options.addons.scopes.tenant.includes('application:application:patch'));
+  assert.equal(f.children.length, 0, 'the CLI is only used to render the QR image');
+  assert.equal(f.setup.status().verificationUrl, r.url);
+  assert.deepEqual(f.executions[0].args, ['auth', 'qrcode', r.url, '--output', 'setup-qr.png']);
   assert.match(f.setup.status().qrImage, /^data:image\/png;base64,/);
-  fs.writeFileSync(path.join(f.dir, 'lark-cli/config.json'), JSON.stringify({ apps: [{ name: 'claude-panel', appId: 'cli_new_test', appSecret: 'private-app-secret', brand: 'lark' }] }));
-  f.children[0].emit('close', 0); await flush();
-  assert.deepEqual(f.configured, [{ appId: 'cli_new_test', appSecret: 'private-app-secret', domain: 'lark', enabled: true }]);
-  assert.equal(f.setup.status().phase, 'complete');
-  assert.equal(f.setup.status().verificationUrl, '');
-  assert.ok(!JSON.stringify(f.setup.status()).includes('private-app-secret'));
+  r.approve({ client_id: 'cli_new_test', client_secret: 'private-app-secret', user_info: { open_id: 'ou_owner_123', tenant_brand: 'lark' } }); await settle();
+  assert.deepEqual(steps, [['patch', 'cli_new_test']]);
+  assert.deepEqual(f.configured, [{ appId: 'cli_new_test', appSecret: 'private-app-secret', domain: 'lark', enabled: true, cardCallbacksReady: true, allowedUserIds: ['ou_owner_123'] }]);
+  assert.deepEqual(greeted, [['ou_owner_123', { callbacks: true }]]);
+  const status = f.setup.status();
+  assert.equal(status.phase, 'complete'); assert.equal(status.owner, true); assert.equal(status.welcomed, true);
+  assert.equal(status.verificationUrl, '');
+  assert.ok(!JSON.stringify(status).includes('private-app-secret'));
+});
+
+test('a new app that is not visible yet is retried; a failed callback patch still connects and says so', async t => {
+  const r = pendingRegistration(), greeted = []; let connects = 0;
+  const f = fixture(t, { registerApp: r.registerApp, settleMs: 0, patchCallbacks: async () => { throw new Error('scope not granted'); },
+    configure: async data => { if (++connects < 3) throw new Error('app not found'); f.configured.push(data); }, welcome: async (id, options) => greeted.push(options) });
+  await f.setup.start(); await settle();
+  r.approve({ client_id: 'cli_slow_app', client_secret: 'secret', user_info: { open_id: 'ou_owner_456' } }); await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(connects, 3, 'connection retried until the new app is visible');
+  assert.equal(f.configured[0].cardCallbacksReady, false);
+  assert.deepEqual(greeted, [{ callbacks: false }], 'the welcome tells the owner how to enable card buttons');
+  assert.equal(f.setup.status().phase, 'complete'); assert.equal(f.setup.status().callbacks, false);
 });
 
 test('QR failure retains the unchanged setup link and keeps app registration alive', async t => {
-  const f = fixture(t, { execute: async () => { throw new Error('unsafe output path'); } });
-  await f.setup.start();
-  const url = 'https://accounts.feishu.cn/setup?opaque=a%2Fb+1';
-  f.children[0].stderr.write(url + '\n'); await flush();
+  const r = pendingRegistration();
+  const f = fixture(t, { registerApp: r.registerApp, execute: async () => { throw new Error('unsafe output path'); } });
+  await f.setup.start(); await settle();
   assert.equal(f.setup.status().phase, 'waiting');
-  assert.equal(f.setup.status().verificationUrl, url);
+  assert.equal(f.setup.status().verificationUrl, 'https://accounts.feishu.cn/setup?opaque=a%2Fb+1');
   assert.match(f.setup.status().error, /打开下方链接/);
-  assert.equal(f.children[0].killed, undefined);
+  assert.equal(r.calls[0].signal.aborted, false);
 });
 
 const installedCLI = findLarkCLI();
@@ -63,12 +85,15 @@ test('installed Lark CLI can generate a PNG outside its protected config directo
   assert.deepEqual([...Buffer.from(image.split(',')[1], 'base64').subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 });
 
-test('cancelled and failed jobs never import credentials or expose raw CLI output', async t => {
-  const f = fixture(t);
-  await f.setup.start(); f.setup.cancel(); f.children[0].emit('close', 0); await flush();
-  assert.equal(f.configured.length, 0); assert.equal(f.children[0].killed, true);
-  await f.setup.start();
-  f.children[1].stderr.write('appSecret=do-not-expose\n'); f.children[1].emit('close', 1);
+test('cancelled and failed jobs never import credentials or expose raw output', async t => {
+  const r = pendingRegistration();
+  const f = fixture(t, { registerApp: r.registerApp, settleMs: 0 });
+  await f.setup.start(); await settle(); f.setup.cancel();
+  assert.equal(r.calls[0].signal.aborted, true);
+  r.approve({ client_id: 'cli_cancelled', client_secret: 'do-not-expose' }); await settle();
+  assert.equal(f.configured.length, 0);
+  await f.setup.start(); await settle();
+  r.reject(new Error('access_denied appSecret=do-not-expose')); await settle();
   assert.equal(f.setup.status().phase, 'error');
   assert.ok(!JSON.stringify(f.setup.status()).includes('do-not-expose'));
   assert.equal(f.setup.status().verificationUrl, '');

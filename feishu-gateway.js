@@ -917,6 +917,18 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     async reload() { await stop(); reloadFiles(); applyRuntime(); return status(); },
     revealSecret: () => config.appSecret,
     messages: options => inbox.messages(config.appId, options),
+    // Greets the owner after one-scan setup, so they never hunt for pairing or callback settings.
+    async welcome(openId, { callbacks = true } = {}) {
+      if (!/^ou_[\w-]{4,100}$/.test(openId || '')) throw new Error('用户 ID 无效');
+      if (phase !== 'connected' || !channel) throw new Error('机器人尚未连接');
+      const lines = ['**my-agents 已连接** ✅', '你已自动完成配对，可以直接在这里发消息使用。', '',
+        '- 直接说需求即可开始，例如「帮我看看这个项目的结构」',
+        `- \`/new\` 选择项目和引擎（${catalog().list.map(engine => engine.label).join(' / ')}）`,
+        '- `/sessions` 查看并切换会话 · `/model` 切换模型 · `/help` 全部命令',
+        '- 拉我进群后 @我，就能在群里或话题里使用'];
+      if (!callbacks) lines.push('', '卡片上的按钮暂未开通：点击按钮时如果飞书弹出「尚未配置卡片回调」，选「立即配置」即可；也可以在面板「IM 接入」里点「启用卡片按钮」。');
+      return sendMarkdown(channel, { chatId: openId }, lines.join('\n'));
+    },
     newPairing() { pairing = { code: crypto.randomBytes(9).toString('base64url'), expires: now() + 10 * 60 * 1000 }; return { command: '/pair ' + pairing.code, expiresAt: pairing.expires }; },
     bootstrap() { applyRuntime(); return start(); },
   };

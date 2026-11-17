@@ -2032,7 +2032,9 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
   },
 });
 
-const larkSetup = require('./lark-setup').createLarkSetup({ dir: DATA_DIR, configure: input => feishuGateway.configure(input) });
+const larkSetup = require('./lark-setup').createLarkSetup({ dir: DATA_DIR, configure: input => feishuGateway.configure(input),
+  welcome: (openId, options) => feishuGateway.welcome(openId, options),
+  currentApp: () => { const { config } = feishuGateway.status(); const appSecret = feishuGateway.revealSecret(); return config.appId && appSecret ? { appId: config.appId, appSecret, domain: config.domain } : null; } });
 async function sharedGateway(method, input) {
   const info = cluster?.status();
   if (info?.enabled && !cluster.canStart()) {

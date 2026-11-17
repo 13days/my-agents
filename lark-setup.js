@@ -68,10 +68,10 @@ async function patchCardCallbacks(credentials) {
   if (result.code !== 0) throw new Error('卡片回调配置未生效');
 }
 
-function createLarkSetup({ dir, configure, findCLI = findLarkCLI, spawnCLI = spawn, execute = run, readApp = readCreatedApp, registerApp = options => require('@larksuiteoapi/node-sdk').registerApp(options), patchCallbacks = patchCardCallbacks, timeoutMs = 10 * 60 * 1000 }) {
+function createLarkSetup({ dir, configure, findCLI = findLarkCLI, spawnCLI = spawn, execute = run, readApp = readCreatedApp, registerApp = options => require('@larksuiteoapi/node-sdk').registerApp(options), patchCallbacks = patchCardCallbacks, welcome = async () => {}, currentApp = () => null, settleMs = 3000, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), timeoutMs = 10 * 60 * 1000 }) {
   const configDir = path.join(dir, 'lark-cli');
   let job = null;
-  const status = () => ({ available: !!findCLI(), phase: job?.phase || 'idle', purpose: job?.purpose || 'create', verificationUrl: job?.url || '', qrImage: job?.qrImage || '', error: job?.error || '', canRecover: fs.existsSync(path.join(configDir, 'config.json')) });
+  const status = () => ({ available: !!findCLI(), phase: job?.phase || 'idle', purpose: job?.purpose || 'create', owner: !!job?.owner, callbacks: !!job?.callbacks, welcomed: !!job?.welcomed, verificationUrl: job?.url || '', qrImage: job?.qrImage || '', error: job?.error || '', canRecover: fs.existsSync(path.join(configDir, 'config.json')) });
   const clearQR = current => { current.url = ''; current.qrImage = ''; current.buffer = ''; };
   const stopChild = child => {
     // npm's launcher forks the native CLI; stop the entire owned process group.
@@ -85,53 +85,52 @@ function createLarkSetup({ dir, configure, findCLI = findLarkCLI, spawnCLI = spa
     if (!job || !['starting', 'waiting', 'completing'].includes(job.phase)) return;
     job.phase = 'cancelled'; clearQR(job); clearTimeout(job.timer); job.abort?.abort(); stopChild(job.child);
   }
+  // One scan does everything: the confirm page creates the app with message events and the
+  // card callback, the scanner becomes the paired owner, and the bot greets them in Feishu.
+  const ADDONS = {
+    scopes: { tenant: ['application:application:patch', 'im:message', 'im:message:send_as_bot', 'im:resource', 'im:message.reactions:write_only'] },
+    events: { items: { tenant: ['im.message.receive_v1'] } },
+    callbacks: { items: ['card.action.trigger'] },
+  };
+  const retry = async (fn, attempts, delayMs) => { let last; for (let i = 0; i < attempts; i++) { try { return await fn(); } catch (error) { last = error; if (i < attempts - 1) await sleep(delayMs); } } throw last; };
   async function start(domain = 'feishu') {
     if (job && ['starting', 'waiting', 'completing'].includes(job.phase)) return status();
     if (!['feishu', 'lark'].includes(domain)) throw new Error('请选择飞书或 Lark');
     const cli = findCLI();
     if (!cli) throw new Error('未检测到 lark-cli，请使用手动配置');
     fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
-    const current = job = { phase: 'starting', url: '', qrImage: '', error: '', buffer: '' };
-    const env = { ...process.env, LARKSUITE_CLI_CONFIG_DIR: configDir, LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1', LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1' };
+    const current = job = { phase: 'starting', purpose: 'create', url: '', qrImage: '', error: '', abort: new AbortController() };
     const fail = message => {
       if (job !== current || ['complete', 'cancelled', 'error'].includes(current.phase)) return;
-      current.phase = 'error'; current.error = message; clearQR(current); clearTimeout(current.timer);
+      current.phase = 'error'; current.error = message; clearQR(current); clearTimeout(current.timer); current.abort.abort();
     };
-    const output = chunk => {
-      if (job !== current || !['starting', 'waiting'].includes(current.phase)) return;
-      current.buffer = (current.buffer + chunk.toString()).slice(-65536);
-      const lines = current.buffer.replace(/\x1b\[[0-9;]*m/g, '').split(/\r?\n/);
-      current.buffer = lines.pop();
-      for (const line of lines) {
-        const url = line.match(/https:\/\/[^\s<>"\x1b]+/)?.[0];
-        if (!url || current.url) continue;
+    current.timer = setTimeout(() => fail('二维码已过期，请重新扫码创建'), timeoutMs); current.timer.unref?.();
+    Promise.resolve().then(() => registerApp({
+      domain: domain === 'lark' ? 'accounts.larksuite.com' : 'accounts.feishu.cn', source: 'my-agents', createOnly: true,
+      appPreset: { name: 'my-agents', desc: '在飞书里使用 Claude Code / Codex' }, addons: ADDONS, signal: current.abort.signal,
+      onQRCodeReady: info => {
+        if (job !== current || current.abort.signal.aborted) return;
         // Keep the original URL byte-for-byte for both the link and QR code.
-        current.url = url; current.phase = 'waiting';
-        generateQRCode(cli, url, env, execute).then(image => {
+        current.url = info.url; current.phase = 'waiting';
+        generateQRCode(cli, info.url, { ...process.env, LARKSUITE_CLI_CONFIG_DIR: configDir }, execute).then(image => {
           if (job === current && current.phase === 'waiting') current.qrImage = image;
-        }).catch(() => {
-          if (job === current && current.phase === 'waiting') current.error = '二维码生成失败，可打开下方链接继续创建，或取消后重试';
-        });
-      }
-    };
-    try {
-      const child = current.child = spawnCLI(cli, ['config', 'init', '--new', '--brand', domain, '--name', 'my-agents'], { cwd: configDir, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' });
-      child.stdout.on('data', output); child.stderr.on('data', output);
-      child.on('error', () => fail('无法启动 lark-cli，请检查安装后重试'));
-      child.on('close', async code => {
-        clearTimeout(current.timer);
-        if (job !== current || !['starting', 'waiting'].includes(current.phase)) return;
-        if (code !== 0) return fail('创建未完成或二维码已过期，请重新扫码创建');
-        current.phase = 'completing'; clearQR(current);
-        try {
-          const credentials = await readApp(configDir);
-          if (job !== current || current.phase !== 'completing') return;
-          await configure({ ...credentials, enabled: true });
-          if (current.phase === 'completing') current.phase = 'complete';
-        } catch { fail('应用已创建，但自动接入失败，请检查系统钥匙串权限或使用手动配置'); }
-      });
-      current.timer = setTimeout(() => { fail('二维码已过期，请重新扫码创建'); stopChild(child); }, timeoutMs); current.timer.unref();
-    } catch { fail('无法启动 lark-cli，请检查安装后重试'); }
+        }).catch(() => { if (job === current && current.phase === 'waiting') current.error = '二维码生成失败，可打开下方链接继续创建，或取消后重试'; });
+      },
+    })).then(async result => {
+      if (job !== current || current.abort.signal.aborted) return;
+      if (!/^[\w-]{8,100}$/.test(result?.client_id || '') || !result.client_secret) throw new Error('未能读取新建应用的信息');
+      current.phase = 'completing'; clearQR(current);
+      const app = { appId: result.client_id, appSecret: result.client_secret, domain: result.user_info?.tenant_brand === 'lark' ? 'lark' : domain };
+      const owner = /^ou_[\w-]{4,100}$/.test(result.user_info?.open_id || '') ? result.user_info.open_id : '';
+      // A brand-new app can take a few seconds to become visible to the open platform.
+      const callbacks = await retry(() => patchCallbacks(app), 4, settleMs).then(() => true, () => false);
+      if (job !== current || current.phase !== 'completing') return;
+      await retry(() => configure({ ...app, enabled: true, cardCallbacksReady: callbacks, ...(owner ? { allowedUserIds: [owner] } : {}) }), 6, settleMs);
+      current.owner = !!owner; current.callbacks = callbacks;
+      if (owner) current.welcomed = await retry(() => welcome(owner, { callbacks }), 3, settleMs).then(() => true, () => false);
+      if (current.phase === 'completing') current.phase = 'complete';
+      clearTimeout(current.timer);
+    }).catch(() => fail('扫码未完成或应用创建失败，请重新扫码创建'));
     return status();
   }
   async function recover() {
@@ -151,7 +150,7 @@ function createLarkSetup({ dir, configure, findCLI = findLarkCLI, spawnCLI = spa
     if (!cli) throw new Error('请先安装 Lark CLI');
     const current = job = { phase: 'starting', purpose: 'callbacks', url: '', qrImage: '', error: '', abort: new AbortController() };
     try {
-      const credentials = await readApp(configDir);
+      const credentials = currentApp() || await readApp(configDir);
       current.timer = setTimeout(() => { current.phase = 'error'; current.error = '授权二维码已过期，请重试'; clearQR(current); current.abort.abort(); }, timeoutMs); current.timer.unref();
       Promise.resolve().then(() => registerApp({
         appId: credentials.appId,

@@ -1255,3 +1255,16 @@ test('/model global sets the shared default for new sessions and the model card 
   await f.gateway.action({ messageId: f.sent.at(-1).messageId, chatId: 'oc_private', operator: { openId: 'ou_owner' }, action: { tag: 'button', value: clear.behaviors[0].value } });
   assert.deepEqual(writes.at(-1), ['claude', '']);
 });
+
+test('after one-scan setup the owner gets a welcome message without pairing', async t => {
+  const f = await fixture(t);
+  await f.gateway.configure({ allowedUserIds: ['ou_scanner_1'] });
+  await f.gateway.welcome('ou_scanner_1', { callbacks: false });
+  const greeting = f.sent.at(-1);
+  assert.equal(greeting.chatId, 'ou_scanner_1');
+  assert.match(JSON.stringify(greeting.content), /已自动完成配对/);
+  assert.match(JSON.stringify(greeting.content), /立即配置/, 'explains card callbacks when they are not enabled yet');
+  await f.gateway.receive(f.msg('/help', { senderId: 'ou_scanner_1' }));
+  assert.doesNotMatch(JSON.stringify(f.sent.at(-1).content), /尚未配对/, 'the scanner is already authorized');
+  await assert.rejects(f.gateway.welcome('not-an-open-id'), /用户 ID 无效/);
+});
