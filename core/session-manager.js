@@ -94,6 +94,7 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
     const sessionId = engine.capabilities.sessionId === 'discovered' ? (known ? requested : '') : (location?.handoff ? crypto.randomUUID() : requested || crypto.randomUUID());
     const nativeOnly = known && !!await engine.nativeSessionAvailable?.(sessionId);
     let model = typeof input.model === 'string' && input.model.trim() && engine.validModel(input.model.trim()) ? input.model.trim() : '';
+    const requestedModel = model;
     if (nativeOnly) model = '';
     else if (!model && resolveModel) model = await resolveModel({ engine: engineId, sessionId: requested, accountId: input.accountId || '', node: nodeId }) || '';
     const baseHistory = known || location?.handoff ? await history.messages(requested) : null;
@@ -145,7 +146,7 @@ function createSessionManager({ registry, history, idleMs = 3 * 60 * 1000, reten
     if (requested && realId !== requested) { aliases.set(requested, realId); if (location?.handoff) handoffAliases.add(requested); }
     history.touch(realId, { engine: engineId, node: host.id, ...(location?.machineId ? { machineId: location.machineId } : {}), cwd, worktree, workspaceId: location?.workspaceId, handoff: location?.handoff, prompt: turn.prompt, created: !known });
 
-    const jobMeta = { conversationId: record?.conversationId || realId, routed: !!session.routed, nativeAttached: !!session.nativeAttached, engine: engineId, node: host.id, machineId: location?.machineId, workspaceId: location?.workspaceId, handoff: location?.handoff, cwd, worktree, model: session.nativeAttached ? '' : model, sessionId: realId, jobId: record?.id || crypto.randomUUID() };
+    const jobMeta = { conversationId: record?.conversationId || realId, routed: !!session.routed, nativeAttached: !!session.nativeAttached, engine: engineId, node: host.id, machineId: location?.machineId, workspaceId: location?.workspaceId, handoff: location?.handoff, cwd, worktree, model: session.nativeAttached ? '' : model, requestedModel, sessionId: realId, jobId: record?.id || crypto.randomUUID() };
     if (record) runStore.update(record.id, { state: 'running', sessionId: realId, engine: engineId, node: host.id, jobMeta });
     const job = createChatJob(jobMeta, { journal: record ? runStore.journal(record.id) : null });
     run = { id: realId, engine: engineId, node: host.id, job, session, baseHistory, baseMessages: baseHistory?.messages || [], stopped: false, requestedId: requested };

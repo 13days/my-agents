@@ -151,22 +151,26 @@ function permissions(context, binding, requests) {
   if (requests.length > 3) elements.push(muted(`另有 ${requests.length - 3} 项等待授权，处理后会依次显示。`));
   return elements;
 }
-function modelPicker({ engine, sessionId, model = '', models = [], accountName = '', forcedModel = '', notice = '', ...context }) {
+function modelPicker({ engine, sessionId, model = '', models = [], accountName = '', forcedModel = '', notice = '', defaultModel = '', ...context }) {
   context.expectedSessionId = sessionId;
   const options = new Map(models.filter(item => typeof item.id === 'string' && item.id.length <= 100).slice(0, 50).map(item => [item.id, item.name || item.id]));
   if (model) options.set(model, options.get(model) || model);
-  const elements = [markdown(`**${context.location || '当前位置'} · ${catalogOf(context).label(engine)}**`), markdown(`模型：**${escape(model || '默认（CLI 配置）')}**`)];
+  const fallback = defaultModel ? `默认（${defaultModel}）` : engine === 'codex' ? '默认（账号实时推荐）' : '默认（CLI 配置）';
+  const elements = [markdown(`**${context.location || '当前位置'} · ${catalogOf(context).label(engine)}**`), markdown(`模型：**${escape(model || fallback)}**`), muted(`全局默认（所有机器共享）：${escape(defaultModel || (engine === 'codex' ? '未设置，账号实时推荐' : '未设置，跟随网关 / CLI 配置'))}`)];
   if (notice) elements.push(markdown(escape(notice)));
   if (accountName) elements.push(muted(`代理账号：${escape(accountName)}`));
   if (forcedModel) elements.push(muted(`账号固定映射到 ${escape(forcedModel)}，会覆盖这里的模型选择。`));
   elements.push({ tag: 'select_static', placeholder: plain('选择模型'), width: 'fill', initial_option: model || '__default__', options: [
-    { text: plain(engine === 'codex' ? '默认（账号实时推荐）' : '默认（跟随网关 / CLI 配置）'), value: '__default__' },
+    { text: plain(defaultModel ? `默认（全局：${clip(defaultModel, 30)}）` : engine === 'codex' ? '默认（账号实时推荐）' : '默认（跟随网关 / CLI 配置）'), value: '__default__' },
     ...Array.from(options, ([id, name]) => ({ text: plain(clip(name, 48)), value: id })),
   ], behaviors: [{ type: 'callback', value: action(context, { action: 'set_model', id: sessionId, engine }) }] });
   elements.push(muted('下一轮生效，当前任务不受影响。/model 模型ID 可手动指定；/model default 恢复默认。模型选择按会话保存。'));
   if (!models.length) elements.push(muted('该引擎暂未返回模型列表，可使用命令输入模型 ID。'));
   if (models.length > 50) elements.push(muted('下拉框展示前 50 个模型，其余可用 /model 模型ID 指定。'));
-  elements.push(buttons([button('刷新可用模型', action(context, { action: 'models', refresh: true })), button('返回会话设置', action(context, { action: 'view', id: sessionId }))]));
+  const global = [];
+  if (model && model !== defaultModel) global.push(button('设为全局默认', action(context, { action: 'set_default_model', id: sessionId, engine, model })));
+  if (defaultModel) global.push(button('清除全局默认', action(context, { action: 'set_default_model', id: sessionId, engine, model: 'default' })));
+  elements.push(buttons([button('刷新可用模型', action(context, { action: 'models', refresh: true })), button('返回会话设置', action(context, { action: 'view', id: sessionId })), ...global]));
   return card('选择 AI 模型', elements, { subtitle: catalogOf(context).label(engine) + ' · 仅此会话，下一轮生效' });
 }
 function currentSession({ binding, item, switched = false, exists = false, running, model = '默认（CLI 配置）', requests = [], nodeLabel = '本机', isCurrent = true, ...context }) {

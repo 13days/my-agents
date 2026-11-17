@@ -158,6 +158,14 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
     const stale = Object.values(vault.codexAccounts()).filter(row => !row.deleted && row.enabled && row.mode === 'chatgpt' && now() - (vault.preference('codex-usage:' + row.id)?.checkedAt || 0) >= maxAge);
     await Promise.all(stale.map(row => checkCodexUsage(row.id).catch(() => null)));
   }
+  // One default model per engine for new sessions, replicated to every node with the pool.
+  const DEFAULT_MODEL_ENGINES = ['claude', 'codex'];
+  const defaultModels = () => Object.fromEntries(DEFAULT_MODEL_ENGINES.map(engine => [engine, vault.preference('default-model:' + engine) || '']));
+  function setDefaultModel(engine, model) {
+    if (!DEFAULT_MODEL_ENGINES.includes(engine)) throw new Error('引擎无效');
+    if (model && (typeof model !== 'string' || !/^[\w.\/:\[\]-]{1,100}$/.test(model))) throw new Error('模型名称无效');
+    vault.preference('default-model:' + engine, model || ''); return defaultModels();
+  }
   function codexStatus() {
     return { ...routing(), routes: Object.fromEntries(Object.entries(vault.preferences()).filter(([key]) => key.startsWith('codex-pin:')).map(([key, row]) => [key.slice(10), row.value?.accountId || ''])), accounts: Object.values(vault.codexAccounts()).filter(row => !row.deleted).map(row => {
       const auth = vault.credential(row.id, row.auth), health = vault.preference('codex-health:' + row.id) || {};
@@ -291,6 +299,6 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
   observe(); install();
   accounts.setPreparation?.(prepareClaude);
   accounts.setRoutingObserver?.(input => { if (input.selected || input.mode!=='manual') setClaudeRouting(input); });
-  return { setClaudeRouting, observeNative: (source, input) => { for(const auth of (Array.isArray(input.claude)?input.claude:[input.claude]))if(auth)vault.importClaude(auth,{origin:source}); for(const auth of (Array.isArray(input.codex)?input.codex:[input.codex]))if(auth)vault.importCodex(auth,{origin:source}); install(); }, claudeStatus, importClaude, configureClaude, prepareClaude, catalog, egress: excluded => { const candidate = [...sources].filter(([id, source]) => !excluded.includes(id) && source.catalog?.codex?.token).sort(([a], [b]) => a.localeCompare(b))[0]; return candidate ? { id: candidate[0], url: candidate[1].url, token: candidate[1].catalog.codex.token } : null; }, codexStatus, resetCodex: () => { for (const entry of Object.values(vault.codexAccounts())) vault.preference('codex-health:' + entry.id, { cooldownUntil: 0, lastStatus: 0 }); return codexStatus(); }, setRouting, pinCodex, checkCodexUsage, refreshCodexUsage, importCodex, configureCodex, accepted, rejected, exchange, exchangeWire, refreshWire, renewWire, exchangeKey: () => ({ publicKey: transport.publicKey }), refresh, refreshAtLeader, resolveCodex, codexRoute, status, vault };
+  return { setClaudeRouting, observeNative: (source, input) => { for(const auth of (Array.isArray(input.claude)?input.claude:[input.claude]))if(auth)vault.importClaude(auth,{origin:source}); for(const auth of (Array.isArray(input.codex)?input.codex:[input.codex]))if(auth)vault.importCodex(auth,{origin:source}); install(); }, claudeStatus, importClaude, configureClaude, prepareClaude, catalog, egress: excluded => { const candidate = [...sources].filter(([id, source]) => !excluded.includes(id) && source.catalog?.codex?.token).sort(([a], [b]) => a.localeCompare(b))[0]; return candidate ? { id: candidate[0], url: candidate[1].url, token: candidate[1].catalog.codex.token } : null; }, codexStatus, resetCodex: () => { for (const entry of Object.values(vault.codexAccounts())) vault.preference('codex-health:' + entry.id, { cooldownUntil: 0, lastStatus: 0 }); return codexStatus(); }, setRouting, pinCodex, defaultModels, setDefaultModel, checkCodexUsage, refreshCodexUsage, importCodex, configureCodex, accepted, rejected, exchange, exchangeWire, refreshWire, renewWire, exchangeKey: () => ({ publicKey: transport.publicKey }), refresh, refreshAtLeader, resolveCodex, codexRoute, status, vault };
 }
 module.exports = { createAccountPool };

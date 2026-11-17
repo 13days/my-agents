@@ -19,7 +19,7 @@ function helpText(engines) {
     ...engines.list.map(engine => `/${engine.id} [问题] 切到 ${engine.label}，可直接带问题`),
     '/node [节点名] [路径] 查看或切换运行位置（本机 / 远程开发机），例如 /node devbox ~/repos/项目',
     '/leader [节点名] 查看集群或主动迁移 Timi 主节点',
-    '/model [模型 ID|default] 查看或切换当前会话模型，default 恢复默认', '/use 引擎 切换引擎（支持别名）', '/engine 查看当前引擎和切换选项', '/current 查看当前位置的绑定会话', '/history 查看最近对话',
+    '/model [模型 ID|default] 查看或切换当前会话模型，default 恢复默认', '/model global [模型 ID|current|default] 设置所有机器共享的全局默认模型', '/use 引擎 切换引擎（支持别名）', '/engine 查看当前引擎和切换选项', '/current 查看当前位置的绑定会话', '/history 查看最近对话',
     '/rename 新名称 固定会话名称', '/queue 内容 排队处理', '/steer 内容 立即引导', '/stop 停止当前任务',
     '/route 代理路由：/route 序号切账号、auto 故障转移、rr 轮询、reset 清除冷却、pin 序号|off 固定当前会话、codex direct|proxy',
     '/reply [wide|card|markdown] 回复形式：宽屏卡片（保留思考过程）、标准卡片或普通 Markdown 消息（按聊天保存）',
@@ -313,8 +313,9 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     rememberCard(result, msg, binding);
   }
   const selectedModel = binding => state.sessionModels[binding.id] ?? modelFor(engineOf(binding)) ?? '';
+  const defaultLabel = engine => { const shared = panel.defaultModel?.(engine); return shared ? `默认（${shared}）` : engine === 'codex' ? '默认（账号实时推荐）' : '默认（CLI 配置）'; };
   const modelLabel = binding => {
-    const next = selectedModel(binding) || (engineOf(binding) === 'codex' ? '默认（账号实时推荐）' : '默认（CLI 配置）'), active = panel.currentModel?.(binding.id);
+    const next = selectedModel(binding) || defaultLabel(engineOf(binding)), active = panel.currentModel?.(binding.id);
     if (!selectedModel(binding) && active) return active;
     return panel.running(binding.id) && active && active !== selectedModel(binding) ? `${active}（下一轮：${next}）` : next;
   };
@@ -325,8 +326,22 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     let data = { models: [] };
     try { data = await panel.models?.({ engine, sessionId: binding.id, node: nodeOf(binding), refresh }) || data; } catch {}
     if (!detailed(msg)) return send(msg, { text: `${notice ? notice + '\n' : ''}${contextLabel(msg)} · ${catalog().label(engine)}\n模型：${modelLabel(binding)}\n/model 模型ID 切换；/model default 恢复默认。${data.models.length ? '\n可用模型：\n' + data.models.map(item => item.id).join('\n') : ''}` });
-    const result = await send(msg, { card: cards.modelPicker({ owner: msg.senderId, key: contextKey(msg), location: contextLabel(msg), engines: catalog(), engine, sessionId: binding.id, model: selectedModel(binding), models: data.models, accountName: data.accountName, forcedModel: data.forcedModel, notice }) });
+    const result = await send(msg, { card: cards.modelPicker({ defaultModel: panel.defaultModel?.(engine) || '', owner: msg.senderId, key: contextKey(msg), location: contextLabel(msg), engines: catalog(), engine, sessionId: binding.id, model: selectedModel(binding), models: data.models, accountName: data.accountName, forcedModel: data.forcedModel, notice }) });
     rememberCard(result, msg, binding);
+  }
+  // The cluster-wide default for new sessions of this engine (shared by every machine and the panel).
+  async function setDefaultModel(msg, input, expected = {}) {
+    if (!detailed(msg)) return managementNotice(msg);
+    if (!panel.setDefaultModel) throw new Error('当前服务尚未支持全局默认模型，请重启面板');
+    const binding = state.bindings[scope(msg)] || defaultBinding(msg);
+    const engine = expected.engine || (binding ? engineOf(binding) : defaultEngine());
+    const raw = String(input || '').trim(), reset = !raw || raw === 'default' || raw === '__default__';
+    const model = reset ? '' : raw === 'current' && binding ? selectedModel(binding) : raw;
+    if (!reset && !model) throw new Error('当前会话没有选定模型，请先选择一个模型，或发送 /model global 模型ID');
+    if (model && (!/^[\w.\/:\[\]-]{1,100}$/.test(model) || panel.validModel && !panel.validModel(engine, model))) throw new Error('该引擎的模型 ID 无效');
+    await panel.setDefaultModel(engine, model);
+    const notice = model ? `已将 ${catalog().label(engine)} 全局默认模型设为 ${model}：所有机器、面板和飞书中未单独选模型的新一轮都会使用它。` : `已清除 ${catalog().label(engine)} 全局默认模型，恢复为${engine === 'codex' ? '账号实时推荐' : '网关 / CLI 配置'}。`;
+    return binding ? modelsCard(msg, notice) : send(msg, { text: notice });
   }
   async function setModel(msg, input, expected = {}) {
     const binding = state.bindings[scope(msg)] || defaultBinding(msg);
@@ -524,7 +539,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       } catch (e) { await reply.close(); throw e; }
       return;
     }
-    const startedAt = now(), taskModel = selectedModel(binding) || (engineOf(binding) === 'codex' ? '默认（账号实时推荐）' : '默认（CLI 配置）');
+    const startedAt = now(), taskModel = selectedModel(binding) || defaultLabel(engineOf(binding));
     const progress = () => widen(msg, { card: cards.task({ replyFormat: replyFormat(msg), nodeLabel: nodeLabel(nodeOf(binding)), model: view.nativeAttached ? '沿用原终端当前模型' : selectedModel(binding) || panel.currentModel?.(binding.id) || taskModel, engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), detailed: detailed(msg), binding, title: session(binding.id)?.title || clip(prompt, 80) || '图片对话', view, taskMessageId: id, elapsed: now() - startedAt }) }).card;
     const sent = await send(msg, { card: progress() }); rememberCard(sent, msg, binding);
     const transport = channel;
@@ -627,6 +642,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (!target) throw new Error(`使用 ${engines.ids().map(id => '/' + id).join(' 或 ')} 切换引擎，/engine 查看当前引擎`);
       return useEngine(msg, target);
     }
+    if (command === 'model' && /^(global|全局)(\s|$)/i.test(arg)) return setDefaultModel(msg, arg.replace(/^\S+\s*/, ''));
     if (command === 'model') return arg ? setModel(msg, arg) : modelsCard(msg);
     if (command === 'reply') return setReplyFormat(msg, arg);
     if (command === 'help') return send(msg, { text: helpText(engines) });
@@ -741,7 +757,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     try {
       if (value.node === panel.machineId?.()) value = { ...value, node: 'local' };
       const origin = state.cards[msg.messageId];
-      if (['models','engine','nodes','route','use_node','use_engine','set_model','stop','permission','continue_task'].includes(value.action) && origin?.sessionId && state.bindings[key]?.id !== origin.sessionId) throw new Error('会话已切换，请发送 /current 获取最新操作卡片');
+      if (['models','engine','nodes','route','use_node','use_engine','set_model','set_default_model','stop','permission','continue_task'].includes(value.action) && origin?.sessionId && state.bindings[key]?.id !== origin.sessionId) throw new Error('会话已切换，请发送 /current 获取最新操作卡片');
       if (['models','engine','nodes','route'].includes(value.action) && value.id && referenceId(state.bindings[key]?.id) !== referenceId(value.id)) throw new Error('此卡片不是当前会话，请先切换到该会话再修改设置');
       if (['models','engine','nodes','route','use_node','use_engine','set_model','stop','permission','continue_task'].includes(value.action) && value.expectedSessionId && referenceId(state.bindings[key]?.id) !== referenceId(value.expectedSessionId)) throw new Error('会话已切换，请发送 /current 获取最新操作卡片');
       if (value.action === 'reply_format') return setReplyFormat(msg, value.format);
@@ -749,6 +765,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (value.action === 'new_form') return panel.workspaces ? newForm(msg, '', catalog().fallback(value.engine, defaultEngine()), value) : projectsCard(msg, 0, value.engine);
       if (value.action === 'models') return await modelsCard(msg, '', value.refresh === true);
       if (value.action === 'set_model') return await setModel(msg, value.model, value);
+      if (value.action === 'set_default_model') return await setDefaultModel(msg, value.model, value);
       if (value.action === 'engine') return engineCard(msg);
       if (value.action === 'use_engine') { if (!catalog().has(value.engine)) throw new Error('引擎无效'); return useEngine(msg, value.engine); }
       if (value.action === 'sessions') return sessionsCard(msg, String(value.query || ''), value.page);

@@ -317,3 +317,16 @@ test('transient upstream errors do not rotate otherwise valid OAuth grants', asy
   await node.pool.resolveCodex('chatgpt', 'transient', [route.id]);
   assert.equal(renewals, 0);
 });
+
+test('the default model for new sessions is one shared setting replicated to every node', async t => {
+  const f = fixture(t), owner = f.add('owner', auth()), worker = f.add('worker');
+  assert.deepEqual(worker.pool.defaultModels(), { claude: '', codex: '' });
+  owner.pool.setDefaultModel('claude', 'auto/claude-opus-5-5');
+  await worker.pool.refresh();
+  assert.equal(worker.pool.defaultModels().claude, 'auto/claude-opus-5-5');
+  worker.pool.setDefaultModel('claude', '');
+  await owner.pool.refresh();
+  assert.equal(owner.pool.defaultModels().claude, '', 'clearing propagates too');
+  assert.throws(() => owner.pool.setDefaultModel('gemini', 'x'), /引擎无效/);
+  assert.throws(() => owner.pool.setDefaultModel('codex', 'bad model id'), /模型名称无效/);
+});

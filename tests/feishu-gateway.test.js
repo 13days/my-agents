@@ -1232,3 +1232,26 @@ test('wide card chats stretch task and settings cards to the window while keepin
   await f.gateway.receive(f.msg('/current'));
   assert.equal(f.sent.at(-1).content.card.config.width_mode, 'default');
 });
+
+test('/model global sets the shared default for new sessions and the model card can set or clear it', async t => {
+  const f = await fixture(t); await f.pair();
+  let shared = ''; const writes = [];
+  f.panel.defaultModel = engine => engine === 'claude' ? shared : '';
+  f.panel.setDefaultModel = async (engine, model) => { writes.push([engine, model]); if (engine === 'claude') shared = model; };
+  f.panel.models = async () => ({ models: [{ id: 'model-a' }, { id: 'model-b' }] });
+  await f.gateway.receive(f.msg('/new'));
+  await f.gateway.receive(f.msg('/model global model-a'));
+  assert.deepEqual(writes.at(-1), ['claude', 'model-a']);
+  assert.match(JSON.stringify(f.sent.at(-1).content), /全局默认（所有机器共享）：model-a/);
+  await f.gateway.receive(f.msg('Use the default'));
+  assert.equal(f.calls.at(-1).model || '', '', 'sessions without a choice defer to the shared default at launch');
+  await f.gateway.receive(f.msg('/model model-b'));
+  const card = f.sent.at(-1);
+  const find = (node, text) => { if (!node || typeof node !== 'object') return null; if (node.tag === 'button' && JSON.stringify(node.text).includes(text)) return node; for (const v of Object.values(node)) { const hit = find(v, text); if (hit) return hit; } return null; };
+  const promote = find(card.content.card, '设为全局默认');
+  await f.gateway.action({ messageId: card.messageId, chatId: 'oc_private', operator: { openId: 'ou_owner' }, action: { tag: 'button', value: promote.behaviors[0].value } });
+  assert.deepEqual(writes.at(-1), ['claude', 'model-b']);
+  const clear = find(f.sent.at(-1).content.card, '清除全局默认');
+  await f.gateway.action({ messageId: f.sent.at(-1).messageId, chatId: 'oc_private', operator: { openId: 'ou_owner' }, action: { tag: 'button', value: clear.behaviors[0].value } });
+  assert.deepEqual(writes.at(-1), ['claude', '']);
+});

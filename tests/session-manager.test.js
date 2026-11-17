@@ -166,8 +166,10 @@ test('model resolution pins a supported default at launch while preserving an ex
   const opened = [], registry = createRegistry({ defaultEngine: 'discovered' }); registry.addNode({ id: 'local', host: createLocalHost() }); registry.register(fakeEngine('discovered', 'discovered', opened));
   let resolutions = 0;
   const manager = createSessionManager({ registry, resolveModel: async () => { resolutions++; return 'account-recommended'; }, history: { ownerOf: () => null, messages: () => ({ messages: [] }), touch() {} } });
-  await manager.start({ cwd: os.tmpdir(), prompt: 'first', engine: 'discovered' });
+  const first = await manager.start({ cwd: os.tmpdir(), prompt: 'first', engine: 'discovered' });
   assert.equal(opened[0].model, 'account-recommended');
+  assert.equal(first.run.job.meta.model, 'account-recommended');
+  assert.equal(first.run.job.meta.requestedModel, '', 'a resolved default is not recorded as the caller\'s choice');
   await new Promise(resolve => setImmediate(resolve));
   await manager.start({ cwd: os.tmpdir(), prompt: 'second', engine: 'discovered', model: 'chosen-explicitly' });
   assert.equal(opened[1].model, 'chosen-explicitly'); assert.equal(resolutions, 1);

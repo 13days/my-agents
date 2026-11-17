@@ -1944,7 +1944,8 @@ const manager = createSessionManager({
   registry,
   ensureNode: async id => { if (registry.node(id)) return; const peer = clusterNetwork?.peer(id); if (peer) await attachClusterRuntime(id, peer); if (!registry.node(id)) await nodeHub.ensure(id); },
   resolveLocation: (input, owner) => workspaceStore.resolve(input, owner),
-  resolveModel: async input => input.engine === 'codex' ? (await codexPoolModels(input)).defaultModel : '',
+  // Cluster-shared default first; otherwise Codex follows the account catalog and Claude its CLI/gateway default.
+  resolveModel: async input => accountPool?.defaultModels()[input.engine] || (input.engine === 'codex' ? (await codexPoolModels(input)).defaultModel : ''),
   history: {
     isOriginal: id => !!codexSessions.pathFor(id) || sessionDirectory.hasCachedNative(id),
     ownerOf: id => resolveSessionReference(id),
@@ -2000,7 +2001,7 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
       const run = manager.get(input.sessionId), live = run && !run.job.closed;
       // The Claude adapter queues native handovers until the original turn is idle.
       if (!live && input.engine !== 'claude' && accountRouter.sessions().items.some(item => item.id === input.sessionId && item.running)) throw new Error('此会话正在外部 CLI 中运行，请等本轮结束后续接；可先用 /history 查看记录');
-      if (live && executionMachines().find(item => item.id === run.job.meta.machineId)?.online !== false && (run.job.meta.model || '') === (input.model || '')) { manager.send(input.sessionId, { ...input, context: gatewayContext }); return { sessionId: run.id }; }
+      if (live && executionMachines().find(item => item.id === run.job.meta.machineId)?.online !== false && (run.job.meta.requestedModel ?? run.job.meta.model ?? '') === (input.model || '')) { manager.send(input.sessionId, { ...input, context: gatewayContext }); return { sessionId: run.id }; }
       const { sessionId, run: started } = await manager.start({ ...input, context: gatewayContext });
       return { sessionId, cwd: started.job.meta.cwd, machineId: started.job.meta.machineId, handoff: started.job.meta.handoff, workspaceId: started.job.meta.workspaceId, worktree: started.job.meta.worktree };
     },
@@ -2009,6 +2010,8 @@ const feishuGateway = require('./feishu-gateway').createFeishuGateway({
     engineInfo: (engine, node = 'local') => registry.adapter(engine, node)?.detect?.() || {},
     models: ({ engine, sessionId, refresh }) => engine === 'codex' ? codexPoolModels({ sessionId, refresh }) : registry.get(engine)?.capabilities?.accounts ? accountRouter.models({ sessionId, refresh }) : Promise.resolve({ models: [] }),
     validModel: (engine, model, node = 'local') => !!(registry.adapter(engine, node) || registry.get(engine))?.validModel(model),
+    defaultModel: engine => accountPool?.defaultModels()[engine] || '',
+    setDefaultModel: async (engine, model) => { if (!accountPool) throw new Error('账号池未就绪'); return accountPool.setDefaultModel(engine, model); },
     currentModel: id => { const run = manager.get(id); return run && !run.job.closed ? run.job.meta.model || '' : ''; },
     nodes: () => executionMachines().filter(item => item.id !== machineId()).map(item => ({ ...item, connected: item.online, home: registry.node(item.id)?.host.homeDir() })),
     routes: engine => engine === 'codex' ? { ...accountPool.codexStatus(), engine: 'codex', pins: accountPool.codexStatus().routes } : ({ ...accountRouter.status(), pins: accountRouter.sessions().routes }),
@@ -2308,6 +2311,17 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'GET' && parts.length === 2) return sendJSON(res, 200, { ...accountRouter.status(), pool: accountPool?.status() || [] });
       if (req.method === 'GET' && parts[2] === 'sessions') return sendJSON(res, 200, combinedAccountSessions());
+      if (parts[2] === 'default-models' && parts.length === 3) {
+        if (!accountPool) return sendJSON(res, 503, { error: '账号池未就绪' });
+        if (req.method === 'GET') return sendJSON(res, 200, accountPool.defaultModels());
+        if (req.method === 'PUT') {
+          try {
+            const body = JSON.parse(await readBody(req) || '{}'), model = typeof body.model === 'string' ? body.model.trim() : '';
+            if (model && !(registry.get(body.engine)?.validModel(model))) throw new Error('该引擎的模型 ID 无效');
+            return sendJSON(res, 200, accountPool.setDefaultModel(body.engine, model));
+          } catch (error) { return sendJSON(res, 400, { error: error instanceof SyntaxError ? 'JSON 格式无效' : error.message }); }
+        }
+      }
       if (req.method === 'GET' && parts[2] === 'models' && parts.length === 3) {
         try { if (url.searchParams.get('engine') === 'codex') return sendJSON(res, 200, await codexPoolModels({ accountId: url.searchParams.get('accountId') || '', sessionId: url.searchParams.get('sessionId') || '', refresh: url.searchParams.get('refresh') === '1' })); return sendJSON(res, 200, await accountRouter.models({ accountId: url.searchParams.get('accountId') || '', sessionId: url.searchParams.get('sessionId') || '', refresh: url.searchParams.get('refresh') === '1' })); }
         catch (error) { return sendJSON(res, 400, { error: error.message }); }
@@ -2734,6 +2748,8 @@ const runtimeRouting = {
       const env = await accountRouteEnv(accountRouter, options);
       if (!env.ANTHROPIC_BASE_URL) return null;
       // Unless the run picks a model, use this panel's default rather than one pinned in the node's settings.
+      const shared = accountPool?.defaultModels().claude;
+      if (!env.ANTHROPIC_MODEL && shared) env.ANTHROPIC_MODEL = shared;
       if (!env.ANTHROPIC_MODEL) { try { const { model } = JSON.parse(fs.readFileSync(path.join(CLAUDE_DIR, 'settings.json'), 'utf8')); const routed = require('./model-defaults').routedDefaultModel(model, env); if (routed) env.ANTHROPIC_MODEL = routed; } catch {} }
       return env;
     },
