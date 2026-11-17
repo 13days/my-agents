@@ -2717,7 +2717,7 @@ const runtimeRouting = {
       const env = await accountRouteEnv(accountRouter, options);
       if (!env.ANTHROPIC_BASE_URL) return null;
       // Unless the run picks a model, use this panel's default rather than one pinned in the node's settings.
-      if (!env.ANTHROPIC_MODEL) { try { const { model } = JSON.parse(fs.readFileSync(path.join(CLAUDE_DIR, 'settings.json'), 'utf8')); if (typeof model === 'string' && model) env.ANTHROPIC_MODEL = model; } catch {} }
+      if (!env.ANTHROPIC_MODEL) { try { const { model } = JSON.parse(fs.readFileSync(path.join(CLAUDE_DIR, 'settings.json'), 'utf8')); const routed = require('./model-defaults').routedDefaultModel(model, env); if (routed) env.ANTHROPIC_MODEL = routed; } catch {} }
       return env;
     },
     // Codex uses this machine's Codex login, which never leaves it (see engines/codex/proxy.js).

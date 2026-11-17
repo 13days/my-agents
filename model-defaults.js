@@ -16,4 +16,15 @@ function modelDefaults(ids, explicit = {}) {
   if (!explicit.ANTHROPIC_SMALL_FAST_MODEL && (explicit.ANTHROPIC_DEFAULT_HAIKU_MODEL || defaults.ANTHROPIC_DEFAULT_HAIKU_MODEL)) defaults.ANTHROPIC_SMALL_FAST_MODEL = explicit.ANTHROPIC_DEFAULT_HAIKU_MODEL || defaults.ANTHROPIC_DEFAULT_HAIKU_MODEL;
   return defaults;
 }
-module.exports = { modelDefaults };
+// A node's settings.json may pin a concrete Claude id (e.g. claude-opus-4-6) that the routed
+// gateway does not serve. Keep aliases and non-Claude ids; map a pinned Claude id to its family
+// alias when the gateway's discovered default for that family differs, so the CLI resolves it
+// through ANTHROPIC_DEFAULT_<FAMILY>_MODEL.
+function routedDefaultModel(model, env = {}) {
+  if (typeof model !== 'string' || !model) return '';
+  const family = ['opus', 'sonnet', 'haiku'].find(name => model.toLowerCase().includes(name));
+  if (!family || !/claude/i.test(model)) return model;
+  const discovered = env[`ANTHROPIC_DEFAULT_${family.toUpperCase()}_MODEL`];
+  return discovered && discovered !== model ? family + (/\[1m\]$/i.test(model) ? '[1m]' : '') : model;
+}
+module.exports = { modelDefaults, routedDefaultModel };

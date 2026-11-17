@@ -72,3 +72,16 @@ test('terminal config refuses to clobber a user-defined provider', t => {
   fs.writeFileSync(file, 'model = "x"\n[model_providers.other]\nname = "ok"\n[profiles.p]\nmodel_provider = "other"\n');
   assert.equal(terminal.enable().enabled, true, 'providers and profile-scoped keys elsewhere are fine');
 });
+
+test('routed default model maps a pinned Claude id the gateway does not serve to its family alias', () => {
+  const { routedDefaultModel } = require('../model-defaults');
+  const env = { ANTHROPIC_DEFAULT_OPUS_MODEL: 'auto/claude-opus-5-5', ANTHROPIC_DEFAULT_SONNET_MODEL: 'auto/claude-sonnet-5-5' };
+  assert.equal(routedDefaultModel('claude-opus-4-6', env), 'opus');
+  assert.equal(routedDefaultModel('claude-opus-4-8[1m]', env), 'opus[1m]');
+  assert.equal(routedDefaultModel('claude-sonnet-4-5', env), 'sonnet');
+  assert.equal(routedDefaultModel('auto/claude-opus-5-5', env), 'auto/claude-opus-5-5', 'already the gateway id');
+  assert.equal(routedDefaultModel('opus', env), 'opus');
+  assert.equal(routedDefaultModel('gpt-6.1-sol', env), 'gpt-6.1-sol');
+  assert.equal(routedDefaultModel('claude-opus-4-6', {}), 'claude-opus-4-6', 'no discovery: leave the configured id');
+  assert.equal(routedDefaultModel('', env), '');
+});
