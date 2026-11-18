@@ -2228,6 +2228,17 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'GET' && parts.length === 2) return sendJSON(res, 200, { nodes: nodeHub.list(), ...require('./node/connection-hint').connectionHint({ port: PORT, bindHost: BIND_HOST, token: auth.token }) });
       try {
         if (req.method === 'POST' && parts.length === 2) return sendJSON(res, 201, { node: nodeHub.add(JSON.parse(await readBody(req, 64 * 1024) || '{}')) });
+        // One-step "add a machine": only an SSH target is needed; installs my-agents there if missing.
+        if (req.method === 'POST' && parts.length === 3 && parts[2] === 'provision') {
+          const input = JSON.parse(await readBody(req, 64 * 1024) || '{}'), target = String(input.ssh || '').trim();
+          if (!/^[\w.@:[\]-]{1,200}$/.test(target) || target.startsWith('-')) throw Object.assign(new Error('请填写 SSH 地址，例如 user@10.0.0.8 或 ~/.ssh/config 里的主机名'), { status: 400 });
+          const { provisionMachine, machineId } = require('./node/provision');
+          const result = await provisionMachine({ ssh: target });
+          const taken = [...nodeHub.list().map(node => node.id), ...(clusterConfig?.members || []).map(member => member.id), machineId()];
+          const id = String(input.label || '').trim() ? machineId(String(input.label).trim(), '', taken) : machineId(target, result.hostname, taken);
+          const node = nodeHub.add({ id, label: String(input.label || '').trim() || id, ssh: target, command: result.command });
+          return sendJSON(res, 201, { node, ...result });
+        }
         const id = decodeURIComponent(parts[2] || '');
         if (req.method === 'DELETE' && parts.length === 3) { req.resume(); return sendJSON(res, nodeHub.remove(id) ? 200 : 404, { ok: true }); }
         if (req.method === 'POST' && parts.length === 4 && parts[3] === 'reconnect') { req.resume(); nodeHub.reconnect(id); return sendJSON(res, 202, { ok: true }); }

@@ -23,9 +23,11 @@ test('cluster controls transfer leadership and expose the join command', () => {
 });
 
 test('cluster and runtime-node copy stays explicit in Chinese and English', () => {
-  for (const text of ['集群与机器', 'Cluster & machines', '项目与目录', 'Projects & directories', 'IM 消息入口', 'IM ingress', 'Agent 执行机器', 'Agent execution', '引擎运行节点', 'Engine runtime nodes']) assert.ok(html.includes(text), `missing UI copy: ${text}`);
+  for (const text of ['集群与机器', 'Cluster & machines', '项目与目录', 'Projects & directories', 'IM 消息入口', 'IM ingress', 'Agent 执行机器', 'Agent execution', '添加机器', 'Add a machine', 'SSH 地址', 'SSH address']) assert.ok(html.includes(text), `missing UI copy: ${text}`);
   assert.match(css, /\.machine-grid/);
   assert.match(css, /\.panel-layers/);
+  assert.doesNotMatch(html, /data-node-kind/, 'one add-machine flow, no runtime/cluster choice');
+  assert.match(html, /nodes\/provision/);
 });
 
 test('cluster member helpers normalize voting roles and engine CLI state', () => {
@@ -74,4 +76,12 @@ test('cluster response renders health, membership, gateways, and transfer candid
   assert.match(section.innerHTML, /Not ready|Standby/);
   assert.match(section.innerHTML, /data-cluster-transfer="linux"/);
   assert.match(section.innerHTML, /Chosen per session/);
+});
+
+test('machine ids are derived from the SSH target or host name and never collide', () => {
+  const { machineId } = require('../node/provision');
+  assert.equal(machineId('me@devbox.corp.net', '', []), 'devbox');
+  assert.equal(machineId('me@10.0.0.8', 'n10-000-008', []), 'n10-000-008');
+  assert.equal(machineId('me@box', '', ['box', 'box-2']), 'box-3');
+  assert.notEqual(machineId('me@local', '', []), 'local');
 });

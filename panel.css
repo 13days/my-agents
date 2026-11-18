@@ -1229,3 +1229,25 @@ body { background: radial-gradient(1100px 520px at 75% -200px, #6d6ef01c, transp
 .onboarding-mark { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: 50%; border: 1px solid var(--border-strong); font-size: 12px; font-variant-numeric: tabular-nums; }
 .onboarding li.done .onboarding-mark { background: #7fcba62e; border-color: #7fcba680; color: var(--green); }
 .gateway-online { padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+
+/* Account pool: one "add account" menu; rare extras collapsed */
+.pool-add { position: relative; }
+.pool-add > summary { list-style: none; cursor: pointer; }
+.pool-add > summary::-webkit-details-marker { display: none; }
+.pool-add-menu { position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; display: grid; gap: 4px; min-width: 240px; padding: 6px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: #15161a; box-shadow: 0 18px 40px -16px #000; }
+.pool-add-menu .btn { display: grid; justify-items: start; gap: 2px; text-align: left; border-color: transparent; background: transparent; box-shadow: none; }
+.pool-add-menu .btn:hover { background: #ffffff0d; }
+.pool-add-menu small { color: var(--muted); font-size: 11px; font-weight: 400; }
+.pool-more { margin: 10px 0 4px; }
+.pool-more > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.pool-more-body { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.node-quick .btn.primary { margin-top: 6px; }
+
+.pool-row-actions { align-items: center; }
+.pool-row-more { position: relative; }
+.pool-row-more > summary { list-style: none; cursor: pointer; min-width: 36px; }
+.pool-row-more > summary::-webkit-details-marker { display: none; }
+.pool-row-menu { left: auto; right: 0; min-width: 150px; }
+.engine-account-pool, .chart:has(details[open] > .pool-add-menu) { contain: none; overflow: visible; }
+.pool-add-menu .btn { justify-content: flex-start; justify-items: start; text-align: left; width: 100%; }
+.codex-pool-account small.route-muted { display: block; margin-top: 2px; }
