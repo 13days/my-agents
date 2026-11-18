@@ -25,8 +25,10 @@ function run(cmd, cmdArgs, { input, timeout = 120000, allowFail = false } = {}) 
 const ssh = (host, script, opts) => run('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', host, script], opts);
 const quote = value => "'" + String(value).replace(/'/g, "'\\''") + "'";
 
-async function localApi(pathname, method = 'GET', body) {
-  const response = await fetch(`http://127.0.0.1:${port}/api/${pathname}`, { method, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000) });
+async function localApi(pathname, method = 'GET', body, attempt = 0) {
+  let response;
+  try { response = await fetch(`http://127.0.0.1:${port}/api/${pathname}`, { method, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000) }); }
+  catch (error) { if (attempt < 4 && method === 'GET') { await sleep(3000); return localApi(pathname, method, body, attempt + 1); } throw error; }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || 'HTTP ' + response.status);
   return data;
