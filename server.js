@@ -1846,7 +1846,7 @@ async function checkCodexPool(accountId) {
       const chunks = []; let size = 0;
       response.on('data', chunk => { size += chunk.length; if (size > 4 * 1024 * 1024) request.destroy(new Error('模型列表过大')); else chunks.push(chunk); });
       response.on('error', () => reject(new Error('账号连接检查中断')));
-      response.on('end', () => { clearTimeout(timer); if (response.statusCode !== 200) return reject(new Error('账号检查失败：HTTP ' + response.statusCode)); let body; try { body = JSON.parse(Buffer.concat(chunks)); } catch { return reject(new Error('账号模型列表响应无效')); } resolve({ ok: true, status: 200, models: (body.models || body.data || []).length, catalog: body }); });
+      response.on('end', () => { clearTimeout(timer); if (response.statusCode !== 200) return reject(new Error([401, 403].includes(response.statusCode) ? 'Codex 账号登录已失效（HTTP ' + response.statusCode + '）：请在面板「账号池 → Codex」点「重新授权」，或用 /model 指定模型后重试' : '账号检查失败：HTTP ' + response.statusCode)); let body; try { body = JSON.parse(Buffer.concat(chunks)); } catch { return reject(new Error('账号模型列表响应无效')); } resolve({ ok: true, status: 200, models: (body.models || body.data || []).length, catalog: body }); });
     });
     const timer = setTimeout(() => request.destroy(new Error('账号连接检查超时')), 45000); timer.unref?.();
     request.on('error', () => { clearTimeout(timer); reject(new Error('账号连接检查失败，请检查集群出网状态')); });
@@ -2272,7 +2272,7 @@ const server = http.createServer(async (req, res) => {
         if (req.method === 'POST' && operation === 'check') {
           if (engine === 'codex') {
             const usage = input.accountId ? await accountPool.checkCodexUsage(input.accountId).catch(() => null) : null;
-            if (usage?.revoked) throw new Error('凭证已被官方撤销（' + (usage.code || 'HTTP ' + usage.status) + '），请点「重新授权」');
+            if (usage?.revoked) throw new Error('登录已失效（' + (usage.code || 'HTTP ' + usage.status) + '），自动续期也失败了，请点「重新授权」重新登录');
             const checked = await checkCodexPool(input.accountId); return sendJSON(res,200,{ok:checked.ok,models:checked.models,usage});
           }
           await accountPool.prepareClaude();

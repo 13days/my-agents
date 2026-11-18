@@ -140,12 +140,17 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
   }
   // Provider-reported quota per subscription. Exhausted accounts cool down until their reset,
   // revoked ones until re-authorized, so failover skips them before a request is wasted.
-  async function checkCodexUsage(id) {
+  async function checkCodexUsage(id, { renewed = false } = {}) {
     const row = vault.codexAccounts()[id];
     if (!row || row.deleted || row.mode !== 'chatgpt') return null;
-    const headers = codexCredentials(vault.credential(row.id, row.auth), 'chatgpt');
+    const auth = vault.credential(row.id, row.auth), headers = codexCredentials(auth, 'chatgpt');
     if (!headers) return null;
     const result = codexUsage.summarizeUsage(await usage(headers), now());
+    // A rejected access token may still have a valid refresh grant: renew once before calling it revoked.
+    if (result.revoked && !renewed && auth.tokens?.refresh_token) {
+      const entry = codexEntries('chatgpt').find(item => item.key === id);
+      if (entry) { try { await renewEntry(entry, true); return checkCodexUsage(id, { renewed: true }); } catch (error) { result.renewError = String(error.message || '').slice(0, 200); } }
+    }
     if (result.error) return result;
     vault.preference('codex-usage:' + id, result);
     const health = vault.preference('codex-health:' + id) || {};

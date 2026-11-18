@@ -85,3 +85,19 @@ test('routed default model maps a pinned Claude id the gateway does not serve to
   assert.equal(routedDefaultModel('claude-opus-4-6', {}), 'claude-opus-4-6', 'no discovery: leave the configured id');
   assert.equal(routedDefaultModel('', env), '');
 });
+
+test('a rejected subscription token is renewed once before the account is marked as needing sign-in', async t => {
+  const dir = tmp(t);
+  const jwt = n => 'h.' + Buffer.from(JSON.stringify({ exp: 9_999_999_999, iat: n })).toString('base64url') + '.s';
+  let renewals = 0;
+  const pool = createAccountPool({ dir, secret: 'secret', identity: () => ({ id: 'n1', label: 'n1' }), accounts: createRouter({ dir, port: 54321 }), peers: () => [],
+    codex: { read: () => null, catalog: () => ({ modes: [] }) },
+    renew: async auth => { renewals++; return { ...auth, tokens: { ...auth.tokens, access_token: jwt(2) + 'fresh' } }; },
+    usage: async headers => headers.authorization.endsWith('fresh') ? { status: 200, body: { rate_limit: { primary_window: { used_percent: 5 } } } } : { status: 401, body: { error: { code: 'token_expired' } } } });
+  pool.importCodex({ tokens: { account_id: 'a', access_token: jwt(1) + 'old', refresh_token: 'r' } }, 'A');
+  const id = pool.codexStatus().accounts[0].id;
+  const result = await pool.checkCodexUsage(id);
+  assert.equal(renewals, 1);
+  assert.equal(result.revoked, undefined); assert.equal(result.usedPercent, 5);
+  assert.equal(pool.codexRoute('chatgpt', 's').accountId, id, 'usable again after renewal');
+});
