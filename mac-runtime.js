@@ -4,7 +4,7 @@ const os = require('os');
 const { spawn } = require('child_process');
 const xml = value => String(value).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
 function createMacRuntime({ dir, claudeDir = dir, serverPath, port, proxyPort, platform = process.platform, home = os.homedir(), launch = spawn, claudeInfo = { path: process.env.CLAUDE_CLI || 'claude', version: '' } }) {
-  let awake = null, wanted = false, respawn = null, nativeInboxError = '';
+  let lidState = false, lidChecked = 0, lidPending = false, awake = null, wanted = false, respawn = null, nativeInboxError = '';
   const nativeInbox = require('./core/native-inbox-policy').createNativeInboxPolicy({ home: process.env.CLAUDE_CONFIG_DIR || claudeDir, stateDir: dir });
   const agent = path.join(home, 'Library/LaunchAgents/io.my-agents.gateway.plist');
   return {
@@ -21,9 +21,14 @@ function createMacRuntime({ dir, claudeDir = dir, serverPath, port, proxyPort, p
       const lost = () => { if (awake !== child) return; awake = null; if (wanted) { respawn = setTimeout(() => this.keepAwake(true), 3000); respawn.unref?.(); } };
       child.on('error', lost); child.on('close', lost);
     },
+    // Never block the event loop: pmset runs asynchronously at most once a minute and status() reads the cache.
     lidSleepDisabled() {
       if (platform !== 'darwin') return false;
-      try { return /SleepDisabled\s+1/.test(require('child_process').execFileSync('/usr/bin/pmset', ['-g'], { encoding: 'utf8', timeout: 3000 })); } catch { return false; }
+      if (Date.now() - lidChecked > 60000 && !lidPending) {
+        lidPending = true;
+        require('child_process').execFile('/usr/bin/pmset', ['-g'], { encoding: 'utf8', timeout: 5000 }, (error, out) => { lidPending = false; lidChecked = Date.now(); if (!error) lidState = /SleepDisabled\s+1/.test(out); });
+      }
+      return lidState;
     },
     setAutoStart(enabled) {
       if (platform !== 'darwin') throw new Error('登录自动启动仅适用于 macOS');

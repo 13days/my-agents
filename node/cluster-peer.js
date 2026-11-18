@@ -15,7 +15,7 @@ function createClusterNetwork({ token, selfId, members = [], WebSocket = require
   const keepAlive = ws => {
     sockets.add(ws); let alive = true;
     ws.on('pong', () => { alive = true; });
-    const timer = setInterval(() => { if (!alive) return ws.terminate(); alive = false; if (ws.readyState === WebSocket.OPEN) ws.ping(); }, 4000); timer.unref?.();
+    let missed = 0; const timer = setInterval(() => { if (!alive && ++missed >= 3) return ws.terminate(); if (alive) missed = 0; alive = false; if (ws.readyState === WebSocket.OPEN) ws.ping(); }, 4000); timer.unref?.();
     ws.on('close', () => { clearInterval(timer); sockets.delete(ws); });
   };
   const installHandlers = (id, peer) => { for (const [method, fn] of handlers) peer.handle(method, params => fn(id, params)); };
