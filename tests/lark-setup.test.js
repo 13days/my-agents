@@ -63,7 +63,7 @@ test('a new app that is not visible yet is retried; a failed callback patch stil
   assert.equal(connects, 3, 'connection retried until the new app is visible');
   assert.equal(f.configured[0].cardCallbacksReady, false);
   assert.deepEqual(greeted, [{ callbacks: false, appId: 'cli_slow_app' }], 'the welcome tells the owner how to enable card buttons');
-  assert.equal(f.setup.status().phase, 'complete'); assert.equal(f.setup.status().callbacks, false);
+  assert.equal(f.setup.status().purpose, 'callbacks', 'goes straight to the card-callback scan'); assert.equal(f.setup.status().afterCreate, true);
 });
 
 const installedCLI = findLarkCLI();
@@ -160,4 +160,23 @@ test('the vendored QR encoder sizes long setup URLs and rejects oversize input',
   const m = QR.matrix(long); assert.ok(m.length > 21 && m.length <= 177 && m.every(row => row.length === m.length));
   assert.match(QR.svg(long), /^<svg [^>]*viewBox/);
   assert.throws(() => QR.matrix('x'.repeat(5000)), /过长/);
+});
+
+test('when callbacks do not take after creation, the extra scan starts at once for the new bot', async t => {
+  const calls = []; let approve;
+  const registerApp = options => { calls.push(options); options.onQRCodeReady({ url: 'https://accounts.feishu.cn/x?' + calls.length, expireIn: 600 }); return new Promise(resolve => { if (calls.length === 1) resolve({ client_id: 'cli_new_bot_1', client_secret: 'new-secret', user_info: { open_id: 'ou_owner_9' } }); else approve = resolve; }); };
+  let patches = 0; const configured = [];
+  const f = fixture(t, { registerApp, settleMs: 0, currentApp: () => ({ appId: 'cli_primary_bot', appSecret: 'p', domain: 'feishu' }),
+    patchCallbacks: async app => { patches++; if (!approve || app.appId !== 'cli_new_bot_1') throw new Error('not yet'); },
+    configure: async data => configured.push(data), welcome: async () => {} });
+  await f.setup.start();
+  await new Promise(r => setTimeout(r, 100));
+  assert.equal(calls.length, 2, 'repair scan started automatically');
+  assert.equal(calls[1].appId, 'cli_new_bot_1', 'targets the new bot, not the primary');
+  const status = f.setup.status();
+  assert.equal(status.purpose, 'callbacks'); assert.equal(status.afterCreate, true); assert.equal(status.phase, 'waiting');
+  assert.ok(!JSON.stringify(status).includes('new-secret'));
+  approve({ client_id: 'cli_new_bot_1', client_secret: 'new-secret' }); await new Promise(r => setTimeout(r, 50));
+  assert.equal(f.setup.status().phase, 'complete');
+  assert.equal(configured.at(-1).appId, 'cli_new_bot_1'); assert.equal(configured.at(-1).cardCallbacksReady, true);
 });

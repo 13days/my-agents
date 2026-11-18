@@ -70,8 +70,8 @@ async function patchCardCallbacks(credentials) {
 
 function createLarkSetup({ dir, configure, findCLI = findLarkCLI, spawnCLI = spawn, execute = run, readApp = readCreatedApp, registerApp = options => require('@larksuiteoapi/node-sdk').registerApp(options), patchCallbacks = patchCardCallbacks, welcome = async () => {}, currentApp = () => null, settleMs = 3000, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), timeoutMs = 10 * 60 * 1000 }) {
   const configDir = path.join(dir, 'lark-cli');
-  let job = null;
-  const status = () => ({ available: true, phase: job?.phase || 'idle', purpose: job?.purpose || 'create', owner: !!job?.owner, callbacks: !!job?.callbacks, welcomed: !!job?.welcomed, verificationUrl: job?.url || '', qrImage: job?.qrImage || '', error: job?.error || '', canRecover: fs.existsSync(path.join(configDir, 'config.json')) });
+  let job = null, lastCreated = null; // credentials of the bot created by the last scan (never exposed in status)
+  const status = () => ({ afterCreate: !!job?.afterCreate, available: true, phase: job?.phase || 'idle', purpose: job?.purpose || 'create', owner: !!job?.owner, callbacks: !!job?.callbacks, welcomed: !!job?.welcomed, verificationUrl: job?.url || '', qrImage: job?.qrImage || '', error: job?.error || '', canRecover: fs.existsSync(path.join(configDir, 'config.json')) });
   const clearQR = current => { current.url = ''; current.qrImage = ''; current.buffer = ''; };
   const stopChild = child => {
     // npm's launcher forks the native CLI; stop the entire owned process group.
@@ -121,10 +121,12 @@ function createLarkSetup({ dir, configure, findCLI = findLarkCLI, spawnCLI = spa
       const callbacks = await retry(() => patchCallbacks(app), 4, settleMs).then(() => true, () => false);
       if (job !== current || current.phase !== 'completing') return;
       await retry(() => configure({ ...app, enabled: true, cardCallbacksReady: callbacks, ...(owner ? { allowedUserIds: [owner] } : {}) }), 6, settleMs);
-      current.owner = !!owner; current.callbacks = callbacks;
+      current.owner = !!owner; current.callbacks = callbacks; lastCreated = app;
       if (owner) current.welcomed = await retry(() => welcome(owner, { callbacks, appId: app.appId }), 3, settleMs).then(() => true, () => false);
       if (current.phase === 'completing') current.phase = 'complete';
       clearTimeout(current.timer);
+      // Card callbacks did not take: go straight to the one extra scan that enables them for this bot.
+      if (!callbacks && job === current) repairCallbacks({ appId: app.appId, afterCreate: true }).catch(() => {});
     }).catch(() => fail('扫码未完成或应用创建失败，请重新扫码创建'));
     return status();
   }
@@ -139,11 +141,12 @@ function createLarkSetup({ dir, configure, findCLI = findLarkCLI, spawnCLI = spa
     } catch { current.phase = 'error'; current.error = '连接已创建的应用失败，请检查系统钥匙串和网关连接状态后重试'; }
     return status();
   }
-  async function repairCallbacks() {
+  async function repairCallbacks({ appId = '', afterCreate = false } = {}) {
     if (job && ['starting', 'waiting', 'completing'].includes(job.phase)) return status();
-    const current = job = { phase: 'starting', purpose: 'callbacks', url: '', qrImage: '', error: '', abort: new AbortController() };
+    const current = job = { phase: 'starting', purpose: 'callbacks', afterCreate, url: '', qrImage: '', error: '', abort: new AbortController() };
     try {
-      const credentials = currentApp() || await readApp(configDir);
+      const credentials = appId && lastCreated?.appId === appId ? lastCreated : appId && currentApp()?.appId !== appId ? null : currentApp() || await readApp(configDir);
+      if (!credentials) throw new Error('unknown app');
       current.timer = setTimeout(() => { current.phase = 'error'; current.error = '授权二维码已过期，请重试'; clearQR(current); current.abort.abort(); }, timeoutMs); current.timer.unref();
       Promise.resolve().then(() => registerApp({
         appId: credentials.appId,

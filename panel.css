@@ -1254,3 +1254,12 @@ body { background: radial-gradient(1100px 520px at 75% -200px, #6d6ef01c, transp
 
 .cluster-line { padding: 16px 20px; align-items: center; }
 #render .cluster-line h2 { margin: 0 0 4px; font-size: 17px; }
+
+.signin-body { display: grid; gap: 14px; margin: 14px 0; }
+.signin-steps { display: grid; gap: 10px; padding-left: 20px; }
+.signin-code { margin-top: 8px; font: 600 26px/1.2 var(--mono); letter-spacing: .14em; color: var(--text); }
+.signin-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.signin-qr { width: 150px; height: 150px; border-radius: 10px; }
+.signin-code-form { display: flex; gap: 8px; }
+.signin-code-form input { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: #ffffff05; color: var(--text); font: 12px var(--mono); }
+.signin-done { color: var(--green); font-weight: 600; }

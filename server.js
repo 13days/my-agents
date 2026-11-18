@@ -2162,7 +2162,7 @@ const server = http.createServer(async (req, res) => {
         if (cluster.status().enabled && !cluster.canStart()) return sendJSON(res, 409, { error: '扫码创建机器人请打开 IM 主节点的面板；现有连接和共享设置可在当前页面管理' });
         const input = JSON.parse(await readBody(req) || '{}');
         if (input.cancel) { larkSetup.cancel(); return sendJSON(res, 200, larkSetup.status()); }
-        if (input.repairCallbacks) return sendJSON(res, 202, await larkSetup.repairCallbacks());
+        if (input.repairCallbacks) return sendJSON(res, 202, await larkSetup.repairCallbacks({ appId: typeof input.appId === 'string' ? input.appId : '' }));
         if (input.recover) return sendJSON(res, 200, await larkSetup.recover());
         return sendJSON(res, 202, await larkSetup.start(input.domain));
       }
@@ -2284,6 +2284,20 @@ const server = http.createServer(async (req, res) => {
     }
 
     // One management contract, separate account pools and routing for each engine.
+    // Panel-driven subscription sign-in: no terminal, the finished login joins the pool.
+    if (type === 'signin') {
+      res.setHeader('Cache-Control', 'no-store');
+      try {
+        if (req.method === 'GET' && parts[2]) return sendJSON(res, 200, subscriptionLogin.status(decodeURIComponent(parts[2])) || { phase: 'missing' });
+        if (req.method === 'POST') {
+          const input = JSON.parse(await readBody(req, 16 * 1024) || '{}');
+          if (input.cancel) return sendJSON(res, 200, subscriptionLogin.cancel(String(input.id || '')) || {});
+          if (input.code !== undefined) return sendJSON(res, 200, subscriptionLogin.submitCode(String(input.id || ''), input.code));
+          return sendJSON(res, 202, subscriptionLogin.start(String(input.engine || '')));
+        }
+      } catch (error) { return sendJSON(res, 400, { error: error instanceof SyntaxError ? 'JSON 格式无效' : error.message }); }
+      return sendJSON(res, 405, { error: 'method not allowed' });
+    }
     if (type === 'accounts' && ['claude','codex'].includes(parts[2])) {
       res.setHeader('Cache-Control','no-store');
       const engine = parts[2], operation = parts[3];
@@ -2837,6 +2851,11 @@ if (!HISTORY_WORKER) accountPool = require('./core/account-pool').createAccountP
   },
 });
 const runtimeAccountTransport=require('./core/account-transport').createAccountTransport('my-agents/runtime-native-accounts/v1');
+const subscriptionLogin = require('./core/subscription-login').createSubscriptionLogin({
+  codexHome: CODEX_HOME, claudeDir: process.env.CLAUDE_CONFIG_DIR || CLAUDE_DIR,
+  codexCli: process.env.CODEX_CLI || 'codex', claudeCli: process.env.CLAUDE_CLI || 'claude',
+  onComplete: async () => { await syncRuntimeLogins().catch(() => {}); await accountPool?.refresh(); },
+});
 async function syncRuntimeLogins() {
   await Promise.all(registry.nodes().filter(node=>node.id!=='local'&&node.info.transport!=='cluster'&&node.info.nativeAccounts).map(async node=>{
     try { const packet=await node.peer.call('accounts.native',{publicKey:runtimeAccountTransport.publicKey},{timeout:3000});accountPool.observeNative(node.id,runtimeAccountTransport.open(packet.sealed,packet.publicKey)); } catch {}
