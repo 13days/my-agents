@@ -90,9 +90,11 @@ async function waitHealthy(machine, commit) {
   while (Date.now() < deadline) {
     await sleep(3000);
     try {
+      // Ask the restarted machine itself: the leader's view of a peer's build can lag behind.
+      const health = await api(machine, 'health');
       const cluster = await localApi('cluster');
       const member = cluster.members.find(item => item.id === machine.id);
-      if (member?.online && member.build?.gitCommit === commit && cluster.leader) return;
+      if (health?.build?.gitCommit === commit && member?.online && cluster.leader) return;
     } catch {}
   }
   throw new Error(`${machine.label} 重启后 3 分钟内未以新版本上线，请检查`);
