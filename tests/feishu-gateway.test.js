@@ -1268,3 +1268,41 @@ test('after one-scan setup the owner gets a welcome message without pairing', as
   assert.doesNotMatch(JSON.stringify(f.sent.at(-1).content), /尚未配对/, 'the scanner is already authorized');
   await assert.rejects(f.gateway.welcome('not-an-open-id'), /用户 ID 无效/);
 });
+
+test('a message accepted but not yet handed to an engine is replayed after a restart', async t => {
+  const f = await fixture(t); await f.pair();
+  await f.gateway.receive(f.msg('/new'));
+  await f.gateway.stop();
+  const file = path.join(f.dir, 'panel-feishu-state.json'), saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const lost = f.msg('Question lost in a restart');
+  saved.pending = { [lost.messageId]: { appId: 'cli_test_app', at: Date.now(), msg: lost } };
+  fs.writeFileSync(file, JSON.stringify(saved));
+  const restored = createFeishuGateway(f.options); t.after(() => restored.stop());
+  await restored.start();
+  for (let i = 0; i < 100 && !f.calls.some(c => c.prompt === 'Question lost in a restart'); i++) await new Promise(r => setTimeout(r, 10));
+  assert.ok(f.calls.some(c => c.prompt === 'Question lost in a restart'), 'replayed to the engine');
+  assert.ok(f.sent.some(s => JSON.stringify(s.content).includes('服务刚刚重启')), 'the user is told why');
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).pending, {}, 'handed over messages leave the queue');
+});
+
+test('messages sent while the bot was disconnected are fetched and answered after reconnecting', async t => {
+  const f = await fixture(t); await f.pair();
+  await f.gateway.receive(f.msg('/new'));
+  await f.gateway.stop();
+  f.channel.botIdentity = { name: 'Test bot', openId: 'ou_bot' };
+  const listed = [];
+  f.channel.rawClient = { im: { v1: { message: { list: async request => { listed.push(request.params); return { data: { items: request.params.container_id === 'oc_private' ? [
+    { message_id: 'om_missed_1', chat_id: 'oc_private', msg_type: 'text', create_time: String(Date.now()), sender: { id: 'ou_owner', id_type: 'open_id', sender_type: 'user' }, body: { content: JSON.stringify({ text: 'Sent while offline' }) } },
+    { message_id: 'om_bot_reply', chat_id: 'oc_private', msg_type: 'text', create_time: String(Date.now()), sender: { id: 'cli_test_app', sender_type: 'app' }, body: { content: JSON.stringify({ text: 'bot text' }) } },
+  ] : [] } }; } } } } };
+  const restored = createFeishuGateway(f.options); t.after(() => restored.stop());
+  await restored.start();
+  for (let i = 0; i < 100 && !f.calls.some(c => c.prompt === 'Sent while offline'); i++) await new Promise(r => setTimeout(r, 10));
+  assert.ok(f.calls.some(c => c.prompt === 'Sent while offline'), 'missed message handled');
+  assert.ok(!f.calls.some(c => c.prompt === 'bot text'), 'bot messages are ignored');
+  assert.ok(f.sent.some(s => JSON.stringify(s.content).includes('重新连接期间')));
+  assert.equal(listed[0].container_id_type, 'chat');
+  const before = f.calls.length; await restored.stop(); await restored.start(); await new Promise(r => setTimeout(r, 50));
+  assert.equal(f.calls.filter(c => c.prompt === 'Sent while offline').length, 1, 'never handled twice');
+  assert.ok(f.calls.length >= before);
+});

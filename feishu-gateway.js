@@ -54,10 +54,10 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   fs.mkdirSync(inboxDir, { recursive: true, mode: 0o700 });
   const inbox = createFeishuInbox(inboxDir);
   const defaults = { allowAllUsers: false, allowAllGroups: false, enabled: false, appId: '', appSecret: '', domain: 'feishu', allowedUserIds: [], disabledUserIds: [], allowedChatIds: [], defaultProject: '', defaultMachine: '', defaultEngine: 'claude', worktree: true, model: '', keepAwake: false, nativeAutoAccept: false };
-  const emptyState = () => ({ replyFormats: {}, bindings: {}, engineBindings: {}, cards: {}, sessionRefs: {}, taskCards: {}, sessionModels: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} });
+  const emptyState = () => ({ pending: {}, lastEventAt: 0, replyFormats: {}, bindings: {}, engineBindings: {}, cards: {}, sessionRefs: {}, taskCards: {}, sessionModels: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} });
   let config = defaults, state = emptyState(), phase = 'disabled', lastError = '', channel = null, connecting = null, pairing = null;
   function reloadFiles() {
-    try { config = { ...defaults, ...load(configFile, {}) }; state = { ...emptyState(), ...load(stateFile, {}) }; state.taskCards ||= {}; state.sessionRefs ||= {}; state.sessionModels ||= {}; state.drafts ||= {}; state.replyFormats ||= {}; }
+    try { config = { ...defaults, ...load(configFile, {}) }; state = { ...emptyState(), ...load(stateFile, {}) }; state.taskCards ||= {}; state.sessionRefs ||= {}; state.sessionModels ||= {}; state.drafts ||= {}; state.replyFormats ||= {}; state.pending ||= {}; }
     catch (e) { lastError = e.message; phase = 'error'; }
   }
   reloadFiles();
@@ -427,6 +427,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (binding.engine !== engine) { binding.engine = engine; persist(); }
     if (panel.machineId?.() && panel.machineId() !== 'local' && !binding.machineId) throw new Error('此旧会话尚未记录执行机器，请发送 /node 选择机器和项目，再继续。系统不会把旧目录默认用于当前主节点');
     const previousId = binding.id;
+    for (const [id, entry] of Object.entries(state.pending)) if ((entry.msg?.turnId || messageUUID(id)) === input.messageId) delete state.pending[id];
     rememberSession(binding);persist();
     const node = nodeOf(binding);
     const result = await panel.submit({ sessionId: binding.sourceSessionId || binding.id, switchMachine: !!binding.sourceSessionId, cwd: binding.cwd, workspaceId: binding.workspaceId, worktree: (binding.worktreeEnabled ?? config.worktree) && !session(binding.id), model: selectedModel(binding), machineId: binding.machineId, engine, ...(node !== 'local' ? { node } : {}), ...input });
@@ -689,7 +690,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (matches.length !== 1) { await sessionsCard(msg, /^\d+$/.test(arg) ? '' : arg); return; }
       bind(key, bindingFor(matches[0])); return currentCard(msg, state.bindings[key]);
     }
-    if (command === 'status') return send(msg, { text: `my-agents 在线\n${runtime.status().keepAwake ? 'Mac 保活已开启' : 'Mac 保活未开启'}\n绑定范围：${contextLabel(msg)}\n当前会话：${binding ? session(binding.id)?.title || binding.id : '尚未选择'}\n运行位置：${nodeLabel(binding ? nodeOf(binding) : 'local')}\n当前引擎：${catalog().label(binding ? engineOf(binding) : defaultEngine())}\n默认引擎：${catalog().label(defaultEngine())}\n默认项目：${config.defaultProject || '未配置'}` });
+    if (command === 'status') return send(msg, { text: `my-agents 在线\n${runtime.status().keepAwake ? (runtime.status().lidSleepDisabled ? 'Mac 保活已开启（含合盖）' : 'Mac 保活已开启（合盖仍会睡眠）') : 'Mac 保活未开启'}\n绑定范围：${contextLabel(msg)}\n当前会话：${binding ? session(binding.id)?.title || binding.id : '尚未选择'}\n运行位置：${nodeLabel(binding ? nodeOf(binding) : 'local')}\n当前引擎：${catalog().label(binding ? engineOf(binding) : defaultEngine())}\n默认引擎：${catalog().label(defaultEngine())}\n默认项目：${config.defaultProject || '未配置'}` });
     if (['current', 'history', 'rename', 'stop'].includes(command)) {
       if (command === 'current') { const current = binding || defaultBinding(msg); return current ? currentCard(msg, current) : projectsCard(msg); }
       if (!binding) return sessionsCard(msg);
@@ -701,7 +702,12 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     const prompt = command ? arg : text.replace(/<image\b[^>]*>[\s\S]*?<\/image>|<image\b[^>]*\/>/g, '').trim();
     return run(msg, prompt, command === 'queue' ? 'queue' : 'steer');
   }
-  async function receive(msg) {
+  // Every allowed message is written to state.pending (replicated with the cluster) before any work,
+  // and removed only once it has been handed to an engine or answered. A restart or leader change
+  // replays what is left; messages sent while the bot was disconnected are fetched on reconnect.
+  const compact = msg => { const { raw, ...rest } = msg; const thread = msg.threadId || raw?.message?.thread_id || raw?.event?.message?.thread_id || ''; return { ...rest, threadId: thread, raw: { message: { thread_id: thread, root_id: raw?.message?.root_id || raw?.event?.message?.root_id || '' } } }; };
+  const settle = id => { if (state.pending[id]) { delete state.pending[id]; persist(); } };
+  async function receive(msg, { replay = false, recovered = '' } = {}) {
     if (!msg?.messageId || !msg.senderId || !msg.chatId || inFlight.has(msg.messageId) || state.receipts.includes(msg.messageId)) return;
     inFlight.add(msg.messageId);
     const appId = config.appId;
@@ -710,17 +716,23 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     const needsMention = msg.chatType === 'group' && (!msg.mentionedBot || msg.mentionAll);
     const pairingMessage = msg.chatType === 'p2p' && /^\/pair(?:\s|$)/i.test(commandText(msg, channel?.botIdentity));
     const access = config.disabledUserIds.includes(msg.senderId) ? 'disabled_user' : needsMention ? 'needs_mention' : pairingMessage ? 'pairing' : !userAllowed ? 'blocked_user' : !groupAllowed ? 'blocked_group' : 'allowed';
-    try {
+    if (!replay) try {
       if (!await inbox.record(appId, msg, access)) { inFlight.delete(msg.messageId); return; }
     } catch (e) { rememberError(e); inFlight.delete(msg.messageId); return; }
+    state.lastEventAt = Math.max(state.lastEventAt || 0, now());
     if (appId !== config.appId) { inFlight.delete(msg.messageId); return; }
     if (!msg.senderName) contacts.lookup('users', msg.senderId).catch(() => {});
     if (msg.chatType === 'group' && !msg.chatName) contacts.lookup('groups', msg.chatId).catch(() => {});
-    if (needsMention) { inFlight.delete(msg.messageId); return; }
+    if (needsMention) { inFlight.delete(msg.messageId); persist(); return; }
+    if (access === 'allowed') { state.pending[msg.messageId] = { appId, at: state.pending[msg.messageId]?.at || now(), msg: compact(msg) }; }
+    persist();
     const key = contextKey(msg), previous = locks.get(key) || Promise.resolve();
     const work = previous.catch(() => {}).then(async () => {
-      try { await processMessage(msg); state.receipts.push(msg.messageId); persist(); }
-      catch (e) { rememberError(e); if (!e?.reported) try { await send(msg, { text: '未能完成：' + errorText(e) }); } catch {} }
+      try {
+        if (recovered && access === 'allowed') await send(msg, { text: recovered === 'restart' ? '服务刚刚重启，继续处理你的这条消息。' : '这条消息是在机器人重新连接期间发出的，现在补上处理。' }).catch(rememberError);
+        await processMessage(msg); state.receipts.push(msg.messageId); settle(msg.messageId);
+      }
+      catch (e) { rememberError(e); settle(msg.messageId); if (!e?.reported) try { await send(msg, { text: '未能完成：' + errorText(e) }); } catch {} }
     });
     locks.set(key, work);
     try { await work; } finally { inFlight.delete(msg.messageId); if (locks.get(key) === work) locks.delete(key); }
@@ -826,6 +838,41 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       return currentCard(msg, state.bindings[key], value.action === 'switch', item);
     } catch (e) { rememberError(e); await send(msg, { text: errorText(e) }); }
   }
+  let catchUpError = '';
+  function replayPending() {
+    for (const [id, entry] of Object.entries(state.pending)) {
+      if (entry.appId !== config.appId || !entry.msg) continue;
+      if (now() - entry.at > 6 * 3600 * 1000) { settle(id); send(entry.msg, { text: '这条消息在服务重启时还没来得及处理，且已超过 6 小时，请重新发送。' }).catch(rememberError); continue; }
+      receive(entry.msg, { replay: true, recovered: 'restart' }).catch(rememberError);
+    }
+  }
+  // Long-connection events are not redelivered after a disconnect: list what arrived meanwhile
+  // in recently active chats and topics. Already-seen messages are skipped by the inbox.
+  async function catchUp() {
+    const client = channel?.rawClient, bot = channel?.botIdentity, since = state.lastEventAt;
+    if (!client?.im?.v1?.message?.list || !bot?.openId || !since) return;
+    const start = Math.max(since, now() - 30 * 60 * 1000) - 5000;
+    const recent = (await inbox.messages(config.appId, { limit: 100 })).items.filter(item => Date.parse(item.receivedAt) > now() - 7 * 86400000 && ['allowed', 'needs_mention'].includes(item.access));
+    const containers = new Map();
+    for (const item of recent) {
+      containers.set('chat:' + item.chatId, { type: 'chat', id: item.chatId, chatType: item.chatType });
+      if (item.threadId) containers.set('thread:' + item.threadId, { type: 'thread', id: item.threadId, chatType: item.chatType });
+    }
+    const { normalize } = require('@larksuiteoapi/node-sdk');
+    for (const container of [...containers.values()].slice(0, 30)) {
+      let result;
+      try { result = await client.im.v1.message.list({ params: { container_id_type: container.type, container_id: container.id, start_time: String(Math.floor(start / 1000)), sort_type: 'ByCreateTimeAsc', page_size: 50 } }); }
+      catch (error) { catchUpError = errorText(error); continue; }
+      for (const item of result?.data?.items || []) {
+        if (item.sender?.sender_type !== 'user' || item.deleted || !item.sender?.id) continue;
+        const raw = { sender: { sender_id: { open_id: item.sender.id }, sender_type: 'user' }, message: { message_id: item.message_id, root_id: item.root_id, parent_id: item.parent_id, thread_id: item.thread_id, chat_id: item.chat_id, chat_type: container.chatType, message_type: item.msg_type, content: item.body?.content || '', create_time: item.create_time, mentions: (item.mentions || []).map(m => ({ key: m.key, id: { open_id: m.id }, name: m.name })) } };
+        let msg;
+        try { msg = await normalize(raw, { botIdentity: bot, includeRaw: true }); } catch { continue; }
+        msg.chatType = container.chatType; if (item.thread_id) msg.threadId = item.thread_id;
+        receive(msg, { recovered: 'gap' }).catch(rememberError);
+      }
+    }
+  }
   async function recoverTaskCards() {
     const pending = Object.entries(state.taskCards);
     for (const [messageId, saved] of pending) {
@@ -865,6 +912,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (!ownsConnection()) { await candidate.disconnect().catch(() => {}); return; }
       phase = 'connected';
       await recoverTaskCards();
+      replayPending(); catchUp().catch(error => { catchUpError = errorText(error); });
       await inbox.ready;
       contacts.refresh(false).catch(() => {});
     })().catch(async e => { rememberError(e); await stop(); phase = 'error'; throw new Error(lastError || '飞书连接失败'); }).finally(() => { connecting = null; });
@@ -886,7 +934,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (next.defaultProject) { if (panel.resolveDirectory) next.defaultProject = await panel.resolveDirectory(next.defaultMachine, next.defaultProject); else { next.defaultProject = fs.realpathSync(next.defaultProject); if (!fs.statSync(next.defaultProject).isDirectory()) throw new Error('默认项目必须是文件夹'); } }
     }
     if (next.model && !/^[\w.\/:\[\]-]{1,100}$/.test(next.model)) throw new Error('模型名称无效');
-    if (next.appId !== config.appId || next.domain !== config.domain) { next.cardCallbacksReady = input.cardCallbacksReady || false; next.allowAllUsers = input.allowAllUsers || false; next.allowAllGroups = input.allowAllGroups || false; next.allowedUserIds = input.allowedUserIds || []; next.disabledUserIds = input.disabledUserIds || []; pairing = null; state = { replyFormats: {}, bindings: {}, engineBindings: {}, cards: {}, sessionRefs: {}, taskCards: {}, sessionModels: {}, listings: {}, receipts: [], projects: [], nodeProjects: {}, drafts: {} }; persist(); }
+    if (next.appId !== config.appId || next.domain !== config.domain) { next.cardCallbacksReady = input.cardCallbacksReady || false; next.allowAllUsers = input.allowAllUsers || false; next.allowAllGroups = input.allowAllGroups || false; next.allowedUserIds = input.allowedUserIds || []; next.disabledUserIds = input.disabledUserIds || []; pairing = null; state = { ...emptyState(), drafts: {} }; persist(); }
     const reconnect = next.enabled !== config.enabled || next.appId !== config.appId || next.appSecret !== config.appSecret || next.domain !== config.domain;
     if (reconnect) await stop();
     config = next; atomic(configFile, config); applyRuntime();

@@ -8,7 +8,7 @@ test('keep-awake is tied to the panel PID; login agent is scoped to this user an
   try {
     process.env.MY_AGENTS_BIND = '0.0.0.0'; process.env.MY_AGENTS_PUBLIC_HOSTS = 'panel.internal';
     const runtime = createMacRuntime({ dir, home: dir, serverPath: path.join(dir, 'A&B/server.js'), port: 4321, proxyPort: 4322, platform: 'darwin', launch: (cmd, args) => { const child = new EventEmitter(); child.kill = signal => calls.push({ signal }); calls.push({ cmd, args }); return child; } });
-    runtime.keepAwake(true); assert.equal(runtime.status().keepAwake, true); assert.deepEqual(calls[0].args, ['-i', '-s', '-w', String(process.pid)]);
+    runtime.keepAwake(true); assert.equal(runtime.status().keepAwake, true); assert.deepEqual(calls[0].args, ['-i', '-s', '-m', '-w', String(process.pid)]);
     runtime.keepAwake(false); assert.equal(runtime.status().keepAwake, false); assert.equal(calls[1].signal, 'SIGTERM');
     runtime.setAutoStart(true); assert.equal(runtime.status().autoStart, true);
     const plist = fs.readFileSync(path.join(dir, 'Library/LaunchAgents/io.my-agents.gateway.plist'), 'utf8');
@@ -19,4 +19,17 @@ test('keep-awake is tied to the panel PID; login agent is scoped to this user an
     if (priorHosts === undefined) delete process.env.MY_AGENTS_PUBLIC_HOSTS; else process.env.MY_AGENTS_PUBLIC_HOSTS = priorHosts;
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('caffeinate is relaunched if it exits while keep-awake is on, and not after it is turned off', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'panel-mac-awake-')), children = [];
+  try {
+    const runtime = createMacRuntime({ dir, home: dir, serverPath: path.join(dir, 'server.js'), port: 1, proxyPort: 2, platform: 'darwin', launch: () => { const child = new EventEmitter(); child.kill = () => {}; children.push(child); return child; } });
+    runtime.keepAwake(true); children[0].emit('close', 1);
+    await new Promise(resolve => setTimeout(resolve, 3200));
+    assert.equal(children.length, 2, 'relaunched'); assert.equal(runtime.status().keepAwake, true);
+    runtime.keepAwake(false); children[1].emit('close', 0);
+    await new Promise(resolve => setTimeout(resolve, 3200));
+    assert.equal(children.length, 2, 'stays off');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

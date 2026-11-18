@@ -4,18 +4,26 @@ const os = require('os');
 const { spawn } = require('child_process');
 const xml = value => String(value).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
 function createMacRuntime({ dir, claudeDir = dir, serverPath, port, proxyPort, platform = process.platform, home = os.homedir(), launch = spawn, claudeInfo = { path: process.env.CLAUDE_CLI || 'claude', version: '' } }) {
-  let awake = null, nativeInboxError = '';
+  let awake = null, wanted = false, respawn = null, nativeInboxError = '';
   const nativeInbox = require('./core/native-inbox-policy').createNativeInboxPolicy({ home: process.env.CLAUDE_CONFIG_DIR || claudeDir, stateDir: dir });
   const agent = path.join(home, 'Library/LaunchAgents/io.my-agents.gateway.plist');
   return {
-    status() { return { nativeInbox: { ...nativeInbox.status(), ...(nativeInboxError ? { error: nativeInboxError } : {}) }, supported: platform === 'darwin', keepAwake: !!awake, autoStart: fs.existsSync(agent), backgroundService: (process.env.MY_AGENTS_BACKGROUND_SERVICE || process.env.CCP_BACKGROUND_SERVICE) === '1', claudeCli: claudeInfo.path, claudeVersion: claudeInfo.version }; },
+    status() { return { nativeInbox: { ...nativeInbox.status(), ...(nativeInboxError ? { error: nativeInboxError } : {}) }, supported: platform === 'darwin', keepAwake: !!awake, lidSleepDisabled: this?.lidSleepDisabled?.() ?? false, autoStart: fs.existsSync(agent), backgroundService: (process.env.MY_AGENTS_BACKGROUND_SERVICE || process.env.CCP_BACKGROUND_SERVICE) === '1', claudeCli: claudeInfo.path, claudeVersion: claudeInfo.version }; },
     nativeAutoAccept(enabled) { try { nativeInbox.set(enabled); nativeInboxError = ''; } catch (error) { nativeInboxError = error.message; } },
+    // Keep the Mac awake for IM: idle and system sleep (-i -s), disk (-m). caffeinate is
+    // re-launched if it ever exits while keep-awake is on. Lid-close sleep can only be
+    // disabled system-wide with `sudo pmset -a disablesleep 1`; status() reports it.
     keepAwake(enabled) {
-      if (awake) { awake.kill('SIGTERM'); awake = null; }
-      if (enabled && platform === 'darwin') {
-        awake = launch('/usr/bin/caffeinate', ['-i', '-s', '-w', String(process.pid)], { stdio: 'ignore' });
-        const child = awake; child.on('error', () => { if (awake === child) awake = null; }); child.on('close', () => { if (awake === child) awake = null; });
-      }
+      wanted = !!enabled; clearTimeout(respawn);
+      if (awake) { const old = awake; awake = null; old.kill('SIGTERM'); }
+      if (!wanted || platform !== 'darwin') return;
+      const child = awake = launch('/usr/bin/caffeinate', ['-i', '-s', '-m', '-w', String(process.pid)], { stdio: 'ignore' });
+      const lost = () => { if (awake !== child) return; awake = null; if (wanted) { respawn = setTimeout(() => this.keepAwake(true), 3000); respawn.unref?.(); } };
+      child.on('error', lost); child.on('close', lost);
+    },
+    lidSleepDisabled() {
+      if (platform !== 'darwin') return false;
+      try { return /SleepDisabled\s+1/.test(require('child_process').execFileSync('/usr/bin/pmset', ['-g'], { encoding: 'utf8', timeout: 3000 })); } catch { return false; }
     },
     setAutoStart(enabled) {
       if (platform !== 'darwin') throw new Error('登录自动启动仅适用于 macOS');
