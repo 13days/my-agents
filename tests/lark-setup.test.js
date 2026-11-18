@@ -43,8 +43,7 @@ test('one scan creates the app with callbacks, pairs the scanner and greets them
   assert.ok(options.addons.scopes.tenant.includes('application:application:patch'));
   assert.equal(f.children.length, 0, 'the CLI is only used to render the QR image');
   assert.equal(f.setup.status().verificationUrl, r.url);
-  assert.deepEqual(f.executions[0].args, ['auth', 'qrcode', r.url, '--output', 'setup-qr.png']);
-  assert.match(f.setup.status().qrImage, /^data:image\/png;base64,/);
+  assert.equal(f.executions.length, 0, 'the page draws the QR code; no CLI is run');
   r.approve({ client_id: 'cli_new_test', client_secret: 'private-app-secret', user_info: { open_id: 'ou_owner_123', tenant_brand: 'lark' } }); await settle();
   assert.deepEqual(steps, [['patch', 'cli_new_test']]);
   assert.deepEqual(f.configured, [{ appId: 'cli_new_test', appSecret: 'private-app-secret', domain: 'lark', enabled: true, cardCallbacksReady: true, allowedUserIds: ['ou_owner_123'] }]);
@@ -65,16 +64,6 @@ test('a new app that is not visible yet is retried; a failed callback patch stil
   assert.equal(f.configured[0].cardCallbacksReady, false);
   assert.deepEqual(greeted, [{ callbacks: false, appId: 'cli_slow_app' }], 'the welcome tells the owner how to enable card buttons');
   assert.equal(f.setup.status().phase, 'complete'); assert.equal(f.setup.status().callbacks, false);
-});
-
-test('QR failure retains the unchanged setup link and keeps app registration alive', async t => {
-  const r = pendingRegistration();
-  const f = fixture(t, { registerApp: r.registerApp, execute: async () => { throw new Error('unsafe output path'); } });
-  await f.setup.start(); await settle();
-  assert.equal(f.setup.status().phase, 'waiting');
-  assert.equal(f.setup.status().verificationUrl, 'https://accounts.feishu.cn/setup?opaque=a%2Fb+1');
-  assert.match(f.setup.status().error, /打开下方链接/);
-  assert.equal(r.calls[0].signal.aborted, false);
 });
 
 const installedCLI = findLarkCLI();
@@ -99,11 +88,13 @@ test('cancelled and failed jobs never import credentials or expose raw output', 
   assert.equal(f.setup.status().verificationUrl, '');
 });
 
-test('missing CLI is reported without starting configuration', async t => {
-  const f = fixture(t, { findCLI: () => '' });
-  assert.equal(f.setup.status().available, false);
-  await assert.rejects(f.setup.start(), /未检测到/);
-  assert.equal(f.children.length, 0);
+test('setup works without lark-cli installed', async t => {
+  const r = pendingRegistration();
+  const f = fixture(t, { findCLI: () => '', registerApp: r.registerApp });
+  assert.equal(f.setup.status().available, true);
+  await f.setup.start(); await settle();
+  assert.equal(f.setup.status().phase, 'waiting');
+  assert.match(f.setup.status().verificationUrl, /^https:\/\//);
   assert.equal(findLarkCLI({ LARK_CLI: '/nonexistent-lark-cli', PATH: '' }), '');
 });
 
@@ -160,4 +151,13 @@ test('callback repair updates the existing app and waits for scan approval befor
   assert.deepEqual(steps, ['patch', 'connect']);
   assert.equal(f.setup.status().phase, 'complete');
   assert.equal(f.setup.status().verificationUrl, '');
+});
+
+test('the vendored QR encoder sizes long setup URLs and rejects oversize input', () => {
+  const QR = require('../vendor/qr.js');
+  assert.equal(QR.matrix('hi').length, 21);
+  const long = 'https://accounts.feishu.cn/setup?addons=' + 'a'.repeat(600);
+  const m = QR.matrix(long); assert.ok(m.length > 21 && m.length <= 177 && m.every(row => row.length === m.length));
+  assert.match(QR.svg(long), /^<svg [^>]*viewBox/);
+  assert.throws(() => QR.matrix('x'.repeat(5000)), /过长/);
 });

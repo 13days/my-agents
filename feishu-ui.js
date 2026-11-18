@@ -22,8 +22,8 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
     <div class="gateway-status chart"><div><span id="feishu-phase" class="route-badge"></span><p id="feishu-connection-note" class="route-muted"></p></div><div class="gateway-runtime" id="feishu-runtime"></div></div>
     <div class="gateway-columns"><section class="chart"><h3>${esc(rt('连接机器人', 'Connect your bot'))}</h3>
       ${(data.bots || []).length ? `<div class="gateway-bots"><p class="route-muted">${esc(rt('同时监听的机器人', 'Bots listening'))}</p>${data.bots.map(bot => `<div class="gateway-bot" data-bot="${esc(bot.appId)}"><span class="status-dot" style="background:${bot.phase === 'connected' ? 'var(--green)' : 'var(--danger)'}"></span><code>${esc(bot.appId)}</code><span class="route-muted">${esc(bot.primary ? rt('主机器人', 'Primary') : rt('附加', 'Additional'))} · ${esc(bot.phase === 'connected' ? rt('已连接', 'Connected') : bot.lastError || bot.phase)} · ${esc(rt('授权用户 ', 'Users ') + bot.users)}</span>${bot.primary ? '' : `<button type="button" class="btn danger" data-remove-bot="${esc(bot.appId)}">${esc(rt('移除', 'Remove'))}</button>`}</div>`).join('')}</div>` : ''}
-      <section id="feishu-cli-setup" class="gateway-cli-setup" ${cliSetup.available ? '' : 'hidden'}>
-        <p class="route-muted">${esc(rt('已检测到 Lark CLI，扫码创建机器人并自动连接，无需填写 App ID 和 Secret。', 'Lark CLI detected. Scan to create and connect your bot without entering app credentials.'))}</p>
+      <section id="feishu-cli-setup" class="gateway-cli-setup">
+        <p class="route-muted">${esc(rt('用飞书扫一次码：自动创建机器人、开通卡片按钮、配对你的账号，并发给你一条欢迎消息。', 'Scan once: creates the bot, enables card buttons, pairs your account and sends you a welcome message.'))}</p>
         <div class="gateway-cli-actions"><select id="feishu-cli-brand" aria-label="${esc(rt('扫码创建服务', 'Service for QR setup'))}"><option value="feishu">飞书</option><option value="lark">Lark</option></select><button class="btn primary" type="button" id="feishu-cli-create">${esc(rt('扫码创建机器人', 'Create bot with QR code'))}</button><button class="btn" type="button" id="feishu-cli-callbacks" hidden>${esc(rt('启用卡片按钮（扫码）', 'Enable card buttons (scan)'))}</button><button class="btn" type="button" id="feishu-cli-cancel" hidden>${esc(rt('取消', 'Cancel'))}</button></div>
         <p id="feishu-cli-state" class="route-muted" role="status"></p>
         <div id="feishu-cli-qr" hidden><img id="feishu-cli-qr-image" alt="${esc(rt('扫码创建飞书机器人', 'Scan to create a bot'))}" hidden><p><a id="feishu-cli-link" target="_blank" rel="noreferrer">${esc(rt('或打开创建链接', 'Or open the setup link'))}</a></p></div>
@@ -188,8 +188,10 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
     const validUrl = typeof setup.verificationUrl === 'string' && setup.verificationUrl.startsWith('https://');
     $('#feishu-cli-qr').hidden = !validUrl;
     if (validUrl) link.href = setup.verificationUrl; else link.removeAttribute('href');
-    image.hidden = !setup.qrImage;
-    if (setup.qrImage?.startsWith('data:image/png;base64,')) image.src = setup.qrImage; else image.removeAttribute('src');
+    // The page draws the QR code itself (vendor/qr.js), so no CLI is required.
+    let qr = ''; try { if (validUrl && window.QR) qr = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(QR.svg(setup.verificationUrl, { size: 240 })); } catch {}
+    image.hidden = !qr;
+    if (qr) image.src = qr; else image.removeAttribute('src');
     if (setupWasActive && setup.phase === 'complete') {
       setupWasActive = false;
       api('GET', 'feishu').then(result => {

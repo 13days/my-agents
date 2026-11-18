@@ -2090,7 +2090,7 @@ const server = http.createServer(async (req, res) => {
   if (scope && !knownProjects().includes(scope)) scope = '';
 
   try {
-    if (req.method === 'GET' && ['/conversation-state.js', '/mermaid-ui.js', '/vendor/mermaid/mermaid.tiny.js'].includes(url.pathname)) {
+    if (req.method === 'GET' && ['/conversation-state.js', '/mermaid-ui.js', '/vendor/mermaid/mermaid.tiny.js', '/vendor/qr.js'].includes(url.pathname)) {
       res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' });
       return fs.createReadStream(path.join(__dirname, url.pathname.slice(1))).pipe(res);
     }

@@ -71,7 +71,7 @@ async function patchCardCallbacks(credentials) {
 function createLarkSetup({ dir, configure, findCLI = findLarkCLI, spawnCLI = spawn, execute = run, readApp = readCreatedApp, registerApp = options => require('@larksuiteoapi/node-sdk').registerApp(options), patchCallbacks = patchCardCallbacks, welcome = async () => {}, currentApp = () => null, settleMs = 3000, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), timeoutMs = 10 * 60 * 1000 }) {
   const configDir = path.join(dir, 'lark-cli');
   let job = null;
-  const status = () => ({ available: !!findCLI(), phase: job?.phase || 'idle', purpose: job?.purpose || 'create', owner: !!job?.owner, callbacks: !!job?.callbacks, welcomed: !!job?.welcomed, verificationUrl: job?.url || '', qrImage: job?.qrImage || '', error: job?.error || '', canRecover: fs.existsSync(path.join(configDir, 'config.json')) });
+  const status = () => ({ available: true, phase: job?.phase || 'idle', purpose: job?.purpose || 'create', owner: !!job?.owner, callbacks: !!job?.callbacks, welcomed: !!job?.welcomed, verificationUrl: job?.url || '', qrImage: job?.qrImage || '', error: job?.error || '', canRecover: fs.existsSync(path.join(configDir, 'config.json')) });
   const clearQR = current => { current.url = ''; current.qrImage = ''; current.buffer = ''; };
   const stopChild = child => {
     // npm's launcher forks the native CLI; stop the entire owned process group.
@@ -96,8 +96,6 @@ function createLarkSetup({ dir, configure, findCLI = findLarkCLI, spawnCLI = spa
   async function start(domain = 'feishu') {
     if (job && ['starting', 'waiting', 'completing'].includes(job.phase)) return status();
     if (!['feishu', 'lark'].includes(domain)) throw new Error('请选择飞书或 Lark');
-    const cli = findCLI();
-    if (!cli) throw new Error('未检测到 lark-cli，请使用手动配置');
     fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
     const current = job = { phase: 'starting', purpose: 'create', url: '', qrImage: '', error: '', abort: new AbortController() };
     const fail = message => {
@@ -112,9 +110,6 @@ function createLarkSetup({ dir, configure, findCLI = findLarkCLI, spawnCLI = spa
         if (job !== current || current.abort.signal.aborted) return;
         // Keep the original URL byte-for-byte for both the link and QR code.
         current.url = info.url; current.phase = 'waiting';
-        generateQRCode(cli, info.url, { ...process.env, LARKSUITE_CLI_CONFIG_DIR: configDir }, execute).then(image => {
-          if (job === current && current.phase === 'waiting') current.qrImage = image;
-        }).catch(() => { if (job === current && current.phase === 'waiting') current.error = '二维码生成失败，可打开下方链接继续创建，或取消后重试'; });
       },
     })).then(async result => {
       if (job !== current || current.abort.signal.aborted) return;
@@ -146,8 +141,6 @@ function createLarkSetup({ dir, configure, findCLI = findLarkCLI, spawnCLI = spa
   }
   async function repairCallbacks() {
     if (job && ['starting', 'waiting', 'completing'].includes(job.phase)) return status();
-    const cli = findCLI();
-    if (!cli) throw new Error('请先安装 Lark CLI');
     const current = job = { phase: 'starting', purpose: 'callbacks', url: '', qrImage: '', error: '', abort: new AbortController() };
     try {
       const credentials = currentApp() || await readApp(configDir);
@@ -160,9 +153,6 @@ function createLarkSetup({ dir, configure, findCLI = findLarkCLI, spawnCLI = spa
         onQRCodeReady: info => {
           if (job !== current || current.abort.signal.aborted) return;
           current.url = info.url; current.phase = 'waiting';
-          generateQRCode(cli, info.url, { ...process.env, LARKSUITE_CLI_CONFIG_DIR: configDir }, execute).then(image => {
-            if (job === current && current.phase === 'waiting') current.qrImage = image;
-          }).catch(() => { if (current.phase === 'waiting') current.error = '二维码生成失败，可打开下方链接继续授权'; });
         },
       })).then(async result => {
         if (job !== current || current.abort.signal.aborted) return;
