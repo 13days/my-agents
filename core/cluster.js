@@ -14,6 +14,10 @@ function createCluster({ dir, config, network, gateway = { start: async () => {}
   let role = self.witness ? 'witness' : 'follower', leaderId = '', leaseUntil = 0, timer = null, heartbeat = null, leaseTimer = null, stopped = true, campaigning = false;
   let lastLeaderAt = monotonicNow(), preferred = config.preferred || '', snapshotChecksum = '', heartbeatBusy = false;
   const peerReports = new Map();
+  // Last election and step-down, kept for diagnosing why a node did or did not become leader.
+  let lastCampaign = null, lastStepDown = null;
+  const stepDown = reason => { lastStepDown = { reason, term: saved.term, at: now() }; };
+  const outcome = results => Object.fromEntries(results.map((r, i) => r.status === 'fulfilled' ? [r.value.id, { term: r.value.value?.term, granted: !!r.value.value?.granted, reason: r.value.value?.reason || '' }] : ['#' + i, { error: String(r.reason?.message || r.reason).slice(0, 120) }]));
   const gatewayPhase = () => gateway.status?.().phase || (gateway.active ? 'connected' : 'disabled');
   const baseNames = ['panel-feishu.json', 'panel-feishu-state.json', 'panel-workspaces.json', 'panel-conversations.json'];
   // Additional Feishu bots replicate with the primary one so a new leader brings all of them up.
@@ -69,10 +73,10 @@ function createCluster({ dir, config, network, gateway = { start: async () => {}
     for (const result of results) if (result.status === 'fulfilled' && result.value.value?.term === saved.term && result.value.value.accepted !== false && voters.some(v => v.id === result.value.id)) { acks++; peerReports.set(result.value.id, { gateway: result.value.value.gateway, at: now() }); if ((result.value.value.snapshotIndex || 0) < snapshot.index) network.call(result.value.id, 'cluster.snapshot', snapshot, { timeout: 3000 }).catch(() => {}); }
     if (acks >= quorum) {
       leaseUntil = startedAt + leaseMs;
-      if (monotonicNow() >= leaseUntil) { await gatewayStop(); role = 'follower'; resetElection(); return; }
+      if (monotonicNow() >= leaseUntil) { stepDown('heartbeat_slower_than_lease'); await gatewayStop(); role = 'follower'; resetElection(); return; }
       role = 'leader'; watchLease();
       Promise.resolve().then(() => { if (validLeader()) return gateway.start(); }).catch(e => log.warn?.('飞书 Leader 启动失败：' + e.message));
-    } else if (monotonicNow() >= leaseUntil) { await gatewayStop(); role = 'follower'; leaderId = ''; resetElection(); }
+    } else if (monotonicNow() >= leaseUntil) { stepDown(`acks ${acks}/${quorum}: ` + JSON.stringify(outcome(results.map(r => r.status === 'fulfilled' ? { ...r, value: { id: r.value.id, value: { ...r.value.value, granted: r.value.value?.accepted !== false } } } : r)))); await gatewayStop(); role = 'follower'; leaderId = ''; resetElection(); }
     } finally { heartbeatBusy = false; }
   }
   async function campaign({ handover = false } = {}) {
@@ -89,9 +93,11 @@ function createCluster({ dir, config, network, gateway = { start: async () => {}
     const electionTerm = saved.term;
     const results = await network.broadcast('cluster.requestVote', { term: saved.term, candidateId: config.nodeId, snapshotIndex: saved.snapshotIndex }, { timeout: 1000 });
     const higher = Math.max(saved.term, ...results.filter(r => r.status === 'fulfilled').map(r => Number(r.value.value?.term) || 0));
-    if (await observeTerm(higher) || stopped || role !== 'candidate' || saved.term !== electionTerm) { campaigning = false; return; }
+    lastCampaign = { term: electionTerm, handover, at: now(), votes: outcome(results) };
+    if (await observeTerm(higher) || stopped || role !== 'candidate' || saved.term !== electionTerm) { lastCampaign.result = 'superseded'; campaigning = false; return; }
     let votes = 1;
     for (const result of results) if (result.status === 'fulfilled' && result.value.value?.term === electionTerm && result.value.value?.granted && voters.some(v => v.id === result.value.id)) votes++;
+    lastCampaign.result = votes >= quorum ? 'won' : `lost ${votes}/${quorum}`;
     if (votes >= quorum) { role = 'leader'; leaderId = config.nodeId; leaseUntil = 0; clearInterval(heartbeat); heartbeat = setInterval(heartbeatRound, heartbeatMs); heartbeat.unref?.(); await heartbeatRound(); }
     else { role = 'follower'; resetElection(); }
     campaigning = false;
@@ -148,7 +154,7 @@ function createCluster({ dir, config, network, gateway = { start: async () => {}
     const onlineVoters = voters.filter(item => online.has(item.id)).length;
     return { enabled: true, clusterId: config.clusterId, nodeId: config.nodeId, role, leader, term: saved.term,
       health: { status: hasQuorum && leader ? 'healthy' : 'unhealthy', reason: hasQuorum ? '' : onlineVoters < quorum ? '成员连接不足，无法取得多数派确认' : '成员可达，但尚未取得有效主节点租约；检查投票与同步状态' },
-      diagnostics: network.status?.() || [], snapshotIndex: saved.snapshotIndex,
+      diagnostics: network.status?.() || [], snapshotIndex: saved.snapshotIndex, lastCampaign, lastStepDown,
       quorum: { online: onlineVoters, required: quorum, total: voters.length, reachable: onlineVoters >= quorum, met: hasQuorum }, voters: voters.length, online: online.size, hasQuorum,
       lease: { remainingMs: Math.max(0, leaseUntil - monotonicNow()), expiresAt: leaseUntil ? now() + Math.max(0, leaseUntil - monotonicNow()) : 0, valid: validLeader(), clock: 'monotonic' }, leaseUntil: leaseUntil ? now() + Math.max(0, leaseUntil - monotonicNow()) : 0, preferred,
       replication: { mode: 'async-snapshot', committedLog: false },
