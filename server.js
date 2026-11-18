@@ -1884,6 +1884,16 @@ registry.register(createCodexEngine({
 }));
 let cluster;
 const machineId = () => clusterConfig?.nodeId || 'local';
+async function waitForMachine(id, timeoutMs) {
+  if (!id || id === 'local' || registry.node(id)) return;
+  const deadline = Date.now() + timeoutMs;
+  while (!registry.node(id) && Date.now() < deadline) {
+    const peer = clusterNetwork?.peer(id);
+    try { if (peer) await attachClusterRuntime(id, peer); else await nodeHub.ensure(id, Math.min(25000, Math.max(1000, deadline - Date.now()))); } catch {}
+    if (!registry.node(id)) await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  if (!registry.node(id)) throw Object.assign(new Error(`执行机器 ${id} 连接中断，等待 ${Math.round(timeoutMs / 1000)} 秒仍未恢复`), { status: 503 });
+}
 const executionMachines = () => {
   const members = clusterConfig?.members || [], result = new Map();
   for (const item of members) result.set(item.id, { id: item.id, label: item.label || item.id, panelOnline: item.id === machineId() || !!clusterNetwork?.connected().includes(item.id), online: item.id === machineId() || !!registry.node(item.id) });
@@ -1942,10 +1952,16 @@ const runStore = HISTORY_WORKER ? null : require('./core/run-store').createRunSt
 const manager = createSessionManager({
   runStore,
   registry,
-  ensureNode: async id => { if (registry.node(id)) return; const peer = clusterNetwork?.peer(id); if (peer) await attachClusterRuntime(id, peer); if (!registry.node(id)) await nodeHub.ensure(id); },
-  resolveLocation: (input, owner) => workspaceStore.resolve(input, owner),
+  ensureNode: id => waitForMachine(id, 90 * 1000),
+  // A machine whose panel is reachable but whose execution link is still reconnecting (e.g. right
+  // after a restart) is waited for instead of failed over or reported unavailable.
+  resolveLocation: async (input, owner) => {
+    const target = input.switchMachine === true ? input.machineId || input.node : owner ? owner.machineId || owner.node : input.machineId || input.node;
+    if (target && target !== 'local' && target !== machineId() && executionMachines().find(item => item.id === target)?.panelOnline) await waitForMachine(target, 60 * 1000).catch(() => {});
+    return workspaceStore.resolve(input, owner);
+  },
   // Cluster-shared default first; otherwise Codex follows the account catalog and Claude its CLI/gateway default.
-  resolveModel: async input => accountPool?.defaultModels()[input.engine] || (input.engine === 'codex' ? (await codexPoolModels(input)).defaultModel : ''),
+  resolveModel: async input => accountPool?.defaultModels()[input.engine] || (input.engine === 'codex' ? (await codexPoolModels(input).catch(() => null))?.defaultModel || '' : ''), // a failed catalog lookup must not block the turn: Codex then uses its own default
   history: {
     isOriginal: id => !!codexSessions.pathFor(id) || sessionDirectory.hasCachedNative(id),
     ownerOf: id => resolveSessionReference(id),
@@ -2050,7 +2066,7 @@ async function gatewayView() {
   if (info.enabled && info.leader && !cluster.canStart()) {
     try { effective = await sharedGateway('status'); } catch (error) { effective = { ...local, lastError: error.message }; }
   }
-  return { ...effective, execution: local.execution, runtime: local.runtime, cluster: { nodeId: info.nodeId, leader: info.leader, label: info.members?.find(item => item.id === info.leader)?.label }, cliSetup: larkSetup.status() };
+  return { ...effective, execution: local.execution, runtime: local.runtime, cluster: { nodeId: info.nodeId, leader: info.leader, label: info.members?.find(item => item.id === info.leader)?.label }, cliSetup: larkSetup.status(), health: imWatchdog?.status() || null };
 }
 
 // Usage annotations must never delay the resource list itself.
@@ -2843,6 +2859,13 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
     return feishuGateway[method](input);
   });
 } else cluster = require('./core/cluster').createStandalone(feishuGateway);
+// Watches every bot and the machines conversations are bound to; reports lasting problems to the owner.
+const imWatchdog = HISTORY_WORKER ? null : require('./core/im-watchdog').createImWatchdog({
+  bots: feishuGateway, leadership: () => cluster.canStart(), machines: executionMachines,
+  boundMachines: () => { try { const state = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'panel-feishu-state.json'), 'utf8')); return Object.values(state.bindings || {}).map(item => item.machineId).filter(Boolean); } catch { return []; } },
+  owner: () => feishuGateway.status().config.allowedUserIds?.[0] || '',
+});
+imWatchdog?.start();
 server.on('upgrade', (req, socket, head) => { if (clusterNetwork?.upgrade(req, socket, head)) return; if (!nodeHub.upgrade(req, socket, head)) socket.destroy(); });
 if (!HISTORY_WORKER) server.listen(PORT, BIND_HOST, () => {
   console.log(`my-agents 已启动: http://localhost:${PORT}`);

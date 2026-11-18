@@ -67,7 +67,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   const defaultEngine = () => catalog().fallback(config.defaultEngine, 'claude');
   // `config.model` predates per-engine models and always meant the Claude model.
   const modelFor = engine => config.models?.[engine] ?? (engine === 'claude' ? config.model : '');
-  const locks = new Map(), inFlight = new Set(), monitors = new Set(), pairAttempts = new Map();
+  const waiting = new Map(), locks = new Map(), inFlight = new Set(), monitors = new Set(), pairAttempts = new Map();
   let channelEpoch = 0;
   const replyTargets = new Map();
   const contacts = require('./feishu-contacts').createContactDirectory({ inbox, getChannel: () => channel, getAppId: () => config.appId, now });
@@ -345,6 +345,18 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     const notice = model ? `已将 ${catalog().label(engine)} 全局默认模型设为 ${model}：所有机器、面板和飞书中未单独选模型的新一轮都会使用它。` : `已清除 ${catalog().label(engine)} 全局默认模型，恢复为${engine === 'codex' ? '账号实时推荐' : '网关 / CLI 配置'}。`;
     return binding ? modelsCard(msg, notice) : send(msg, { text: notice });
   }
+  // Stop waiting on the bound session and answer the waiting question in a new session on the
+  // same machine, project and engine. The old session and its history stay untouched.
+  async function forkNow(msg, key) {
+    const binding = state.bindings[key], entry = binding && waiting.get(binding.id);
+    if (!entry) return send(msg, { text: '这条消息已经开始处理或已结束，无需另起会话。' });
+    waiting.delete(binding.id);
+    try { await panel.stop(binding.id); } catch {}
+    const { id: _old, started: _s, sourceSessionId: _src, worktree: _wt, ...rest } = binding;
+    bind(key, { ...rest, id: crypto.randomUUID() });
+    await send(msg, { text: '已另起新会话处理这条消息（同一项目和执行机器）。原会话保留，可用 /sessions 切回。' });
+    return processMessage({ ...entry.msg, messageId: entry.msg.messageId, turnId: crypto.randomUUID() });
+  }
   async function setModel(msg, input, expected = {}) {
     const binding = state.bindings[scope(msg)] || defaultBinding(msg);
     if (!binding) throw new Error('请先用 /new 选择项目');
@@ -556,7 +568,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     catch (e) { view.phase = '失败'; view.text = errorText(e); view.done = true; saveTask(progress()); if (await transport.updateCard(sent.messageId, progress()).then(() => true, () => false)) { delete state.taskCards[sent.messageId]; persist(); e.reported = true; } throw e; }
     view.accepted = true;
     let timer, heartbeat, unsub, updating, shuttingDown = false, dirty = false, busy = false, closed = false, updateFailures = 0;
-    const finish = () => { if (closed) return; closed = true; clearTimeout(timer); clearInterval(heartbeat); unsub?.(); monitors.delete(shutdownMonitor); };
+    const finish = () => { if (closed) return; closed = true; if (waiting.get(binding.id)?.taskMessageId === id) waiting.delete(binding.id); clearTimeout(timer); clearInterval(heartbeat); unsub?.(); monitors.delete(shutdownMonitor); };
     const flush = async () => {
       if (closed || busy) { dirty = true; return; }
       busy = true; dirty = false;
@@ -595,12 +607,18 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       } catch (error) { rememberError(error); }
       finally { finish(); }
     };
+    // Every wait states its reason and how long it has lasted; after 3 minutes without any output
+    // the user may abandon the wait and have the question answered in a fresh session at once.
+    waiting.set(binding.id, { msg, taskMessageId: id });
     heartbeat = setInterval(() => {
       if (view.done || closed) return;
-      if (!view.text && !view.tools.size && now() - startedAt >= 30000 && !view.warning) {
+      const waited = now() - startedAt, quiet = !view.text && !view.tools.size;
+      if (quiet && waited >= 30000 && !view.warning) {
         view.phase = '等待引擎响应';
-        view.warning = '引擎尚未返回内容，可能正在连接或重试。可以停止任务，检查网络，或用 /route 查看账号状态。';
+        view.warning = '引擎尚未返回内容，可能正在连接或重试。';
       }
+      if (quiet && waited >= 30000) view.waitNote = `已等待 ${Math.floor(waited / 60000)} 分 ${Math.floor(waited / 1000) % 60} 秒`;
+      if (quiet && waited >= 3 * 60000) view.canFork = true;
       schedule(true);
     }, 15000);
     heartbeat.unref?.();
@@ -775,6 +793,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (['models','engine','nodes','route'].includes(value.action) && value.id && referenceId(state.bindings[key]?.id) !== referenceId(value.id)) throw new Error('此卡片不是当前会话，请先切换到该会话再修改设置');
       if (['models','engine','nodes','route','use_node','use_engine','set_model','stop','permission','continue_task'].includes(value.action) && value.expectedSessionId && referenceId(state.bindings[key]?.id) !== referenceId(value.expectedSessionId)) throw new Error('会话已切换，请发送 /current 获取最新操作卡片');
       if (value.action === 'reply_format') return setReplyFormat(msg, value.format);
+      if (value.action === 'fork_now') return forkNow(msg, key);
       if (value.action === 'new_submit') return submitNewForm(msg, key, value);
       if (value.action === 'new_form') return panel.workspaces ? newForm(msg, '', catalog().fallback(value.engine, defaultEngine()), value) : projectsCard(msg, 0, value.engine);
       if (value.action === 'models') return await modelsCard(msg, '', value.refresh === true);
@@ -979,6 +998,12 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
         '- 拉我进群后 @我，就能在群里或话题里使用'];
       if (!callbacks) lines.push('', '卡片上的按钮暂未开通：点击按钮时如果飞书弹出「尚未配置卡片回调」，选「立即配置」即可；也可以在面板「IM 接入」里点「启用卡片按钮」。');
       return sendMarkdown(channel, { chatId: openId }, lines.join('\n'));
+    },
+    // Plain notice to a user from this bot (used by the watchdog); never throws on content.
+    async notify(openId, text) {
+      if (!/^ou_[\w-]{4,100}$/.test(openId || '')) throw new Error('用户 ID 无效');
+      if (phase !== 'connected' || !channel) throw new Error('机器人尚未连接');
+      return sendMarkdown(channel, { chatId: openId }, String(text).slice(0, 4000));
     },
     newPairing() { pairing = { code: crypto.randomBytes(9).toString('base64url'), expires: now() + 10 * 60 * 1000 }; return { command: '/pair ' + pairing.code, expiresAt: pairing.expires }; },
     bootstrap() { applyRuntime(); return start(); },

@@ -1306,3 +1306,25 @@ test('messages sent while the bot was disconnected are fetched and answered afte
   assert.equal(f.calls.filter(c => c.prompt === 'Sent while offline').length, 1, 'never handled twice');
   assert.ok(f.calls.length >= before);
 });
+
+test('a question stuck waiting can be answered at once in a new session on the same project', async t => {
+  const f = await fixture(t); await f.pair();
+  await f.gateway.receive(f.msg('/new'));
+  const submit = f.panel.submit; let hang = true;
+  f.panel.submit = async input => { if (!hang) return submit(input); f.calls.push(input); const job = createChatJob({ sessionId: input.sessionId }); f.panel.watch = (id, l) => job.listen(l); f.panel.running = () => true; job.publish('turn', { id: input.messageId, messageId: input.messageId }); };
+  f.panel.stop = async id => { f.calls.push({ stop: id }); };
+  const question = f.msg('Stuck question');
+  const pending = f.gateway.receive(question);
+  for (let i = 0; i < 100 && !f.calls.some(c => c.prompt === 'Stuck question'); i++) await new Promise(r => setTimeout(r, 10));
+  const oldSession = f.calls.find(c => c.prompt === 'Stuck question').sessionId;
+  hang = false; f.panel.running = () => false; f.panel.watch = undefined;
+  const jobs = new Map(); f.panel.watch = (id, l) => jobs.get(id).listen(l);
+  f.panel.submit = async input => { f.calls.push(input); const job = createChatJob({ sessionId: input.sessionId }); jobs.set(input.sessionId, job); job.publish('turn', { id: input.messageId, messageId: input.messageId }); job.publish('text', { messageId: input.messageId, text: 'Answered now' }); job.publish('done', { messageId: input.messageId }); };
+  await f.gateway.action({ messageId: f.sent.at(-1).messageId, chatId: 'oc_private', operator: { openId: 'ou_owner' }, action: { tag: 'button', value: { action: 'fork_now', id: oldSession, owner: 'ou_owner', key: contextKey(question) } } });
+  assert.ok(f.calls.some(c => c.stop === oldSession), 'the old wait is cancelled');
+  const retried = f.calls.filter(c => c.prompt === 'Stuck question').at(-1);
+  assert.notEqual(retried.sessionId, oldSession, 'answered in a new session');
+  assert.equal(retried.cwd, f.calls.find(c => c.prompt === 'Stuck question').cwd, 'same project');
+  assert.ok(f.sent.some(s => JSON.stringify(s.content).includes('已另起新会话')));
+  void pending;
+});

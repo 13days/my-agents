@@ -218,7 +218,8 @@ function task({ binding, title, view, elapsed, nodeLabel = '', model = '默认�
   if (view.nativeSession?.name) elements.push(muted(`原终端会话：${escape(clip(view.nativeSession.name, 80))} · ${escape(String(view.nativeSession.id || binding.id).slice(0, 8))}`));
   if (binding.handoff) elements.push(markdown(`**${binding.handoff.from === binding.handoff.to ? '已创建接续会话 · ' + escape(binding.handoff.to) : '执行位置已切换：' + escape(binding.handoff.from) + ' → ' + escape(binding.handoff.to)}**\n${binding.handoff.reason === 'offline' ? '原机器离线，接管机器已接续新一轮。' : '已按手动选择创建接续会话。'}${binding.handoff.context === 'checkpoint' ? '上下文来自有限的对话检查点，文件和工具状态需核对。' : '没有可恢复的对话检查点，请补充必要上下文。'}`));
   if (disconnected) elements.push(markdown('进度同步已中断，执行结果尚未确认。请先查看最近对话；不要直接重复提交原任务。'));
-  if (view.warning && !view.done) elements.push(muted(clip(view.warning, 500)));
+  if (view.warning && !view.done) elements.push(muted(clip(view.warning, 500) + (view.waitNote ? '（' + view.waitNote + '）' : '')));
+  else if (view.waitNote && !view.done && !view.text) elements.push(muted(view.waitNote));
   if (view.text) elements.push(markdown(clip(view.text, REPLY_PREVIEW)));
   else elements.push(markdown(requests.length ? '请确认下方工具调用，授权后继续。' : disconnected ? '暂无已同步的回复。' : view.done ? '本轮已结束。' : '正在处理你的请求，进展会更新在这张卡片中。'));
   if (view.text.length > REPLY_PREVIEW) elements.push(muted(disconnected ? '卡片保留已同步的回复摘要；完整内容请查看对话记录。' : view.done ? '卡片展示回复摘要；完整回复会另行发送。' : '卡片展示回复摘要；完成后会另发完整回复。'));
@@ -239,6 +240,7 @@ function task({ binding, title, view, elapsed, nodeLabel = '', model = '默认�
   const actions = [button('查看最近对话', action(context, { action: 'history', id: binding.id })), button('会话设置', action(context, { action: 'view', id: binding.id }))];
   if (view.done) actions.push(context.replyFormat === 'wide' ? button('改用 Markdown 回复', action(context, { action: 'reply_format', format: 'markdown' })) : button('改用宽屏卡片', action(context, { action: 'reply_format', format: 'wide' })));
   if (view.accepted && view.done && failed) actions.push(button('继续未完成任务', action(context, { action: 'continue_task', id: binding.id }), 'primary'));
+  if (!view.done && view.canFork) actions.push(button('另起会话立即处理', action(context, { action: 'fork_now', id: binding.id }), 'primary'));
   if (!view.done) actions.push(button(view.nativeAttached ? '断开飞书同步' : '停止当前任务', action(context, { action: 'stop', id: binding.id, ...(context.taskMessageId ? { taskMessageId: context.taskMessageId } : {}) }), 'danger'));
   if (view.nativeAttached && !view.done) elements.push(muted('当前正在接续原终端；断开飞书同步后，终端中的任务仍会运行。'));
   elements.push(buttons(actions));
