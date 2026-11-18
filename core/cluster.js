@@ -16,7 +16,10 @@ function createCluster({ dir, config, network, gateway = { start: async () => {}
   const peerReports = new Map();
   // Last election and step-down, kept for diagnosing why a node did or did not become leader.
   let lastCampaign = null, lastStepDown = null;
-  const stepDown = reason => { lastStepDown = { reason, term: saved.term, at: now() }; };
+  // Recent heartbeat rounds and the worst event-loop stall: a blocked loop silently lets the lease lapse.
+  const rounds = [];
+  let loopDelay = null; try { loopDelay = require('perf_hooks').monitorEventLoopDelay({ resolution: 50 }); loopDelay.enable(); } catch {}
+  const stepDown = reason => { lastStepDown = { reason, term: saved.term, at: now(), rounds: rounds.slice(-8), maxLoopStallMs: loopDelay ? Math.round(loopDelay.max / 1e6) : null }; loopDelay?.reset(); };
   const outcome = results => Object.fromEntries(results.map((r, i) => r.status === 'fulfilled' ? [r.value.id, { term: r.value.value?.term, granted: !!r.value.value?.granted, reason: r.value.value?.reason || '' }] : ['#' + i, { error: String(r.reason?.message || r.reason).slice(0, 120) }]));
   const gatewayPhase = () => gateway.status?.().phase || (gateway.active ? 'connected' : 'disabled');
   const baseNames = ['panel-feishu.json', 'panel-feishu-state.json', 'panel-workspaces.json', 'panel-conversations.json'];
@@ -71,6 +74,7 @@ function createCluster({ dir, config, network, gateway = { start: async () => {}
     const higher = Math.max(saved.term, ...results.filter(r => r.status === 'fulfilled').map(r => Number(r.value.value?.term) || 0));
     if (await observeTerm(higher) || stopped || role !== 'leader' || saved.term !== roundTerm) return;
     let acks = 1;
+    rounds.push({ at: now(), ms: Math.round(monotonicNow() - startedAt), results: results.map(r => r.status === 'fulfilled' ? `${r.value.id}:${r.value.value?.accepted === false ? 'rejected@' + r.value.value?.term : 'ok'}` : 'error:' + String(r.reason?.message || r.reason).slice(0, 60)) }); if (rounds.length > 12) rounds.shift();
     for (const result of results) if (result.status === 'fulfilled' && result.value.value?.term === saved.term && result.value.value.accepted !== false && voters.some(v => v.id === result.value.id)) { acks++; peerReports.set(result.value.id, { gateway: result.value.value.gateway, at: now() }); if ((result.value.value.snapshotIndex || 0) < snapshot.index) network.call(result.value.id, 'cluster.snapshot', snapshot, { timeout: 3000 }).catch(() => {}); }
     if (acks >= quorum) {
       leaseUntil = startedAt + leaseMs;
@@ -155,7 +159,7 @@ function createCluster({ dir, config, network, gateway = { start: async () => {}
     const onlineVoters = voters.filter(item => online.has(item.id)).length;
     return { enabled: true, clusterId: config.clusterId, nodeId: config.nodeId, role, leader, term: saved.term,
       health: { status: hasQuorum && leader ? 'healthy' : 'unhealthy', reason: hasQuorum ? '' : onlineVoters < quorum ? '成员连接不足，无法取得多数派确认' : '成员可达，但尚未取得有效主节点租约；检查投票与同步状态' },
-      diagnostics: network.status?.() || [], snapshotIndex: saved.snapshotIndex, lastCampaign, lastStepDown,
+      diagnostics: network.status?.() || [], snapshotIndex: saved.snapshotIndex, lastCampaign, lastStepDown, maxLoopStallMs: loopDelay ? Math.round(loopDelay.max / 1e6) : null,
       quorum: { online: onlineVoters, required: quorum, total: voters.length, reachable: onlineVoters >= quorum, met: hasQuorum }, voters: voters.length, online: online.size, hasQuorum,
       lease: { remainingMs: Math.max(0, leaseUntil - monotonicNow()), expiresAt: leaseUntil ? now() + Math.max(0, leaseUntil - monotonicNow()) : 0, valid: validLeader(), clock: 'monotonic' }, leaseUntil: leaseUntil ? now() + Math.max(0, leaseUntil - monotonicNow()) : 0, preferred,
       replication: { mode: 'async-snapshot', committedLog: false },
