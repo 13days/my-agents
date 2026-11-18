@@ -23,7 +23,7 @@ test('cluster controls transfer leadership and expose the join command', () => {
 });
 
 test('cluster and runtime-node copy stays explicit in Chinese and English', () => {
-  for (const text of ['集群与机器', 'Cluster & machines', '项目与目录', 'Projects & directories', 'IM 消息入口', 'IM ingress', 'Agent 执行机器', 'Agent execution', '添加机器', 'Add a machine', 'SSH 地址', 'SSH address']) assert.ok(html.includes(text), `missing UI copy: ${text}`);
+  for (const text of ['项目与目录', 'Projects & directories', '负责飞书', 'Handles Feishu', '只运行任务', 'Runs tasks only', '添加机器', 'Add a machine', 'SSH 地址', 'SSH address']) assert.ok(html.includes(text), `missing UI copy: ${text}`);
   assert.match(css, /\.machine-grid/);
   assert.match(css, /\.panel-layers/);
   assert.doesNotMatch(html, /data-node-kind/, 'one add-machine flow, no runtime/cluster choice');
@@ -70,12 +70,13 @@ test('cluster response renders health, membership, gateways, and transfer candid
   vm.runInContext(source, context);
   await vm.runInContext('renderClusterPanel()', context);
   assert.equal(section.hidden, false);
-  assert.match(section.innerHTML, /IM messages are received by Mac/);
+  assert.match(section.innerHTML, /Feishu is handled by Mac/);
+  assert.match(section.innerHTML, /2 machines online/);
   assert.match(section.innerHTML, /majority/);
-  assert.match(section.innerHTML, /Agent runtime/);
-  assert.match(section.innerHTML, /Not ready|Standby/);
+  assert.match(section.innerHTML, /Handles Feishu/);
+  assert.match(section.innerHTML, /Standby/);
   assert.match(section.innerHTML, /data-cluster-transfer="linux"/);
-  assert.match(section.innerHTML, /Chosen per session/);
+  assert.doesNotMatch(section.innerHTML, /IM ingress|Agent runtime|Panel link/, 'no internal jargon');
 });
 
 test('machine ids are derived from the SSH target or host name and never collide', () => {

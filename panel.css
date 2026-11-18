@@ -1251,3 +1251,6 @@ body { background: radial-gradient(1100px 520px at 75% -200px, #6d6ef01c, transp
 .engine-account-pool, .chart:has(details[open] > .pool-add-menu) { contain: none; overflow: visible; }
 .pool-add-menu .btn { justify-content: flex-start; justify-items: start; text-align: left; width: 100%; }
 .codex-pool-account small.route-muted { display: block; margin-top: 2px; }
+
+.cluster-line { padding: 16px 20px; align-items: center; }
+#render .cluster-line h2 { margin: 0 0 4px; font-size: 17px; }
