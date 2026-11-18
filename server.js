@@ -2833,6 +2833,8 @@ async function syncRuntimeLogins() {
 }
 const poolTimer = HISTORY_WORKER ? null : setInterval(() => { for (const id of clusterNetwork?.connected() || []) if (!registry.node(id) && !clusterRuntimePending.has(id)) attachClusterRuntime(id, clusterNetwork.peer(id)).catch(error => console.warn('集群执行连接：' + error.message)); return syncRuntimeLogins().then(()=>accountPool.refresh()).catch(() => console.warn('共享账号池同步失败，请检查集群连接')); }, 5000); poolTimer?.unref();
 // Provider quota per Codex subscription (replicated, so peers skip accounts checked recently).
+// Log event-loop stalls over 1s with what the panel was doing, so blocking startup work can be found.
+if (!HISTORY_WORKER) { let tick = performance.now(); const stallTimer = setInterval(() => { const now = performance.now(), stall = now - tick - 250; tick = now; if (stall > 1000) console.warn(`事件循环卡顿 ${Math.round(stall)}ms（启动后 ${Math.round(process.uptime())}s，主节点 ${cluster?.status?.().leader || '-'}）`); }, 250); stallTimer.unref(); }
 const usageTimer = HISTORY_WORKER ? null : setInterval(() => accountPool.refreshCodexUsage().catch(() => {}), 60 * 1000); usageTimer?.unref();
 if (!HISTORY_WORKER) { setTimeout(() => accountPool.refreshCodexUsage().catch(() => {}), 10 * 1000).unref(); try { codexTerminal.sync(); } catch (error) { console.warn('终端 Codex 配置同步失败：' + error.message); } }
 

@@ -128,6 +128,8 @@ async function waitGateway(avoidLeader) {
     if (machine.id === leader) {
       const target = all.find(m => m.id !== leader);
       if (target) {
+        // A freshly restarted panel does heavy startup work; let it settle before it takes the IM gateway.
+        await sleep(45000);
         // Tasks on every machine are driven through the leader: wait for all of them.
         for (const other of all) await waitIdle(other);
         log(`  将 IM 主节点从 ${machine.label} 移交给 ${target.label}`);
