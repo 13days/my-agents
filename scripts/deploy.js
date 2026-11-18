@@ -97,11 +97,12 @@ async function waitHealthy(machine, commit) {
   }
   throw new Error(`${machine.label} 重启后 3 分钟内未以新版本上线，请检查`);
 }
-async function waitGateway(expectLeader) {
+// After a transfer the election may pick any updated node; only the old leader must be gone.
+async function waitGateway(avoidLeader) {
   const deadline = Date.now() + 2 * 60000;
   while (Date.now() < deadline) {
     await sleep(3000);
-    try { const view = await localApi('feishu'); if ((!expectLeader || view.cluster?.leader === expectLeader) && (view.bots || [view]).every(bot => bot.phase === 'connected')) return view; } catch {}
+    try { const view = await localApi('feishu'); if (view.cluster?.leader && view.cluster.leader !== avoidLeader && (view.bots || [view]).every(bot => bot.phase === 'connected')) return view; } catch {}
   }
   throw new Error('飞书机器人 2 分钟内未全部重新连接');
 }
@@ -126,7 +127,7 @@ async function waitGateway(expectLeader) {
         for (const other of all) await waitIdle(other);
         log(`  将 IM 主节点从 ${machine.label} 移交给 ${target.label}`);
         await api(machine, 'cluster/transfer', 'POST', { target: target.id }).catch(error => log(`  移交失败（${error.message}），直接重启`));
-        try { await waitGateway(target.id); leader = target.id; log(`  ${target.label} 已接管，机器人全部在线`); } catch (error) { log('  ' + error.message); }
+        try { const view = await waitGateway(machine.id); leader = view.cluster.leader; log(`  ${all.find(m => m.id === leader)?.label || leader} 已接管，机器人全部在线`); } catch (error) { log('  ' + error.message); }
       }
     }
     await waitIdle(machine);
