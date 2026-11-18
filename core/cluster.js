@@ -75,14 +75,16 @@ function createCluster({ dir, config, network, gateway = { start: async () => {}
     } else if (monotonicNow() >= leaseUntil) { await gatewayStop(); role = 'follower'; leaderId = ''; resetElection(); }
     } finally { heartbeatBusy = false; }
   }
-  async function campaign() {
+  async function campaign({ handover = false } = {}) {
     if (stopped || self.witness || campaigning) return;
     campaigning = true;
+    if (!handover) {
     // A stale rejoining member must not keep increasing everyone else's term.
     const preliminary = await network.broadcast('cluster.preVote', { candidateId: config.nodeId, snapshotIndex: saved.snapshotIndex }, { timeout: 1000 });
     const peerTerm = Math.max(saved.term, ...preliminary.filter(item => item.status === 'fulfilled').map(item => Number(item.value.value?.term) || 0));
     if (await observeTerm(peerTerm) || stopped) { campaigning = false; return; }
     if (1 + preliminary.filter(item => item.status === 'fulfilled' && item.value.value?.granted && voters.some(v => v.id === item.value.id)).length < quorum) { campaigning = false; resetElection(); return; }
+    }
     role = 'candidate'; leaderId = ''; saved.term++; saved.votedFor = config.nodeId; persist();
     const electionTerm = saved.term;
     const results = await network.broadcast('cluster.requestVote', { term: saved.term, candidateId: config.nodeId, snapshotIndex: saved.snapshotIndex }, { timeout: 1000 });
@@ -112,8 +114,8 @@ function createCluster({ dir, config, network, gateway = { start: async () => {}
   });
   network.handle('cluster.snapshot', async (from, snapshot) => ({ term: saved.term, applied: from === leaderId && role !== 'leader' && snapshot.term === saved.term ? await applySnapshot(snapshot) : false, snapshotIndex: saved.snapshotIndex }));
   network.handle('cluster.transfer', async (_, request) => {
-    if (request.target !== config.nodeId || self.witness) return { accepted: false };
-    if (request.term >= saved.term) { saved.term = request.term; saved.votedFor = ''; persist(); setTimeout(campaign, 10); }
+    if (request.target !== config.nodeId || self.witness || (request.snapshotIndex || 0) > saved.snapshotIndex) return { accepted: false };
+    if (request.term >= saved.term) { saved.term = request.term; saved.votedFor = ''; persist(); clearTimeout(timer); setTimeout(() => campaign({ handover: true }), 0); }
     return { accepted: true };
   });
   network.handle('cluster.move', (_, request) => { if (!validLeader()) throw new Error('当前节点没有有效主节点租约'); return transfer(request.target); });
@@ -123,9 +125,21 @@ function createCluster({ dir, config, network, gateway = { start: async () => {}
     const member = members.find(item => item.id === target && !item.witness);
     if (!member) throw new Error('目标节点不存在或不能承载网关');
     if (target === config.nodeId) return status();
-    const result = await network.call(target, 'cluster.transfer', { target, term: saved.term + 1 }, { timeout: 3000 });
-    if (!result.accepted) throw new Error('目标节点拒绝接管');
-    preferred = target; await gatewayStop(); role = 'follower'; resetElection(); return status();
+    // Leadership transfer (Raft TimeoutNow): stop the gateway first so its last state is final, push
+    // that state to the target, then let the target campaign immediately. Followers that recently
+    // heard from us would refuse a pre-vote, and a target one snapshot behind would lose every
+    // vote, so without this the next leader was whoever won a later election, often us again.
+    preferred = target; await gatewayStop(); role = 'follower'; clearTimeout(timer);
+    try {
+      const snapshot = localSnapshot();
+      const synced = await network.call(target, 'cluster.snapshot', snapshot, { timeout: 15000 });
+      if ((synced?.snapshotIndex || 0) < snapshot.index) throw new Error('目标节点未能同步最新状态');
+      const result = await network.call(target, 'cluster.transfer', { target, term: saved.term + 1, snapshotIndex: snapshot.index }, { timeout: 3000 });
+      if (!result.accepted) throw new Error('目标节点拒绝接管');
+    } catch (error) { resetElection(); throw error; }
+    // Stay out of the election long enough for the target to win it.
+    timer = setTimeout(campaign, electionMinMs * 3); timer.unref?.();
+    return status();
   }
   function status() {
     const online = new Set([config.nodeId, ...network.connected()]);

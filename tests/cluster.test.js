@@ -6,12 +6,13 @@ const { createCluster } = require('../core/cluster');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 function mesh(ids) {
   const handlers = new Map(ids.map(id => [id, new Map()]));
-  const blocked = new Set();
+  const blocked = new Set(), dropped = new Set();
   return Object.fromEntries(ids.map(id => [id, {
     start() {}, stop() {}, connected: () => ids.filter(other => other !== id && !blocked.has([id, other].sort().join(':'))),
     handle(method, fn) { handlers.get(id).set(method, fn); },
-    async call(other, method, params) { if (blocked.has([id, other].sort().join(':'))) throw new Error('partition'); const fn = handlers.get(other).get(method); if (!fn) throw new Error('missing handler'); return fn(id, params); },
+    async call(other, method, params) { if (blocked.has([id, other].sort().join(':'))) throw new Error('partition'); if (dropped.has(other + ':' + method)) throw new Error('dropped'); const fn = handlers.get(other).get(method); if (!fn) throw new Error('missing handler'); return fn(id, params); },
     async broadcast(method, params) { return Promise.allSettled(ids.filter(other => other !== id).map(async other => ({ id: other, value: await this.call(other, method, params) }))); },
+    drop(method, on = true) { if (on) dropped.add(id + ':' + method); else dropped.delete(id + ':' + method); },
     block(other) { blocked.add([id, other].sort().join(':')); }, unblock(other) { blocked.delete([id, other].sort().join(':')); },
   }]));
 }
@@ -98,4 +99,27 @@ for (const jump of [-60000, 60000]) test(`wall clock jump ${jump}ms cannot keep 
   assert.equal(f.gateways[leader].active, false);
   assert.equal(Object.values(f.gateways).filter(g => g.active).length, 1);
   assert.equal(f.clusters[leader].canStart(), false);
+});
+
+test('a leadership transfer makes the requested node the leader, not whoever wins a later election', async t => {
+  const f = fixture([{ id: 'a' }, { id: 'b' }, { id: 'c' }]);
+  t.after(() => Promise.all(Object.values(f.clusters).map(c => c.stop())));
+  await Promise.all(Object.values(f.clusters).map(c => c.start())); await sleep(260);
+  for (let round = 0; round < 6; round++) {
+    const leader = Object.keys(f.clusters).find(id => f.clusters[id].status().role === 'leader');
+    const target = Object.keys(f.clusters).filter(id => id !== leader)[round % 2];
+    // The leader's state just changed (as it does constantly with Feishu traffic): followers lag a snapshot.
+    // Routine snapshot pushes to the target are slow/lost, so it is a version behind the leader.
+    f.networks[target].drop('cluster.snapshot');
+    fs.writeFileSync(path.join(f.dirs[leader], 'panel-feishu-state.json'), JSON.stringify({ round, at: Date.now() }));
+    await sleep(70);
+    assert.ok(f.clusters[target].status().snapshotIndex < f.clusters[leader].status().snapshotIndex, 'target lags');
+    f.networks[target].drop('cluster.snapshot', false);
+    await f.clusters[leader].transfer(target);
+    for (let i = 0; i < 40 && f.clusters[target].status().role !== 'leader'; i++) await sleep(10);
+    assert.equal(f.clusters[target].status().role, 'leader', `round ${round}: ${leader} -> ${target}`);
+    await sleep(80);
+    assert.equal(Object.values(f.gateways).filter(g => g.active).length, 1, 'exactly one gateway');
+    assert.ok(f.gateways[target].active);
+  }
 });
