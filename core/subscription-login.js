@@ -28,9 +28,10 @@ function createSubscriptionLogin({ codexHome, claudeDir, codexCli = 'codex', cla
     jobs.set(id, job);
     for (const [key, old] of jobs) if (now() - old.startedAt > 2 * timeoutMs) jobs.delete(key);
     const env = { ...process.env, BROWSER: 'true', NO_COLOR: '1' };
+    const cli = value => typeof value === 'function' ? value() || '' : value;
     const child = job.child = engine === 'codex'
-      ? spawnImpl(codexCli, ['-c', 'cli_auth_credentials_store="file"', 'login', '--device-auth'], { env: { ...env, CODEX_HOME: dir }, stdio: ['pipe', 'pipe', 'pipe'] })
-      : spawnImpl(claudeCli, ['auth', 'login'], { env: { ...env, CLAUDE_CONFIG_DIR: dir }, stdio: ['pipe', 'pipe', 'pipe'] });
+      ? spawnImpl(cli(codexCli) || 'codex', ['-c', 'cli_auth_credentials_store="file"', 'login', '--device-auth'], { env: { ...env, CODEX_HOME: dir }, stdio: ['pipe', 'pipe', 'pipe'] })
+      : spawnImpl(cli(claudeCli) || 'claude', ['auth', 'login'], { env: { ...env, CLAUDE_CONFIG_DIR: dir }, stdio: ['pipe', 'pipe', 'pipe'] });
     const read = chunk => {
       job.output = (job.output + chunk).slice(-16000);
       if (!job.url) job.url = firstUrl(job.output);

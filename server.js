@@ -2853,7 +2853,8 @@ if (!HISTORY_WORKER) accountPool = require('./core/account-pool').createAccountP
 const runtimeAccountTransport=require('./core/account-transport').createAccountTransport('my-agents/runtime-native-accounts/v1');
 const subscriptionLogin = require('./core/subscription-login').createSubscriptionLogin({
   codexHome: CODEX_HOME, claudeDir: process.env.CLAUDE_CONFIG_DIR || CLAUDE_DIR,
-  codexCli: process.env.CODEX_CLI || 'codex', claudeCli: process.env.CLAUDE_CLI || 'claude',
+  // The same CLI the panel runs sessions with, not whichever comes first on the service PATH.
+  codexCli: () => { try { return resolveCodex().path; } catch { return ''; } }, claudeCli: () => { try { return resolveClaude().path; } catch { return ''; } },
   onComplete: async () => { await syncRuntimeLogins().catch(() => {}); await accountPool?.refresh(); },
 });
 async function syncRuntimeLogins() {
