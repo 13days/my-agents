@@ -11,18 +11,18 @@ function mesh(ids) {
     start() {}, stop() {}, connected: () => ids.filter(other => other !== id && !blocked.has([id, other].sort().join(':'))),
     handle(method, fn) { handlers.get(id).set(method, fn); },
     async call(other, method, params) { if (blocked.has([id, other].sort().join(':'))) throw new Error('partition'); if (dropped.has(other + ':' + method)) throw new Error('dropped'); const fn = handlers.get(other).get(method); if (!fn) throw new Error('missing handler'); return fn(id, params); },
-    async broadcast(method, params) { return Promise.allSettled(ids.filter(other => other !== id).map(async other => ({ id: other, value: await this.call(other, method, params) }))); },
+    async broadcast(method, params, { timeout } = {}) { return Promise.allSettled(ids.filter(other => other !== id).map(async other => ({ id: other, value: await (timeout ? Promise.race([this.call(other, method, params), sleep(timeout).then(() => { throw new Error('timeout'); })]) : this.call(other, method, params)) }))); },
     drop(method, on = true) { if (on) dropped.add(id + ':' + method); else dropped.delete(id + ':' + method); },
     block(other) { blocked.add([id, other].sort().join(':')); }, unblock(other) { blocked.delete([id, other].sort().join(':')); },
   }]));
 }
-function fixture(spec, initial = {}, clocks = {}) {
+function fixture(spec, initial = {}, clocks = {}, timing = {}) {
   const ids = spec.map(x => x.id), networks = mesh(ids), gateways = {}, clusters = {}, dirs = {};
   for (const member of spec) {
     const gateway = gateways[member.id] = { active: false, starts: 0, reloads: 0, async start() { this.active = true; this.starts++; }, async stop() { this.active = false; }, async reload() { this.reloads++; } };
     const dir = dirs[member.id] = fs.mkdtempSync(path.join(os.tmpdir(), `cluster-${member.id}-`));
     if (initial[member.id]) fs.writeFileSync(path.join(dir, 'panel-cluster-state.json'), JSON.stringify(initial[member.id]));
-    clusters[member.id] = createCluster({ dir, config: { clusterId: 'c', nodeId: member.id, members: spec }, network: networks[member.id], gateway, now: () => Date.now() + (clocks[member.id] || 0), heartbeatMs: 30, electionMinMs: 60, leaseMs: 100, random: () => ids.indexOf(member.id) / 10 });
+    clusters[member.id] = createCluster({ dir, config: { clusterId: 'c', nodeId: member.id, members: spec }, network: networks[member.id], gateway, now: () => Date.now() + (clocks[member.id] || 0), heartbeatMs: 30, electionMinMs: 60, leaseMs: 100, ...timing, random: () => ids.indexOf(member.id) / 10 });
   }
   return { clusters, gateways, networks, dirs };
 }
@@ -122,4 +122,18 @@ test('a leadership transfer makes the requested node the leader, not whoever win
     assert.equal(Object.values(f.gateways).filter(g => g.active).length, 1, 'exactly one gateway');
     assert.ok(f.gateways[target].active);
   }
+});
+
+test('a leader on a slow link keeps its lease when one follower is down', async t => {
+  const f = fixture([{ id: 'a' }, { id: 'b' }, { id: 'c' }], {}, {}, { leaseMs: 300 });
+  t.after(() => Promise.all(Object.values(f.clusters).map(c => c.stop())));
+  await Promise.all(Object.values(f.clusters).map(c => c.start())); await sleep(500);
+  const leader = Object.keys(f.clusters).find(id => f.clusters[id].status().role === 'leader');
+  const [down, slow] = Object.keys(f.clusters).filter(id => id !== leader);
+  f.networks[leader].block(down);
+  // The only remaining voter answers after 40ms, longer than the 30ms heartbeat interval.
+  const call = f.networks[leader].call.bind(f.networks[leader]);
+  f.networks[leader].call = async (other, method, params) => { if (other === slow && method === 'cluster.heartbeat') await sleep(40); return call(other, method, params); };
+  await sleep(1200);
+  assert.equal(f.clusters[leader].status().role, 'leader', JSON.stringify(f.clusters[leader].status().lastStepDown));
 });

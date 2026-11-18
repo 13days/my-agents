@@ -5,7 +5,7 @@ const { performance } = require('perf_hooks');
 
 const load = (file, fallback) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; } };
 function atomic(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); const tmp = `${file}.${process.pid}.tmp`; fs.writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 }); fs.renameSync(tmp, file); }
-function createCluster({ dir, config, network, gateway = { start: async () => {}, stop: async () => {} }, canTransfer = () => true, now = Date.now, monotonicNow = () => performance.now(), random = Math.random, heartbeatMs = 500, electionMinMs = 1500, leaseMs = 1400, log = console }) {
+function createCluster({ dir, config, network, gateway = { start: async () => {}, stop: async () => {} }, canTransfer = () => true, now = Date.now, monotonicNow = () => performance.now(), random = Math.random, heartbeatMs = 500, electionMinMs = 2500, leaseMs = 4000, log = console }) {
   const stateFile = path.join(dir, 'panel-cluster-state.json');
   const members = config.members || [], self = members.find(item => item.id === config.nodeId);
   if (!self) throw new Error('本机不在集群成员列表中');
@@ -48,6 +48,7 @@ function createCluster({ dir, config, network, gateway = { start: async () => {}
     leaseTimer = setTimeout(async () => {
       if (stopped || role !== 'leader' || term !== saved.term) return;
       if (monotonicNow() < leaseUntil) return watchLease();
+      stepDown('lease_expired_without_quorum_acks');
       try { await gatewayStop(); } catch (error) { log.warn?.('网关租约失效：' + error.message); }
       if (saved.term === term && role === 'fenced') { role = 'follower'; leaderId = ''; resetElection(); }
     }, Math.max(1, leaseUntil - monotonicNow()));
@@ -66,7 +67,7 @@ function createCluster({ dir, config, network, gateway = { start: async () => {}
     try {
     const snapshot = localSnapshot();
     const message = { term: saved.term, leaderId: config.nodeId, leaseMs, snapshotIndex: saved.snapshotIndex, gateway: gatewayPhase() };
-    const results = await network.broadcast('cluster.heartbeat', message, { timeout: Math.min(heartbeatMs, 1000) });
+    const results = await network.broadcast('cluster.heartbeat', message, { timeout: Math.min(Math.floor(leaseMs / 3), 2000) });
     const higher = Math.max(saved.term, ...results.filter(r => r.status === 'fulfilled').map(r => Number(r.value.value?.term) || 0));
     if (await observeTerm(higher) || stopped || role !== 'leader' || saved.term !== roundTerm) return;
     let acks = 1;
