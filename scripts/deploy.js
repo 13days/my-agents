@@ -99,12 +99,17 @@ async function waitHealthy(machine, commit) {
 }
 // After a transfer the election may pick any updated node; only the old leader must be gone.
 async function waitGateway(avoidLeader) {
-  const deadline = Date.now() + 2 * 60000;
+  const deadline = Date.now() + 2 * 60000; let last = '';
   while (Date.now() < deadline) {
     await sleep(3000);
-    try { const view = await localApi('feishu'); if (view.cluster?.leader && view.cluster.leader !== avoidLeader && (view.bots || [view]).every(bot => bot.phase === 'connected')) return view; } catch {}
+    try {
+      const view = await localApi('feishu');
+      last = `主节点=${view.cluster?.leader || '无'} 机器人=${(view.bots || [view]).map(bot => (bot.appId || '').slice(-6) + ':' + bot.phase).join(',')}${view.lastError ? ' 错误=' + view.lastError : ''}`;
+      if (view.cluster?.leader && view.cluster.leader !== avoidLeader && (view.bots || [view]).every(bot => bot.phase === 'connected')) return view;
+    } catch (error) { last = '面板接口：' + error.message; }
   }
-  throw new Error('飞书机器人 2 分钟内未全部重新连接');
+  // Say what was actually seen, so a slow election is not mistaken for disconnected bots.
+  throw new Error('2 分钟内未确认移交完成（最后状态：' + (last || '未知') + '）');
 }
 
 (async () => {

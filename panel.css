@@ -1219,3 +1219,13 @@ body { background: radial-gradient(1100px 520px at 75% -200px, #6d6ef01c, transp
 .gateway-bot { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #ffffff04; }
 .gateway-bot .route-muted { flex: 1; min-width: 0; font-size: 12px; }
 .gateway-bot .btn { min-height: 28px; padding: 3px 10px; font-size: 12px; }
+
+.onboarding { margin-bottom: 24px; }
+.onboarding-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; }
+.onboarding ol { list-style: none; display: grid; gap: 10px; }
+.onboarding li { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #ffffff04; }
+.onboarding li > div { flex: 1; display: grid; gap: 2px; min-width: 0; }
+.onboarding li.done { opacity: .6; }
+.onboarding-mark { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: 50%; border: 1px solid var(--border-strong); font-size: 12px; font-variant-numeric: tabular-nums; }
+.onboarding li.done .onboarding-mark { background: #7fcba62e; border-color: #7fcba680; color: var(--green); }
+.gateway-online { padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); }

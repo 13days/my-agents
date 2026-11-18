@@ -1995,6 +1995,24 @@ function tokenStatsHTML(d, id) {
   const table = (title, rows = []) => `<div class="chart"><h3>${esc(title)}</h3><div class="table-scroll"><table class="usage"><thead><tr><th>${esc(ui('名称', 'Name'))}</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cached</th></tr></thead><tbody>${rows.length ? rows.map(r => `<tr><td>${esc(r.key)}</td>${[r.input, r.output, r.cached].map(v => `<td class="num">${Number(v || 0).toLocaleString()}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="4">${esc(ui('暂无记录', 'No records yet'))}</td></tr>`}</tbody></table></div></div>`;
   return h + table(ui('模型用量', 'Usage by model'), d.models) + table(ui('每日用量 · 最近 30 天记录', 'Daily usage · Latest 30 recorded days'), (d.daily || []).slice(-30).reverse());
 }
+// First-run checklist: every step states whether it is done and offers its one action.
+async function renderOnboarding() {
+  const host = document.createElement('section'); host.className = 'onboarding chart'; host.hidden = true;
+  $('#render .view-heading')?.after(host);
+  let d; try { d = await api('GET', 'feishu'); } catch { return; }
+  if (!host.isConnected) return;
+  const rtm = d.runtime || {}, users = (d.config?.allowedUserIds || []).length || d.config?.allowAllUsers;
+  const steps = [
+    { done: d.phase === 'connected', title: ui('连接飞书机器人', 'Connect a Feishu bot'), hint: ui('扫一次码，自动创建机器人、开通卡片按钮', 'One scan creates the bot and enables card buttons'), action: ui('去扫码', 'Scan'), run: () => switchType('im') },
+    { done: !!users, title: ui('配对你的飞书账号', 'Pair your Feishu account'), hint: ui('扫码创建时会自动配对扫码人', 'The person who scans is paired automatically'), action: ui('去配对', 'Pair'), run: () => switchType('im') },
+    ...(rtm.supported ? [{ done: rtm.keepAwake && rtm.autoStart, title: ui('保持在线', 'Stay online'), hint: rtm.keepAwake && rtm.autoStart && !rtm.lidSleepDisabled ? ui('合盖仍会睡眠，可在终端运行 sudo pmset -a disablesleep 1', 'Closing the lid still sleeps') : ui('防止 Mac 睡眠，登录后自动启动', 'Keep awake and start at login'), action: ui('一键开启', 'Turn on'), run: async () => { await api('PUT', 'feishu', { keepAwake: true, autoStart: true }); toast(ui('已开启保持在线', 'Staying online')); } }] : []),
+    { done: (d.inbox?.messageCount || 0) > 0, title: ui('在飞书里发第一条消息', 'Send your first message in Feishu'), hint: ui('私聊机器人，或拉进群后 @它', 'Message the bot, or @mention it in a group'), action: '', run: null },
+  ];
+  if (steps.every(step => step.done)) return;
+  host.hidden = false;
+  host.innerHTML = `<div class="onboarding-head"><h3>${esc(ui('开始使用', 'Get started'))}</h3><span class="route-muted">${steps.filter(s => s.done).length}/${steps.length}</span></div><ol>${steps.map((step, i) => `<li class="${step.done ? 'done' : ''}"><span class="onboarding-mark">${step.done ? '✓' : i + 1}</span><div><strong>${esc(step.title)}</strong><small class="route-muted">${esc(step.hint)}</small></div>${!step.done && step.run ? `<button type="button" class="btn${i === steps.findIndex(s => !s.done) ? ' primary' : ''}" data-onboard="${i}">${esc(step.action)}</button>` : ''}</li>`).join('')}</ol>`;
+  host.querySelectorAll('[data-onboard]').forEach(button => button.onclick = async () => { try { await steps[+button.dataset.onboard].run(); if (state.type === 'stats') { host.remove(); renderOnboarding(); } } catch (error) { toast(error.message, false); } });
+}
 function renderStatsNow() {
   statsEngine = knownEngine(statsEngine);
   const stats = state.engineStats || {}, current = stats[statsEngine], label = engineLabel(statsEngine);
@@ -2009,6 +2027,7 @@ function renderStatsNow() {
   const error = state.statsErrors?.[statsEngine];
   $('#render').innerHTML = intro + tabs + `<div class="engine-detail"><div class="engine-detail-heading"><h3>${esc(label)} · ${esc(ui('用量详情', 'Usage details'))}</h3>${can(statsEngine, 'wrapped') && current ? `<button class="btn" id="wrappedBtn">${esc(t('wrappedBtn').replace(/^🎁\s*/, ''))}</button>` : ''}</div>${error ? `<p class="data-source" role="status">${esc(t('loadFail') + error)}</p>` : ''}${detail}</div>`;
   $('#overview-connect').onclick = () => switchType('proxy');
+  renderOnboarding();
   $('#overview-chat').onclick = async () => { localStorage.setItem('panel-chat-engine', statsEngine); await switchType('sessions'); openNewChat(); };
   document.querySelectorAll('[data-stats-engine]').forEach(button => button.onclick = () => { statsEngine = button.dataset.statsEngine; localStorage.setItem('panel-stats-engine', statsEngine); renderStatsNow(); });
   $('#render').querySelectorAll('.rangebtn').forEach(b => { b.onclick = () => { statsRange = +b.dataset.range; renderStatsNow(); }; });

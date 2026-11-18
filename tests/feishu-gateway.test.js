@@ -1328,3 +1328,15 @@ test('a question stuck waiting can be answered at once in a new session on the s
   assert.ok(f.sent.some(s => JSON.stringify(s.content).includes('已另起新会话')));
   void pending;
 });
+
+test('without a default project, a new chat uses the last project on the default machine', async t => {
+  const f = await fixture(t); await f.pair();
+  await f.gateway.configure({ defaultProject: '' });
+  f.panel.defaultDirectory = () => f.dir;
+  await f.gateway.receive(f.msg('First question with no project configured'));
+  const first = f.calls.find(c => c.prompt === 'First question with no project configured');
+  assert.ok(first, 'answered instead of asking for /new');
+  assert.equal(fs.realpathSync(first.cwd), fs.realpathSync(f.dir));
+  await f.gateway.receive(f.msg('Second in another chat', { chatId: 'oc_private_2', senderId: 'ou_owner' }));
+  assert.equal(fs.realpathSync(f.calls.at(-1).cwd), fs.realpathSync(f.dir), 'reuses the last project');
+});

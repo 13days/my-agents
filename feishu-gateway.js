@@ -100,7 +100,9 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   };
   function defaultBinding(msg) {
     const key = scope(msg);
-    if (!state.bindings[key] && config.defaultProject) { bind(key, { id: crypto.randomUUID(), cwd: config.defaultProject, machineId: config.defaultMachine || panel.machineId?.(), engine: defaultEngine() }); }
+    const machine = config.defaultMachine || panel.machineId?.();
+    const project = config.defaultProject || Object.values(state.bindings).filter(item => (item.machineId || panel.machineId?.()) === machine).map(item => item.worktree?.repository || item.cwd).filter(Boolean).at(-1) || panel.defaultDirectory?.(machine) || '';
+    if (!state.bindings[key] && project) { bind(key, { id: crypto.randomUUID(), cwd: project, machineId: machine, engine: defaultEngine() }); }
     return state.bindings[key];
   }
   async function send(msg, content) {
@@ -524,8 +526,10 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     let binding = proposed || state.bindings[key];
     if (binding && !session(binding.id) && !usable(binding)) binding = null;
     if (!binding) {
-      if (!config.defaultProject) { await projectsCard(msg); return; }
-      binding = bind(key, { id: crypto.randomUUID(), cwd: config.defaultProject, machineId: config.defaultMachine || panel.machineId?.(), engine: defaultEngine() });
+      // Default project, else the last project used on the default machine, else its default folder.
+      if (state.bindings[key]) delete state.bindings[key];
+      binding = defaultBinding(msg);
+      if (!binding) { await projectsCard(msg); return; }
     }
     if (binding.engine !== engineOf(binding)) { binding.engine = engineOf(binding); persist(); }
     const images = [];
