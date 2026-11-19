@@ -150,3 +150,34 @@ test('feedback on a resolved proposal is retained for learning without reopening
  assert.equal(check.decision,'feedback');assert.equal(check.learning,true);assert.equal(check.before.state,'ignored');assert.equal(store.snapshot().proposals[p.id].state,'ignored');assert.equal(Object.keys(store.snapshot().deliveries).length,0);
  assert.throws(()=>store.feedback(p.id,{version:1,reason:'旧版本'}),/已经更新/);assert.throws(()=>store.feedback(p.id,{version:resolved.version,reason:' '}));
 });
+
+test('automatic discovery reads private chats outside the selected list and keeps live/history cursors separate',async t=>{
+ const {store}=setup(t),base=Date.now();store.configure({since:base-86400000,selfId:'me',discoveryMode:'recent',chats:[]});let calls=[];
+ const source={recent:async(floor,upper,page)=>{calls.push({floor,upper,page});return {messages:[{message_id:'dm-'+upper,chat_id:'oc_private',create_time:String(upper-1000),sender:{id:'peer',sender_type:'user'},msg_type:'text',body:{content:'{"text":"请检查配置，我已经提交发布"}'}}],has_more:false};}};
+ const flow=createHeartflow({store,source,now:()=>base,sessions:async()=>[],analyze:async c=>{assert.ok(c.messages.some(m=>m.chatId==='oc_private'));return {suggestions:[]};}});
+ await flow.sync();assert.equal(calls.length,2);assert.equal(calls[0].floor,base-20*60000);assert.equal(calls[1].upper,base-10*60000);assert.equal(store.snapshot().cursor.discovery.history.done,true);
+ await flow.suggest();assert.equal(Object.keys(store.snapshot().deliveries).length,0);
+ await flow.sync();assert.equal(calls.length,3);
+});
+test('discovery persists bounded pagination, excludes app messages, deduplicates overlaps, and never advances on failure',async t=>{
+ const {store}=setup(t),base=Date.now();store.configure({since:base-60000,selfId:'me',discoveryMode:'recent'});let fail=false;
+ const source={recent:async(floor,upper,page)=>{if(fail)throw Error('read unavailable');return {messages:[{message_id:'dm',chat_id:'oc_dm',create_time:String(base-1000),sender:{sender_type:'user'},body:{content:'{"text":"hello"}'}},{message_id:'bot',chat_id:'oc_bot',create_time:String(base-1000),sender:{sender_type:'app'},body:{content:'{"text":"notification"}'}}],has_more:true,page_token:String(Number(page||0)+1)};}};
+ const flow=createHeartflow({store,source,now:()=>base});await flow.sync();let s=store.snapshot();assert.equal(s.cursor.discovery.live.page,'2');assert.equal(s.messages.dm.revision,1);assert.equal(s.messages.bot,undefined);assert.equal(s.cursor.discovery.history.done,true);
+ fail=true;await assert.rejects(()=>flow.sync(),/read unavailable/);assert.deepEqual(store.snapshot().cursor.discovery,s.cursor.discovery);assert.equal(store.snapshot().source.ok,false);
+ fail=false;await flow.sync();assert.equal(store.snapshot().cursor.discovery.live.page,'4');assert.equal(store.snapshot().messages.dm.revision,1);
+});
+test('switching back to selected chats excludes discovered messages from analysis and topic context',async t=>{
+ const {store}=setup(t),base=Date.now();store.configure({since:base-60000,chats:[{id:'oc_a'}],discoveryMode:'recent'});
+ store.ingest([{id:'private',chatId:'oc_private',text:'Private followup',createdAt:base,updatedAt:base}]);
+ const {topicContext}=require('../core/heartflow-context');assert.ok(topicContext([store.snapshot().messages.private],store.snapshot()).some(m=>m.id==='private'));
+ store.configure({discoveryMode:'selected'});let context;
+ await createHeartflow({store,source:{},sessions:async()=>[],analyze:async c=>{context=c;return {suggestions:[]};}}).suggest();assert.ok(context.messages.every(m=>m.chatId==='oc_a'));assert.throws(()=>store.configure({discoveryMode:'all-ever'}),/有效/);
+});
+test('personal discovery uses a bounded empty-query user message search, including pagination',async()=>{
+ let command;const {createPersonalFeishu}=require('../core/heartflow-feishu');const source=createPersonalFeishu({execute:(cli,args,options,cb)=>{command=args;cb(null,JSON.stringify({status:'success',data:{messages:[],has_more:false}}));}});
+ await source.recent(10001,20001,'next');const payload=JSON.parse(command[command.indexOf('--body-json')+1]);assert.equal(payload.query,'');assert.deepEqual(payload.filter,{from_create_time:'10',to_create_time:'21'});assert.equal(command.at(-1),'next');assert.ok(!command.includes('--compact'));
+});
+test('analysis drains history while reserving space for newest messages',async t=>{
+ const {store}=setup(t),base=Date.now();store.configure({since:base-60000,discoveryMode:'recent'});store.ingest(Array.from({length:80},(_,i)=>({id:'bulk'+i,chatId:'oc_new',text:'Update '+i,createdAt:base-1000+i,updatedAt:base})));
+ let context;await createHeartflow({store,source:{},sessions:async()=>[],analyze:async c=>{context=c;return {suggestions:[]};}}).suggest();assert.equal(context.messages.length,30);assert.ok(context.messages.some(m=>m.id==='bulk79'));assert.ok(context.messages.some(m=>m.id==='bulk0'));
+});

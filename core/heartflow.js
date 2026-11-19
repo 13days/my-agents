@@ -7,8 +7,9 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
     if(polling)return {busy:true};polling=true;
     try{
       const config=store.snapshot().config;
-      if(!config.chats.length)throw new Error('先选择需要监听的聊天');
+      if(!config.chats.length && config.discoveryMode!=='recent')throw new Error('先选择需要监听的聊天');
       if(!config.selfId){const who=await source.identity();if(!who.user?.open_id)throw new Error('无法确认当前飞书用户身份');store.configure({selfId:who.user.open_id});}
+      if(config.discoveryMode==='recent')await require('./heartflow-discovery').discoverMessages({store,source,now});
       for(const chat of config.chats){
         let snapshot=store.snapshot(),cursor=snapshot.cursor[chat.id]||{},page=cursor.page||'',upper=cursor.upper||now(),floor=cursor.floor||Math.max(config.since,(cursor.watermark||config.since)-5*60000),finished=false;
         // Bounded pages per tick; persist continuation instead of dropping burst messages.
@@ -21,9 +22,9 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
         store.transaction(s=>{s.cursor[chat.id]=finished?{watermark:upper}:{page,upper,floor,watermark:cursor.watermark};});
       }
       const snapshot=store.snapshot();
-      const parents=[...new Set(Object.values(snapshot.messages).filter(m=>config.chats.some(c=>c.id===m.chatId)&&m.createdAt>=config.since).map(m=>m.parentId).filter(id=>id&&!snapshot.messages[id]))].slice(0,30);
-      if(parents.length && source.messages){const refs=await source.messages(parents);store.ingest((refs.messages||refs.items||[]).filter(m=>config.chats.some(c=>c.id===m.chat_id)).map(normalizeMessage));}
-      const missing=Object.values(store.snapshot().messages).filter(m=>config.chats.some(c=>c.id===m.chatId)&&!m.identityEnriched).slice(-30);
+      const parents=[...new Set(Object.values(snapshot.messages).filter(m=>require('./heartflow-discovery').inScope(m,config)&&m.createdAt>=config.since).map(m=>m.parentId).filter(id=>id&&!snapshot.messages[id]))].slice(0,30);
+      if(parents.length && source.messages){const refs=await source.messages(parents);store.ingest((refs.messages||refs.items||[]).filter(m=>require('./heartflow-discovery').inScope({chatId:m.chat_id},config)).map(normalizeMessage));}
+      const missing=Object.values(store.snapshot().messages).filter(m=>require('./heartflow-discovery').inScope(m,config)&&!m.identityEnriched).slice(-30);
       if(missing.length&&source.messages){const refs=await source.messages(missing.map(m=>m.id));store.ingest((refs.messages||refs.items||[]).map(normalizeMessage));}
       store.transaction(s=>{s.source={...s.source,ok:true,lastSync:now(),error:''};});
       return {ok:true};
@@ -79,7 +80,9 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
       await followups();
       await verify();
       const s=store.snapshot(),covered=new Set(Object.values(s.proposals).flatMap(p=>p.messageIds));
-      const messages=Object.values(s.messages).filter(m=>!m.deleted && m.createdAt>=s.config.since && (!covered.has(m.id)||Object.values(s.proposals).some(p=>p.sourceChanged&&p.messageIds.includes(m.id))) && s.cursor['analyzed:'+m.id]!==m.revision).sort((a,b)=>a.createdAt-b.createdAt).slice(0,30);
+      const unread=Object.values(s.messages).filter(m=>require('./heartflow-discovery').inScope(m,s.config) && !m.deleted && m.createdAt>=s.config.since && (!covered.has(m.id)||Object.values(s.proposals).some(p=>p.sourceChanged&&p.messageIds.includes(m.id))) && s.cursor['analyzed:'+m.id]!==m.revision).sort((a,b)=>a.createdAt-b.createdAt);
+      // Reserve half of each batch for new arrivals while draining older history.
+      const messages=[...new Map([...unread.slice(0,15),...unread.slice(-15)].map(m=>[m.id,m])).values()].sort((a,b)=>a.createdAt-b.createdAt);
       if(!messages.length){store.transaction(next=>{next.source.lastAnalysis=now();next.source.analysisError='';});return {created:0};}
       const catalog=(await sessions()).slice(0,100),candidates=catalog.map(x=>({id:x.id,title:x.title,engine:x.engine,machineId:x.machineId,cwd:x.project,latestPrompt:x.latestPrompt?.slice(0,600),running:x.running}));
       const chats=new Set(messages.map(m=>m.chatId));

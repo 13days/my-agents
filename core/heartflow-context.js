@@ -4,7 +4,7 @@ function topicContext(sources,state) {
   sources=sources.filter(Boolean);
   if(!sources.length)return [];
   const selected=new Set((state.config.chats||[]).map(c=>c.id));
-  const all=Object.values(state.messages).filter(m=>!m.deleted&&(!selected.size||selected.has(m.chatId))).sort((a,b)=>a.createdAt-b.createdAt||a.id.localeCompare(b.id));
+  const all=Object.values(state.messages).filter(m=>!m.deleted&&(state.config.discoveryMode==='recent'||!selected.size||selected.has(m.chatId))).sort((a,b)=>a.createdAt-b.createdAt||a.id.localeCompare(b.id));
   const chats=new Set(sources.map(m=>m.chatId));
   const keys=new Set(sources.flatMap(m=>[m.id,m.parentId,m.threadId].filter(Boolean).map(id=>m.chatId+':'+id)));
   const linked=new Set(sources.map(m=>m.id));

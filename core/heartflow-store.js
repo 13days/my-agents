@@ -38,6 +38,11 @@ function createHeartflowStore({ dir, now = Date.now }) {
         if (!Array.isArray(input.chats) || input.chats.length > 30 || input.chats.some(x => !/^oc_[\w-]+$/.test(x.id))) fail('最多选择 30 个有效聊天');
         c.chats = input.chats.map(x => ({ id: x.id, name: String(x.name || x.id).slice(0,160) }));
       }
+      if ('discoveryMode' in input) {
+        if (!['selected','recent'].includes(input.discoveryMode)) fail('请选择有效的消息读取范围');
+        if (c.discoveryMode !== input.discoveryMode) delete s.cursor.discovery;
+        c.discoveryMode = input.discoveryMode;
+      }
       if ('notifyEnabled' in input) c.notifyEnabled = !!input.notifyEnabled;
       if ('notifyUserId' in input) { if(input.notifyUserId && !/^ou_[\w-]+$/.test(input.notifyUserId)) fail('请输入有效的机器人配对用户 ID'); c.notifyUserId = input.notifyUserId; }
       if ('panelUrl' in input) { const u=String(input.panelUrl||'');if(u && !/^https?:\/\/[^\s]+$/.test(u))fail('面板链接必须是 HTTP(S) 地址'); c.panelUrl=u.slice(0,1000); }

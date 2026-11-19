@@ -8,6 +8,7 @@ function createPersonalFeishu({ cli = process.env.BYTEDCLI || 'bytedcli', execut
     }));
   }
   return {
+    recent:(floor,upper,pageToken)=>call(['im','messages','search','--body-json',JSON.stringify({query:'',filter:{from_create_time:String(Math.floor(floor/1000)),to_create_time:String(Math.ceil(upper/1000))}}),'--page-size','50',...(pageToken?['--page-token',pageToken]:[])]),
     identity:()=>call(['user','get']),
     messages:ids=>call(['im','messages','mget','--message-ids',ids.join(',')]),
     search:query=>call(['chat','search','--query',String(query).slice(0,100)]),
