@@ -12,3 +12,21 @@ test('restoring a cached conversation reuses live input nodes and refreshes with
 test('conversation cache is bounded and does not restore a missing or evicted view',()=>{
  const {context,run}=setup();for(let i=0;i<10;i++){context.chatView={sessionId:'session-'+i};run('rememberChatPage()');}assert.equal(run('chatPageCache.size'),8);assert.equal(run("restoreChatPage('session-0')"),false);assert.equal(run("restoreChatPage('session-9')"),true);
 });
+function setupRefresh(api){
+ const box={scrollTop:20,scrollHeight:200,clientHeight:100,querySelectorAll:()=>[]};
+ const prompt={value:'draft',selectionStart:2,selectionEnd:2,setSelectionRange(){}};
+ const context={state:{type:'sessions'},chatView:{sessionId:'a',messages:[],lastReplayJobId:'same-job'},document:{querySelector:()=>null},api,renderChat(){},streamChat(v,options){context.streams.push({v,options});v.run={};},streams:[],rt:zh=>zh,$:id=>({'#chat-messages':box,'#chat-prompt':prompt,'#chat-model':{value:'codex'},'#chat-status':{textContent:''}}[id])};
+ vm.createContext(context);vm.runInContext('const openChatRefreshes = new WeakSet();\n'+html.slice(html.indexOf('async function refreshOpenChat()'),html.indexOf('async function refreshRoutes()')),context);
+ return context;
+}
+test('returning to the same running job reconnects once without submitting a prompt',async()=>{
+ const c=setupRefresh(async()=>({messages:[],liveReplay:true,jobId:'same-job'}));
+ await c.refreshOpenChat();await c.refreshOpenChat();
+ assert.equal(c.streams.length,1);assert.equal(c.streams[0].options.reconnect,true);
+});
+test('a pending refresh in another conversation does not block the current conversation',async()=>{
+ let resolveA;const c=setupRefresh(url=>url);c.api=(_method,url)=>url.includes('/a/')?new Promise(resolve=>{resolveA=resolve;}):Promise.resolve({messages:[],liveReplay:true,jobId:'b-job'});
+ const pending=c.refreshOpenChat();c.chatView={sessionId:'b',messages:[]};await c.refreshOpenChat();
+ assert.equal(c.streams.length,1);assert.equal(c.streams[0].v.sessionId,'b');
+ resolveA({messages:[],liveReplay:true,jobId:'same-job'});await pending;assert.equal(c.streams.length,1);
+});

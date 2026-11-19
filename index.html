@@ -2563,7 +2563,8 @@ function restoreChatPage(key) {
 }
 let chatView = { sessionId: '', cwd: '', messages: [] };
 // 每个会话的代理账号：Claude Code 请求里带 session id，代理据此记录实时账号，也可把单个会话固定到某个账号
-let routeInfo = null, routeTimer = null, sessionListEpoch = 0, sessionListRefreshing = false, openChatRefreshing = false;
+let routeInfo = null, routeTimer = null, sessionListEpoch = 0, sessionListRefreshing = false;
+const openChatRefreshes = new WeakSet();
 const ROUTE_MODES = { manual: ['手动', 'Manual'], failover: ['故障切换', 'Failover'], 'round-robin': ['轮询', 'Round robin'] };
 function startRoutePoll() {
   stopRoutePoll();
@@ -2599,13 +2600,14 @@ async function refreshSessionList() {
 }
 async function refreshOpenChat() {
   const v = chatView;
-  if (state.type !== 'sessions' || !v.sessionId || v.run || openChatRefreshing || !$('#chat-messages')) return;
-  openChatRefreshing = true;
+  if (state.type !== 'sessions' || !v.sessionId || v.run || openChatRefreshes.has(v) || !$('#chat-messages')) return;
+  openChatRefreshes.add(v);
   try {
     const d = await api('GET', `sessions/${encodeURIComponent(v.sessionId)}/messages?limit=${Math.max(80, v.messages.length)}${v.revision ? '&since=' + encodeURIComponent(v.revision) : ''}`);
     if (chatView !== v || state.type !== 'sessions' || v.run || !$('#chat-messages')) return;
     if (d.unchanged || !Array.isArray(d.messages)) return;
-    if (d.liveReplay && d.jobId === v.lastReplayJobId) return;
+    // The same job still needs a new subscription after navigation aborted its stream.
+    // v.run above is the live-connection guard; lastReplayJobId is only identity.
     if (v.readingImages || v.loadingOlder || document.querySelector('.panel-select-menu:popover-open')) return;
     v.revision = d.revision;
     if (!d.liveReplay && JSON.stringify(v.messages) === JSON.stringify(d.messages)) return;
@@ -2627,7 +2629,7 @@ async function refreshOpenChat() {
     };
     restore();
     if (d.liveReplay) { v.restoreReplayScroll = restore; streamChat(v, { reconnect: true }); }
-  } catch {} finally { openChatRefreshing = false; }
+  } catch(error) { if(chatView===v&&state.type==='sessions'&&$('#chat-status'))$('#chat-status').textContent=rt('同步暂时失败，将自动重试：','Sync failed; retrying: ')+error.message; } finally { openChatRefreshes.delete(v); }
 }
 async function refreshRoutes() {
   try { routeInfo = await api('GET', 'proxy/sessions'); } catch { return; }
