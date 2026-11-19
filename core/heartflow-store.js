@@ -38,6 +38,12 @@ function createHeartflowStore({ dir, now = Date.now }) {
         if (!Array.isArray(input.chats) || input.chats.length > 30 || input.chats.some(x => !/^oc_[\w-]+$/.test(x.id))) fail('最多选择 30 个有效聊天');
         c.chats = input.chats.map(x => ({ id: x.id, name: String(x.name || x.id).slice(0,160) }));
       }
+      if ('dailyTokenBudget' in input) {
+        const value=Number(input.dailyTokenBudget);if(!Number.isSafeInteger(value)||value<0||value>10000000)fail('每日预算需为 0–10000000 的整数');c.dailyTokenBudget=value;
+      }
+      if ('checkIntervalSeconds' in input) {
+        const value=Number(input.checkIntervalSeconds);if(!Number.isInteger(value)||value<60||value>3600)fail('后台核对间隔需为 60–3600 秒');c.checkIntervalSeconds=value;
+      }
       if ('discoveryMode' in input) {
         if (!['selected','recent'].includes(input.discoveryMode)) fail('请选择有效的消息读取范围');
         if (c.discoveryMode !== input.discoveryMode) delete s.cursor.discovery;

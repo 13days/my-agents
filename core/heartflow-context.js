@@ -11,13 +11,15 @@ function topicContext(sources,state) {
   for(let i=0;i<5;i++)for(const m of all)if([m.id,m.parentId,m.threadId].some(id=>id&&keys.has(m.chatId+':'+id))){linked.add(m.id);for(const id of [m.id,m.parentId,m.threadId].filter(Boolean))keys.add(m.chatId+':'+id);}
   const links=text=>(text.match(/https?:\/\/[^\s<>"，。]+/g)||[]).filter(url=>{try{return new URL(url).pathname.length>1;}catch{return false;}});
   const urls=new Set(sources.flatMap(m=>links(m.text)));
-  const cross=all.filter(m=>!chats.has(m.chatId)&&links(m.text).some(url=>urls.has(url))).slice(-20);
+  const cross=all.filter(m=>!chats.has(m.chatId)&&links(m.text).some(url=>urls.has(url))).slice(-4);
   const latest=Math.max(...all.filter(m=>chats.has(m.chatId)).map(m=>m.createdAt),...sources.map(m=>m.createdAt));
   const floor=Math.max(Math.min(...sources.map(m=>m.createdAt))-30*60000,latest-7*86400000);
-  const nearby=all.filter(m=>chats.has(m.chatId)&&m.createdAt>=floor&&!linked.has(m.id)).slice(-80);
-  const explicit=all.filter(m=>linked.has(m.id)&&!sources.some(s=>s.id===m.id)).slice(-60);
+  const query=sources.map(s=>s.text).join(' '),{relevance}=require('./heartflow-compact');
+  const nearby=all.filter(m=>chats.has(m.chatId)&&m.createdAt>=floor&&!linked.has(m.id)).map(m=>({m,score:relevance(m.text,query)})).sort((a,b)=>b.score-a.score).slice(0,8).map(x=>x.m);
+  const explicit=all.filter(m=>linked.has(m.id)&&!sources.some(s=>s.id===m.id)).slice(-12);
   const picked=new Map(sources.map(m=>[m.id,m]));
-  for(const m of [...explicit,...cross,...nearby])if(picked.size<150)picked.set(m.id,m);
+  const latestReplies=all.filter(m=>chats.has(m.chatId)&&m.createdAt>=floor).slice(-6);
+  for(const m of [...explicit,...cross,...latestReplies,...nearby])if(picked.size<sources.length+24)picked.set(m.id,m);
   return [...picked.values()].sort((a,b)=>a.createdAt-b.createdAt||a.id.localeCompare(b.id));
 }
 module.exports={topicContext};

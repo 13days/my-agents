@@ -2,6 +2,7 @@ const { normalizeMessage } = require('./heartflow-feishu');
 function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>null,notify=null,notifyResult=null,history=null,now=Date.now}) {
   let polling=false,analyzing=false,dispatching=false,notifying=false,checking=false,timer;
   store.recover();
+  analyze=require('./heartflow-budget').trackedAnalysis({store,analyze,now});
   const errorText=e=>String(e.message||e).slice(0,1000);
   async function sync() {
     if(polling)return {busy:true};polling=true;
@@ -32,13 +33,15 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
   }
   async function followups(id,force=false) {
     const snapshot=store.snapshot();
-    for(const p of Object.values(snapshot.proposals).filter(p=>['pending','deferred'].includes(p.state)&&(!id||p.id===id)).slice(-50)){
-      const result=await require('./heartflow-followup').inspectFollowup(p,snapshot,analyze,force);
-      if(!result)continue;
+    let checked=0;
+    for(const p of Object.values(snapshot.proposals).filter(p=>['pending','deferred'].includes(p.state)&&(!id||p.id===id)).sort((a,b)=>(a.lastFollowupCheck||0)-(b.lastFollowupCheck||0)).slice(0,50)){
+      if(!force&&checked>=2)break;
+      const result=await require('./heartflow-followup').inspectFollowup(p,snapshot,analyze,force,now());
+      if(!result)continue;checked++;
       store.transaction(s=>{const current=s.proposals[p.id];if(current.version!==p.version)return;
         if(JSON.stringify(require('./heartflow-followup').relatedMessages(current,s).map(m=>[m.id,m.revision]))!==JSON.stringify(result.messages.map(m=>[m.id,m.revision])))throw new Error('群聊消息已变化，请重新核对');
         const contextChanged=current.followupFingerprint!==result.fingerprint;
-        current.followupFingerprint=result.fingerprint;
+        current.followupFingerprint=result.fingerprint;current.lastFollowupCheck=now();
         const topicChanged=contextChanged&&result.topic&&JSON.stringify(result.topic)!==JSON.stringify(current.topic);
         if(topicChanged){current.topic=result.topic;current.version++;current.updatedAt=now();if(['changed','cancelled'].includes(result.topic.status))current.sourceChanged=true;}
         if(!result.resolutions.length)return;
@@ -58,12 +61,14 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
     checking=true;
     try {
       const snapshot=store.snapshot();
-      for(const p of Object.values(snapshot.proposals).filter(p=>['pending','deferred'].includes(p.state)&&(!id||p.id===id)).slice(-50)){
-        const result=await require('./heartflow-history').inspectProposal(p,snapshot,history,analyze,force);
-        if(!result)continue;
+      let checked=0;
+      for(const p of Object.values(snapshot.proposals).filter(p=>['pending','deferred'].includes(p.state)&&(!id||p.id===id)).sort((a,b)=>(a.lastHistoryCheck||0)-(b.lastHistoryCheck||0)).slice(0,50)){
+        if(!force&&checked>=2)break;
+        const result=await require('./heartflow-history').inspectProposal(p,snapshot,history,analyze,force,now());
+        if(!result)continue;checked++;
         store.transaction(s=>{const current=s.proposals[p.id];if(current.version!==p.version)return;
           if(p.messageIds.some(id=>s.messages[id]?.revision!==snapshot.messages[id]?.revision))throw new Error('来源已变化，请重新核对');
-          current.historyFingerprint=result.fingerprint;
+          current.historyFingerprint=result.fingerprint;current.lastHistoryCheck=now();
           if(!result.resolutions.length)return;
           current.resolutions=[...(current.resolutions||[]),...result.resolutions];
           current.resolvedActions=[...(current.resolvedActions||[]),...current.actions.filter(a=>result.resolutions.some(r=>r.actionId===a.id))];
@@ -81,19 +86,16 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
       await verify();
       const s=store.snapshot(),covered=new Set(Object.values(s.proposals).flatMap(p=>p.messageIds));
       const unread=Object.values(s.messages).filter(m=>require('./heartflow-discovery').inScope(m,s.config) && !m.deleted && m.createdAt>=s.config.since && (!covered.has(m.id)||Object.values(s.proposals).some(p=>p.sourceChanged&&p.messageIds.includes(m.id))) && s.cursor['analyzed:'+m.id]!==m.revision).sort((a,b)=>a.createdAt-b.createdAt);
-      // Reserve half of each batch for new arrivals while draining older history.
-      const messages=[...new Map([...unread.slice(0,15),...unread.slice(-15)].map(m=>[m.id,m])).values()].sort((a,b)=>a.createdAt-b.createdAt);
+      const messages=require('./heartflow-compact').batchMessages(unread,s);
       if(!messages.length){store.transaction(next=>{next.source.lastAnalysis=now();next.source.analysisError='';});return {created:0};}
       const catalog=(await sessions()).slice(0,100),candidates=catalog.map(x=>({id:x.id,title:x.title,engine:x.engine,machineId:x.machineId,cwd:x.project,latestPrompt:x.latestPrompt?.slice(0,600),running:x.running}));
-      const chats=new Set(messages.map(m=>m.chatId));
-      const learning=s.checks.filter(c=>c.learning && (Array.isArray(c.before)?c.before.flatMap(p=>p.messageIds||[]):c.before?.messageIds||[]).some(id=>chats.has(s.messages[id]?.chatId))).slice(-20).map(c=>({decision:c.decision,reason:c.reason,before:c.before,after:c.after,approvedActions:c.approvedActions,sourceMessages:(Array.isArray(c.before)?c.before.flatMap(p=>p.messageIds||[]):c.before?.messageIds||[]).map(id=>s.messages[id]).filter(Boolean).map(m=>({id:m.id,senderId:m.senderId,senderName:m.senderName,chatId:m.chatId,text:m.text,createdAt:m.createdAt}))}));
-      const supportingMessages=require('./heartflow-context').topicContext(messages,s).filter(m=>!messages.some(x=>x.id===m.id));
-      const pending=Object.values(s.proposals).filter(p=>['pending','deferred'].includes(p.state)).slice(-50).map(p=>({id:p.id,title:p.title,summary:p.summary,messageIds:p.messageIds,actions:p.actions}));
-      const recentTopics=Object.values(s.proposals).slice(-50).map(p=>({id:p.id,title:p.title,state:p.state,topic:p.topic,messageIds:p.messageIds,resolutions:p.resolutions}));
-      const context={recentTopics,pending,supportingMessages,selfId:s.config.selfId,messages,matters:Object.values(s.matters).slice(-100),sessions:candidates,learning};
+      const support=require('./heartflow-context').topicContext(messages,s).filter(m=>!messages.some(x=>x.id===m.id));
+      const context=require('./heartflow-compact').suggestionContext(s,messages,support,candidates);
+      const supportingMessages=context.supportingMessages,pending=context.pending;
       const result=await analyze(context,s.config.model);let created=0;
-      const latest=store.snapshot();if([...messages,...supportingMessages].some(m=>latest.messages[m.id]?.revision!==m.revision))throw new Error('分析期间来源消息已更新，将在下次重新分析');
+      const latest=store.snapshot();if([...messages,...supportingMessages,...context.topicMemories.flatMap(m=>m.refs)].some(m=>latest.messages[m.id]?.revision!==m.revision))throw new Error('分析期间来源消息已更新，将在下次重新分析');
       for(const draft of result.suggestions){
+        if((draft.messageIds||[]).some(id=>messages.some(m=>m.id===id&&!m.textComplete)))continue;
         if(!Array.isArray(draft.messageIds)||!draft.messageIds.length||draft.messageIds.some(id=>![...messages,...supportingMessages].some(m=>m.id===id)) || !draft.messageIds.some(id=>messages.some(m=>m.id===id)))continue;
         if((draft.matterIds||[]).some(id=>!s.matters[id]))continue;
         if(draft.relatedProposalId && pending.some(p=>p.id===draft.relatedProposalId)){
@@ -101,15 +103,15 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
           const merged=store.transaction(next=>{const p=next.proposals[previous.id];if(p.version!==previous.version || !['pending','deferred'].includes(p.state))return false;const ids=[...new Set([...p.messageIds,...draft.messageIds])];if(ids.length>30)return false;p.messageIds=ids;p.summary=String(draft.summary||p.summary).slice(0,12000);p.reason=String(draft.reason||p.reason).slice(0,3000);p.version++;p.sourceChanged=true;p.state='pending';p.updatedAt=now();return true;});
           if(merged){created++;continue;}
         }
-        const actions=(draft.actions||[]).filter(a=>a.sessionId?candidates.some(c=>c.id===a.sessionId):candidates.some(c=>c.cwd===a.cwd&&c.machineId===a.machineId)).map(a=>{
-          const target=candidates.find(c=>c.id===a.sessionId);return {...a,...(target?{engine:target.engine,machineId:target.machineId,cwd:target.cwd,sessionTitle:target.title}:{})};
+        const actions=(draft.actions||[]).filter(a=>a.sessionId?context.sessions.some(c=>c.id===a.sessionId):context.sessions.some(c=>c.cwd===a.cwd&&c.machineId===a.machineId)).map(a=>{
+          const target=context.sessions.find(c=>c.id===a.sessionId);return {...a,...(target?{engine:target.engine,machineId:target.machineId,cwd:target.cwd,sessionTitle:target.title}:{})};
         });
         // Never overwrite a reviewed draft. Changed sources remain visible for explicit review.
         if(draft.messageIds.every(id=>covered.has(id)))continue;
         store.draft({...draft,actions,model:result.model});created++;
       }
-      store.transaction(next=>{for(const m of messages)next.cursor['analyzed:'+m.id]=m.revision;next.source.analysisError='';next.source.lastAnalysis=now();next.source.analysisFailures=0;next.source.analysisRetryAt=0;});await followups();await verify();return {created};
-    }catch(e){store.transaction(s=>{s.source.analysisError=errorText(e);s.source.analysisFailures=(s.source.analysisFailures||0)+1;s.source.analysisRetryAt=now()+Math.min(3600000,60000*2**Math.min(s.source.analysisFailures,6));});throw e;}finally{analyzing=false;}
+      store.transaction(next=>{for(const m of messages){if(m.textComplete){next.cursor['analyzed:'+m.id]=m.revision;delete next.cursor['offset:'+m.id+':'+m.revision];}else next.cursor['offset:'+m.id+':'+m.revision]=m.textOffset+m.text.length;}next.source.analysisBatchTurn=(next.source.analysisBatchTurn||0)+1;require('./heartflow-compact').saveMemory(next,result,context,now());next.source.analysisError='';next.source.lastAnalysis=now();next.source.analysisFailures=0;next.source.analysisRetryAt=0;});await followups();await verify();return {created};
+    }catch(e){store.transaction(s=>{s.source.analysisError=errorText(e);s.source.analysisFailures=(s.source.analysisFailures||0)+1;s.source.analysisRetryAt=e.code==='BUDGET_EXHAUSTED'?0:now()+Math.min(3600000,60000*2**Math.min(s.source.analysisFailures,6));});throw e;}finally{analyzing=false;}
   }
   async function deliver() {
     if(dispatching)return;dispatching=true;
@@ -142,7 +144,7 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
     }finally{notifying=false;}
   }
   async function tick() {if(store.snapshot().config.enabled){try{await sync();if(store.snapshot().config.modelEnabled && (store.snapshot().source.analysisRetryAt||0)<=now())await suggest();}catch{}}await deliver();await notices();}
-  return {sync,suggest,deliver,notices,verify,followups,status:()=>({polling,analyzing,dispatching}),start(){if(timer)return;const schedule=()=>{timer=setTimeout(async()=>{await tick().catch(()=>{});schedule();},Math.max(30,store.snapshot().config.intervalSeconds)*1000);timer.unref();};schedule();},stop(){clearTimeout(timer);timer=null;},
+  return {sync,suggest,deliver,notices,verify,followups,status:()=>({polling,analyzing,dispatching,usage:require('./heartflow-budget').usageStatus(store.snapshot(),now())}),start(){if(timer)return;const schedule=()=>{timer=setTimeout(async()=>{await tick().catch(()=>{});schedule();},Math.max(30,store.snapshot().config.intervalSeconds)*1000);timer.unref();};schedule();},stop(){clearTimeout(timer);timer=null;},
     async review(id,input){
       if(input.decision==='approve'){
         if(history && input.draft && JSON.stringify(input.draft.actions)!==JSON.stringify(store.snapshot().proposals[id]?.actions))throw new Error('请先保存修改，再确认执行，以便核对修改后的范围');

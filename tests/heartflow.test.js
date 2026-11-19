@@ -94,7 +94,7 @@ test('later reversal closes the exact action with evidence and invalidates old a
 test('fabricated evidence and checkpoint transcripts cannot resolve work',async t=>{
  const {store}=setup(t),p=draft(store);let checkpoint=false;
  const flow=createHeartflow({store,source:{},sessions:async()=>[],history:async()=>({checkpoint,messages:[]}),analyze:async()=>({suggestions:[],resolutions:[{actionId:p.actions[0].id,sessionId:'session-a',status:'completed',evidence:[{messageId:'invented',quote:'已经完成整个需求'}]}]})});
- await flow.verify();assert.equal(store.snapshot().proposals[p.id].state,'pending');checkpoint=true;await assert.rejects(flow.verify(),/实时记录/);
+ await flow.verify();assert.equal(store.snapshot().proposals[p.id].state,'pending');checkpoint=true;await assert.rejects(flow.verify(p.id,true),/实时记录/);
 });
 test('failed card updates never fall back to sending another card',async t=>{
  const {store}=setup(t);store.configure({notifyEnabled:true,notifyUserId:'ou_owner'});const p=draft(store);let calls=0;
@@ -177,7 +177,8 @@ test('personal discovery uses a bounded empty-query user message search, includi
  let command;const {createPersonalFeishu}=require('../core/heartflow-feishu');const source=createPersonalFeishu({execute:(cli,args,options,cb)=>{command=args;cb(null,JSON.stringify({status:'success',data:{messages:[],has_more:false}}));}});
  await source.recent(10001,20001,'next');const payload=JSON.parse(command[command.indexOf('--body-json')+1]);assert.equal(payload.query,'');assert.deepEqual(payload.filter,{from_create_time:'10',to_create_time:'21'});assert.equal(command.at(-1),'next');assert.ok(!command.includes('--compact'));
 });
-test('analysis drains history while reserving space for newest messages',async t=>{
- const {store}=setup(t),base=Date.now();store.configure({since:base-60000,discoveryMode:'recent'});store.ingest(Array.from({length:80},(_,i)=>({id:'bulk'+i,chatId:'oc_new',text:'Update '+i,createdAt:base-1000+i,updatedAt:base})));
- let context;await createHeartflow({store,source:{},sessions:async()=>[],analyze:async c=>{context=c;return {suggestions:[]};}}).suggest();assert.equal(context.messages.length,30);assert.ok(context.messages.some(m=>m.id==='bulk79'));assert.ok(context.messages.some(m=>m.id==='bulk0'));
+test('analysis alternates old and new topic batches without mixing chats',async t=>{
+ const {store}=setup(t),base=Date.now();store.transaction(s=>{s.messages={};});store.configure({since:base-60000,discoveryMode:'recent'});store.ingest(Array.from({length:80},(_,i)=>({id:'bulk'+i,chatId:'oc_new',text:'Update '+i,createdAt:base-1000+i,updatedAt:base})));
+ const contexts=[];const flow=createHeartflow({store,source:{},sessions:async()=>[],analyze:async c=>{contexts.push(c);return {suggestions:[],usage:{input_tokens:100,output_tokens:10}};}});
+ await flow.suggest();await flow.suggest();assert.ok(contexts.every(c=>c.messages.length<=12));assert.ok(contexts[0].messages.some(m=>m.id==='bulk0'));assert.ok(contexts[1].messages.some(m=>m.id==='bulk79'));
 });

@@ -1,12 +1,13 @@
 const {createHash}=require('crypto');
 const {topicContext}=require('./heartflow-context');
 function relatedMessages(p,state) {return topicContext(p.messageIds.map(id=>state.messages[id]),state);}
-async function inspectFollowup(p,state,analyze,force=false) {
+async function inspectFollowup(p,state,analyze,force=false,now=Date.now()) {
+  if(!force && p.lastFollowupCheck && now-p.lastFollowupCheck<(state.config.checkIntervalSeconds??600)*1000)return null;
   const messages=relatedMessages(p,state);
   if(!messages.length||!p.actions.length)return null;
   const fingerprint=createHash('sha256').update(JSON.stringify([p.actions,messages])).digest('hex');
   if(!force&&p.followupFingerprint===fingerprint)return null;
-  const result=await analyze({mode:'followup',selfId:state.config.selfId,proposal:p,messages},state.config.model);
+  const result=await analyze({mode:'followup',selfId:state.config.selfId,proposal:{id:p.id,title:p.title,summary:p.summary,actions:p.actions},messages:messages.map(require('./heartflow-compact').compactMessage)},state.config.model);
   const resolutions=[];
   const floor=Math.min(...p.messageIds.map(id=>state.messages[id]?.createdAt).filter(Number.isFinite));
   for(const r of result.resolutions||[]){
