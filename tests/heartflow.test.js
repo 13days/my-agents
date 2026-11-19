@@ -103,6 +103,25 @@ test('failed card updates never fall back to sending another card',async t=>{
 });
 test('partial history resolution preserves other actions and checkpoint checks block approval',async t=>{
  const {store}=setup(t),p=draft(store,[action('a'),action('b','session-b')]);let checkpoint=false;
- const flow=createHeartflow({store,source:{},sessions:async()=>[],history:async()=>({checkpoint,messages:[{role:'user',timestamp:new Date(Date.now()+1000).toISOString(),text:'这个改回来吧，先保持原样，不用关了'}]}),analyze:async c=>({suggestions:[],resolutions:[{actionId:'a',sessionId:'session-a',status:'superseded',reason:'撤回',evidence:[{messageId:c.transcripts[0].messages[0].id,quote:'这个改回来吧，先保持原样，不用关了'}]}]})});
+ const flow=createHeartflow({store,source:{},sessions:async()=>[],history:async()=>({checkpoint,messages:[{role:'user',timestamp:new Date(Date.now()+1000).toISOString(),text:'这个改回来吧，先保持原样，不用关了'}]}),analyze:async c=>c.mode==='followup'?{suggestions:[],resolutions:[]}:({suggestions:[],resolutions:[{actionId:'a',sessionId:'session-a',status:'superseded',reason:'撤回',evidence:[{messageId:c.transcripts[0].messages[0].id,quote:'这个改回来吧，先保持原样，不用关了'}]}]})});
  await flow.verify();assert.equal(store.snapshot().proposals[p.id].state,'pending');assert.deepEqual(store.snapshot().proposals[p.id].actions.map(a=>a.id),['b']);checkpoint=true;await assert.rejects(flow.review(p.id,{version:2,decision:'approve'}),/实时记录/);assert.equal(Object.keys(store.snapshot().deliveries).length,0);
+});
+
+test('group followup supersedes a pending action without any session history',async t=>{
+ const {store}=setup(t),p=draft(store),at=Date.now()+1000;
+ store.ingest([{id:'later',chatId:'oc_a',parentId:'m1',senderId:'requester',senderName:'请求人',text:'结论：先不做默认回复模式的限制，取消刚刚的配置',createdAt:at,updatedAt:at}]);
+ let calls=0;const flow=createHeartflow({store,source:{},sessions:async()=>[],analyze:async c=>{calls++;assert.equal(c.mode,'followup');assert.equal(c.messages.find(m=>m.id==='later').senderName,'请求人');return {suggestions:[],resolutions:[{actionId:p.actions[0].id,status:'superseded',reason:'请求人明确取消',evidence:[{messageId:'later',quote:'先不做默认回复模式的限制，取消刚刚的配置'}]}]};}});
+ await flow.followups();await flow.followups();const next=store.snapshot().proposals[p.id];assert.equal(calls,1);assert.equal(next.state,'superseded');assert.equal(next.resolutions[0].evidence[0].senderId,'requester');assert.ok(next.messageIds.includes('later'));await assert.rejects(flow.review(p.id,{version:1,decision:'approve'}));
+});
+test('reply-chain matching excludes other topics and caches unchanged checks',async t=>{
+ const {store}=setup(t),p=draft(store);
+ store.ingest([{id:'other',chatId:'oc_a',parentId:'unrelated',senderId:'someone',text:'取消别的项目的配置修改',createdAt:Date.now()+1000,updatedAt:1}]);
+ let calls=0;const flow=createHeartflow({store,source:{},sessions:async()=>[],analyze:async c=>{calls++;assert.ok(!c.messages.some(m=>m.id==='other'));return {suggestions:[],resolutions:[{actionId:p.actions[0].id,status:'superseded',evidence:[{messageId:'other',quote:'取消别的项目的配置修改'}]}]};}});
+ await flow.followups();await flow.followups();assert.equal(calls,1);assert.equal(store.snapshot().proposals[p.id].state,'pending');
+});
+test('names enrich existing sender identities without changing source versions',t=>{
+ const {store}=setup(t);const base={message_id:'identity',chat_id:'oc_a',sender:{id:'ou_person'},create_time:String(Date.now()),body:{content:'{"text":"原消息"}'}};
+ store.ingest([normalizeMessage(base)]);const revision=store.snapshot().messages.identity.revision;
+ store.ingest([normalizeMessage({...base,message_id:'mention',sender:{id:'ou_other'},mentions:[{id:'ou_person',name:'张三',key:'@_1'}]})]);
+ store.ingest([normalizeMessage(base)]);assert.equal(store.snapshot().messages.identity.senderName,'张三');assert.equal(store.snapshot().messages.identity.revision,revision);
 });

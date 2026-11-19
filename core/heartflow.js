@@ -23,9 +23,30 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
       const snapshot=store.snapshot();
       const parents=[...new Set(Object.values(snapshot.messages).filter(m=>config.chats.some(c=>c.id===m.chatId)&&m.createdAt>=config.since).map(m=>m.parentId).filter(id=>id&&!snapshot.messages[id]))].slice(0,30);
       if(parents.length && source.messages){const refs=await source.messages(parents);store.ingest((refs.messages||refs.items||[]).filter(m=>config.chats.some(c=>c.id===m.chat_id)).map(normalizeMessage));}
+      const missing=Object.values(store.snapshot().messages).filter(m=>config.chats.some(c=>c.id===m.chatId)&&!m.identityEnriched).slice(-30);
+      if(missing.length&&source.messages){const refs=await source.messages(missing.map(m=>m.id));store.ingest((refs.messages||refs.items||[]).map(normalizeMessage));}
       store.transaction(s=>{s.source={...s.source,ok:true,lastSync:now(),error:''};});
       return {ok:true};
     }catch(e){store.transaction(s=>{s.source={...s.source,ok:false,error:errorText(e)};});throw e;}finally{polling=false;}
+  }
+  async function followups(id,force=false) {
+    const snapshot=store.snapshot();
+    for(const p of Object.values(snapshot.proposals).filter(p=>['pending','deferred'].includes(p.state)&&(!id||p.id===id)).slice(-50)){
+      const result=await require('./heartflow-followup').inspectFollowup(p,snapshot,analyze,force);
+      if(!result)continue;
+      store.transaction(s=>{const current=s.proposals[p.id];if(current.version!==p.version)return;
+        if(JSON.stringify(require('./heartflow-followup').relatedMessages(current,s).map(m=>[m.id,m.revision]))!==JSON.stringify(result.messages.map(m=>[m.id,m.revision])))throw new Error('群聊消息已变化，请重新核对');
+        current.followupFingerprint=result.fingerprint;
+        if(!result.resolutions.length)return;
+        current.resolutions=[...(current.resolutions||[]),...result.resolutions];
+        current.resolvedActions=[...(current.resolvedActions||[]),...current.actions.filter(a=>result.resolutions.some(r=>r.actionId===a.id))];
+        current.actions=current.actions.filter(a=>!result.resolutions.some(r=>r.actionId===a.id));
+        current.messageIds=[...new Set([...current.messageIds,...result.resolutions.flatMap(r=>r.evidence.map(e=>e.id))])].slice(-30);
+        for(const r of result.resolutions)for(const e of r.evidence)s.cursor['analyzed:'+e.id]=s.messages[e.id].revision;
+        current.version++;current.updatedAt=now();current.sourceChanged=false;
+        if(!current.actions.length)current.state='superseded';
+      });
+    }
   }
   async function verify(id,force=false) {
     if(!history)return;
@@ -52,13 +73,14 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
   async function suggest() {
     if(analyzing)return {busy:true};analyzing=true;
     try{
+      await followups();
       await verify();
       const s=store.snapshot(),covered=new Set(Object.values(s.proposals).flatMap(p=>p.messageIds));
       const messages=Object.values(s.messages).filter(m=>!m.deleted && (m.senderId!==s.config.selfId || Object.values(s.proposals).some(p=>['pending','deferred'].includes(p.state)&&p.messageIds.some(id=>s.messages[id]?.chatId===m.chatId))) && m.createdAt>=s.config.since && (!covered.has(m.id)||Object.values(s.proposals).some(p=>p.sourceChanged&&p.messageIds.includes(m.id))) && s.cursor['analyzed:'+m.id]!==m.revision).sort((a,b)=>a.createdAt-b.createdAt).slice(0,30);
-      if(!messages.length)return {created:0};
+      if(!messages.length){store.transaction(next=>{next.source.lastAnalysis=now();next.source.analysisError='';});return {created:0};}
       const catalog=(await sessions()).slice(0,100),candidates=catalog.map(x=>({id:x.id,title:x.title,engine:x.engine,machineId:x.machineId,cwd:x.project,latestPrompt:x.latestPrompt?.slice(0,600),running:x.running}));
       const chats=new Set(messages.map(m=>m.chatId));
-      const learning=s.checks.filter(c=>c.learning && (Array.isArray(c.before)?c.before.flatMap(p=>p.messageIds||[]):c.before?.messageIds||[]).some(id=>chats.has(s.messages[id]?.chatId))).slice(-20).map(c=>({decision:c.decision,reason:c.reason,before:c.before,after:c.after,approvedActions:c.approvedActions}));
+      const learning=s.checks.filter(c=>c.learning && (Array.isArray(c.before)?c.before.flatMap(p=>p.messageIds||[]):c.before?.messageIds||[]).some(id=>chats.has(s.messages[id]?.chatId))).slice(-20).map(c=>({decision:c.decision,reason:c.reason,before:c.before,after:c.after,approvedActions:c.approvedActions,sourceMessages:(Array.isArray(c.before)?c.before.flatMap(p=>p.messageIds||[]):c.before?.messageIds||[]).map(id=>s.messages[id]).filter(Boolean).map(m=>({id:m.id,senderId:m.senderId,senderName:m.senderName,chatId:m.chatId,text:m.text,createdAt:m.createdAt}))}));
       const threadKeys=new Set(messages.map(m=>m.chatId+':'+m.threadId).filter(k=>!k.endsWith(':')));
       const supportingMessages=Object.values(s.messages).filter(m=>!messages.some(x=>x.id===m.id) && (messages.some(x=>x.parentId===m.id || x.chatId===m.chatId && Math.abs(x.createdAt-m.createdAt)<15*60000)||threadKeys.has(m.chatId+':'+m.threadId))).slice(-20);
       const pending=Object.values(s.proposals).filter(p=>['pending','deferred'].includes(p.state)).slice(-50).map(p=>({id:p.id,title:p.title,summary:p.summary,messageIds:p.messageIds,actions:p.actions}));
@@ -80,7 +102,7 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
         if(draft.messageIds.every(id=>covered.has(id)))continue;
         store.draft({...draft,actions,model:result.model});created++;
       }
-      store.transaction(next=>{for(const m of messages)next.cursor['analyzed:'+m.id]=m.revision;next.source.analysisError='';next.source.lastAnalysis=now();next.source.analysisFailures=0;next.source.analysisRetryAt=0;});await verify();return {created};
+      store.transaction(next=>{for(const m of messages)next.cursor['analyzed:'+m.id]=m.revision;next.source.analysisError='';next.source.lastAnalysis=now();next.source.analysisFailures=0;next.source.analysisRetryAt=0;});await followups();await verify();return {created};
     }catch(e){store.transaction(s=>{s.source.analysisError=errorText(e);s.source.analysisFailures=(s.source.analysisFailures||0)+1;s.source.analysisRetryAt=now()+Math.min(3600000,60000*2**Math.min(s.source.analysisFailures,6));});throw e;}finally{analyzing=false;}
   }
   async function deliver() {
@@ -114,10 +136,11 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
     }finally{notifying=false;}
   }
   async function tick() {if(store.snapshot().config.enabled){try{await sync();if(store.snapshot().config.modelEnabled && (store.snapshot().source.analysisRetryAt||0)<=now())await suggest();}catch{}}await deliver();await notices();}
-  return {sync,suggest,deliver,notices,verify,status:()=>({polling,analyzing,dispatching}),start(){if(timer)return;const schedule=()=>{timer=setTimeout(async()=>{await tick().catch(()=>{});schedule();},Math.max(30,store.snapshot().config.intervalSeconds)*1000);timer.unref();};schedule();},stop(){clearTimeout(timer);timer=null;},
+  return {sync,suggest,deliver,notices,verify,followups,status:()=>({polling,analyzing,dispatching}),start(){if(timer)return;const schedule=()=>{timer=setTimeout(async()=>{await tick().catch(()=>{});schedule();},Math.max(30,store.snapshot().config.intervalSeconds)*1000);timer.unref();};schedule();},stop(){clearTimeout(timer);timer=null;},
     async review(id,input){
       if(input.decision==='approve'){
         if(history && input.draft && JSON.stringify(input.draft.actions)!==JSON.stringify(store.snapshot().proposals[id]?.actions))throw new Error('请先保存修改，再确认执行，以便核对修改后的范围');
+        await followups(id,true);
         await verify(id,true);
         const p=store.snapshot().proposals[id],draft=input.draft||p;if(!draft)throw new Error('建议不存在');
         const all=await sessions();for(const a of draft.actions||[]){if(input.actionIds&&!input.actionIds.includes(a.id))continue;if(a.sessionId){const target=all.find(s=>s.id===a.sessionId);if(!target)throw new Error('目标会话不在当前可访问列表，请刷新后改派');if(a.machineId!==target.machineId || a.cwd!==target.project || a.engine!==target.engine)throw new Error('目标会话的位置或引擎已变化，请重新选择会话');}}

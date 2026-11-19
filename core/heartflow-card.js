@@ -1,5 +1,5 @@
 function heartflowCard({proposal:p,owner,coordinator,panelUrl=''}) {
-  const resolved=(p.resolutions||[]).map(r=>r.reason+'\n'+r.evidence.map(e=>e.quote).join('\n')).join('\n\n');
+  const resolved=(p.resolutions||[]).map(r=>r.reason+'\n'+r.evidence.map(e=>(e.source==='feishu'?(e.senderName||e.senderId)+'：':'')+e.quote).join('\n')).join('\n\n');
   const active=!p.state||['pending','deferred'].includes(p.state);
   const actions=p.actions.map((a,i)=>`${i+1}. ${a.sessionId?'续接 '+(a.sessionTitle||a.sessionId):'新建任务'}\n${a.engine} · ${a.machineId} · ${a.cwd}\n${a.prompt}`).join('\n\n');
   const content=`${resolved ? '执行记录核对：\n'+resolved+'\n\n' : ''}${p.summary}\n\n推荐依据：${p.reason}\n\n${actions}\n\n版本 ${p.version} · 确认后追加排队，正在执行的任务不会被打断。`;

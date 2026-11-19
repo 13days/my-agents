@@ -54,11 +54,14 @@ function createHeartflowStore({ dir, now = Date.now }) {
       for (const m of messages) {
         if (!m.id || !m.chatId || typeof m.text !== 'string') continue;
         const old = s.messages[m.id];
-        if (old && old.text === m.text && old.deleted === m.deleted) continue;
+        if (old && old.text === m.text && old.deleted === m.deleted) {Object.assign(old,{identityEnriched:m.identityEnriched??old.identityEnriched,mentionNames:m.mentionNames||old.mentionNames,senderType:m.senderType||old.senderType});if(m.senderName&&m.senderName!==m.senderId)old.senderName=m.senderName;continue;}
         if (old && Number(old.updatedAt) > Number(m.updatedAt)) continue;
         s.messages[m.id] = { ...m, revision: (old?.revision || 0) + 1, receivedAt: now() }; changed.push(m.id);
         for (const p of Object.values(s.proposals)) if (p.messageIds.includes(m.id) && ['pending','deferred'].includes(p.state)) { p.version++; p.state = 'pending'; p.sourceChanged = true; p.updatedAt = now(); }
       }
+      const names=new Map();
+      for(const m of Object.values(s.messages)){if(m.senderName&&m.senderName!==m.senderId)names.set(m.senderId,m.senderName);for(const ref of m.mentionNames||[])if(ref.id&&ref.name)names.set(ref.id,ref.name);}
+      for(const m of Object.values(s.messages))if(names.has(m.senderId))m.senderName=names.get(m.senderId);
       return changed;
     }); },
     matter(input) { return transaction(s => {
@@ -98,7 +101,7 @@ function createHeartflowStore({ dir, now = Date.now }) {
       const before=copy(ps); let ids=[...new Set(ps.flatMap(p=>p.messageIds))];
       if (splitIds) { if (ps.length!==1 || !splitIds.length || splitIds.length>=ids.length || splitIds.some(id=>!ids.includes(id))) fail('拆分需选择部分来源消息'); ids=[...new Set(splitIds)]; }
       const id=uid(), p={...copy(ps[0]),id,version:1,messageIds:ids,matterIds:[...new Set(ps.flatMap(p=>p.matterIds))],actions:[],summary:ps.map(p=>p.summary).join('\n').slice(0,12000),reason:'整理后请重新确认行动范围',createdAt:now(),updatedAt:now()};
-      for(const key of ['noticeMessageId','noticeOwner','noticeState','notifiedVersion','historyFingerprint','resolutions','resolvedActions'])delete p[key];
+      for(const key of ['noticeMessageId','noticeOwner','noticeState','notifiedVersion','historyFingerprint','followupFingerprint','resolutions','resolvedActions'])delete p[key];
       s.proposals[id]=p;
       for (const old of ps) { old.version++; if(splitIds) {old.messageIds=old.messageIds.filter(id=>!ids.includes(id));old.actions=[];} else old.state='merged'; }
       s.checks.push({id:uid(),at:now(),decision:splitIds?'split':'merge',before,after:copy(p),learning:true}); return p;

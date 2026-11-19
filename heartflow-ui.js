@@ -47,9 +47,11 @@ async function hfDo(button,fn) {
   try {await fn();if(state.type==='heartflow')await renderHeartflow();}
   catch(e){const n=$('#hf-notice');if(n){n.textContent=e.message;n.className='hf-error';}if(button)button.disabled=false;}
 }
-function hfMessage(m, selectable=false) {
+function hfMessage(m, selectable=false, data=null) {
   if(!m)return '';
-  return `<article class="hf-source">${selectable?`<input type="checkbox" data-hf-msg="${esc(m.id)}" aria-label="选择来源消息">`:''}<strong>${esc(m.chatName)}</strong><small>${esc(m.senderName)} · ${esc(hfTime(m.createdAt))}</small><p>${esc(m.text)}</p>${m.deleted?'<b>消息已撤回</b>':''}<small>${esc(m.id)}${m.parentId?' · 回复 '+esc(m.parentId):''}</small></article>`;
+  const links=data?Object.values(data.proposals).filter(p=>p.messageIds.includes(m.id)):[];
+  const outcome=links.map(p=>`<p>${hfState(p.state)} ${esc(p.title)}${p.resolutions?.length?' · '+esc(p.resolutions.map(r=>r.reason).join('；')):''}</p>`).join('');
+  return `<article class="hf-source">${selectable?`<input type="checkbox" data-hf-msg="${esc(m.id)}" aria-label="选择来源消息">`:''}<strong>${esc(m.chatName)}</strong><small>${esc(m.senderName && m.senderName!==m.senderId ? m.senderName : '姓名未解析 · '+m.senderId)} · ${esc(hfTime(m.createdAt))}</small><p>${esc(m.text)}</p>${outcome}${m.deleted?'<b>消息已撤回</b>':''}<small>${esc(m.id)}${m.parentId?' · 回复 '+esc(m.parentId):''}</small></article>`;
 }
 function hfPending(data) {
   const ps=Object.values(data.proposals).filter(p=>['pending','deferred'].includes(p.state)).sort((a,b)=>b.updatedAt-a.updatedAt);
@@ -91,7 +93,7 @@ function hfDetail(p,data) {
 }
 function hfMessages(data) {
   const rows=Object.values(data.messages).sort((a,b)=>b.createdAt-a.createdAt).slice(0,200);
-  $('#hf-content').innerHTML=`<div class="hf-toolbar"><button class="btn" id="hf-sync">同步消息</button><button class="btn" id="hf-manual">从选中消息建立建议</button><span>最近 200 条；原始消息只作为资料，未经确认不会执行。</span></div>${rows.map(m=>hfMessage(m,true)).join('')||'<p class="hf-empty">还没有消息，请先选择聊天并同步。</p>'}`;
+  $('#hf-content').innerHTML=`<div class="hf-toolbar"><button class="btn" id="hf-sync">同步消息</button><button class="btn" id="hf-manual">从选中消息建立建议</button><span>最近 200 条；原始消息只作为资料，未经确认不会执行。</span></div>${rows.map(m=>hfMessage(m,true,data)).join('')||'<p class="hf-empty">还没有消息，请先选择聊天并同步。</p>'}`;
   $('#hf-sync').onclick=e=>hfDo(e.target,()=>api('POST','heartflow/sync',{}));
   $('#hf-manual').onclick=e=>hfDo(e.target,async()=>{const messageIds=[...document.querySelectorAll('[data-hf-msg]:checked')].map(x=>x.dataset.hfMsg);if(!messageIds.length)throw new Error('请选择消息');const p=await api('POST','heartflow/drafts',{title:data.messages[messageIds[0]].chatName+' · 待办',summary:messageIds.map(id=>data.messages[id].text).join('\n').slice(0,12000),messageIds,matterIds:[],actions:[]});heartflowSelected=p.id;heartflowView='pending';});
 }
@@ -101,7 +103,7 @@ function hfMatters(data) {
 }
 function hfActivity(data) {
   $('#hf-content').innerHTML=`<div class="hf-toolbar"><button class="btn" id="hf-reconcile">核对执行状态</button><span>结果不明的行动不会自动重发。</span></div>${Object.values(data.deliveries).reverse().map(d=>`<article class="hf-card">${hfState(d.state)} <small>${esc(hfTime(d.updatedAt))}</small><h3>${esc(data.proposals[d.proposalId]?.title||'行动')}</h3><p>${esc(d.action.prompt)}</p><small>${esc(d.action.machineId)} · ${esc(d.action.cwd)} · 建议版本 ${d.version}</small>${d.error?`<p class="hf-error">${esc(d.error)}</p>`:''}${d.sessionId||d.action.sessionId?`<p><a href="/sessions/${encodeURIComponent(d.sessionId||d.action.sessionId)}">查看执行会话</a></p>`:''}</article>`).join('')||'<p class="hf-empty">还没有批准的行动。</p>'}`;
-  $('#hf-content').insertAdjacentHTML('beforeend',Object.values(data.proposals).filter(p=>p.resolutions?.length).map(p=>`<article class="hf-card">${hfState(p.state)}<h3>${esc(p.title)}</h3>${p.resolutions.map(r=>`<p>${esc(r.reason)}</p><a href="/sessions/${encodeURIComponent(r.sessionId)}">查看原会话</a><pre>${esc(r.evidence.map(e=>e.quote).join('\n'))}</pre>`).join('')}</article>`).join(''));
+  $('#hf-content').insertAdjacentHTML('beforeend',Object.values(data.proposals).filter(p=>p.resolutions?.length).map(p=>`<article class="hf-card">${hfState(p.state)}<h3>${esc(p.title)}</h3>${p.resolutions.map(r=>`<p>${esc(r.reason)}</p>${r.sessionId?`<a href="/sessions/${encodeURIComponent(r.sessionId)}">查看原会话</a>`:''}<pre>${esc(r.evidence.map(e=>(e.source==='feishu'?(e.senderName||e.senderId)+' · '+hfTime(e.timestamp)+'\n':'')+e.quote).join('\n'))}</pre>`).join('')}</article>`).join(''));
   $('#hf-reconcile').onclick=e=>hfDo(e.target,()=>api('POST','heartflow/reconcile',{}));
 }
 function hfLearning(data) {
