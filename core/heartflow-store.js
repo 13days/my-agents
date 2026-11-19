@@ -67,7 +67,10 @@ function createHeartflowStore({ dir, now = Date.now }) {
         const old = s.messages[m.id];
         if (old && old.text === m.text && old.deleted === m.deleted) {Object.assign(old,{identityEnriched:m.identityEnriched??old.identityEnriched,mentionNames:m.mentionNames||old.mentionNames,senderType:m.senderType||old.senderType});if(m.senderName&&m.senderName!==m.senderId)old.senderName=m.senderName;continue;}
         if (old && Number(old.updatedAt) > Number(m.updatedAt)) continue;
-        s.messages[m.id] = { ...m, revision: (old?.revision || 0) + 1, receivedAt: now() }; changed.push(m.id);
+        s.messages[m.id] = { ...m, reactions:m.reactions??old?.reactions, revision: (old?.revision || 0) + 1, receivedAt: now() }; changed.push(m.id);
+        for(const p of Object.values(s.proposals))if(p.state==='completed'&&p.completion?.source==='conversation'&&p.messageIds.includes(m.id)){
+          p.previousCompletion=p.completion;delete p.completion;p.state='pending';p.actions=p.completionActions||[];delete p.completionActions;
+        }
         for (const p of Object.values(s.proposals)) if (p.messageIds.includes(m.id) && ['pending','deferred'].includes(p.state)) { p.version++; p.state = 'pending'; p.sourceChanged = true; p.updatedAt = now(); }
       }
       const names=new Map();
@@ -88,8 +91,8 @@ function createHeartflowStore({ dir, now = Date.now }) {
     review(id, input) { return transaction(s => {
       const p = proposal(s,id,input.version);
       if (!['pending','deferred'].includes(p.state)) fail('此建议已经处理',409);
-      if (!['save','approve','ignore','defer'].includes(input.decision)) fail('未知 check 操作');
-      const before = copy(p), edited = ['ignore','defer'].includes(input.decision) ? copy(p) : validateDraft(s,input.draft || p);
+      if (!['save','approve','ignore','defer','complete'].includes(input.decision)) fail('未知 check 操作');
+      const before = copy(p), edited = ['ignore','defer','complete'].includes(input.decision) ? copy(p) : validateDraft(s,input.draft || p);
       Object.assign(p,edited); p.version++; p.updatedAt = now(); p.sourceChanged = false;
       const selected = input.actionIds || p.actions.map(a=>a.id);
       if (input.decision === 'approve' && (!selected.length || selected.some(id=>!p.actions.some(a=>a.id===id)))) fail('请选择要执行的行动');
@@ -102,6 +105,7 @@ function createHeartflowStore({ dir, now = Date.now }) {
         }
         p.actions = p.actions.filter(a=>!selected.includes(a.id)); p.state = p.actions.length ? 'pending' : 'approved';
       } else p.state = input.decision === 'ignore' ? 'ignored' : input.decision === 'defer' ? 'deferred' : 'pending';
+      if(input.decision==='complete'){p.state='completed';p.completion={source:'user',at:now(),reason:String(input.reason||'用户确认已完成').slice(0,2000),evidence:[]};p.completionActions=p.actions;p.actions=[];}
       s.checks.push({ id:uid(), proposalId:id, at:now(), decision:input.decision, reason:String(input.reason || '').slice(0,2000), before, after:copy(p), selectedActionIds:input.decision==='approve'?selected:[], approvedActions:input.decision==='approve'?edited.actions.filter(a=>selected.includes(a.id)):[], learning:true });
       return p;
     }); },

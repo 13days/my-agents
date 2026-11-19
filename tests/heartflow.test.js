@@ -35,7 +35,7 @@ test('changed source blocks queued execution; transport uncertainty is never ret
 test('model receives check feedback and own supporting replies, cannot invent sources or executable session IDs',async t=>{
  const {store}=setup(t);store.configure({since:Date.now()-60000,selfId:'me'});const old=draft(store);store.review(old.id,{version:1,decision:'ignore',reason:'只在创建时关闭'});
  store.ingest([{id:'m3',chatId:'oc_a',text:'请修改默认配置',threadId:'thread',senderId:'other',createdAt:Date.now(),updatedAt:1},{id:'m4',chatId:'oc_a',text:'只在创建时关闭',threadId:'thread',senderId:'me',createdAt:Date.now(),updatedAt:1}]);
- let context;const flow=createHeartflow({store,source:{},sessions:async()=>[{id:'known',engine:'codex',machineId:'mac',project:'/work'}],analyze:async c=>{context=c;return {model:'test',suggestions:[{title:'修改',summary:'默认值',reason:'@用户',messageIds:['m3'],actions:[action('a','invented')]}]};},dispatch:()=>{throw Error('must not execute');}});
+ let context;const flow=createHeartflow({store,source:{},sessions:async()=>[{id:'known',engine:'codex',machineId:'mac',project:'/work'}],analyze:async c=>{if(c.mode!=='followup')context=c;return {model:'test',suggestions:[{title:'修改',summary:'默认值',reason:'@用户',messageIds:['m3'],actions:[action('a','invented')]}]};},dispatch:()=>{throw Error('must not execute');}});
  await flow.suggest();assert.equal(context.learning.length,1);assert.ok([...context.messages,...context.supportingMessages].some(m=>m.id==='m4')); assert.equal(Object.values(store.snapshot().proposals).at(-1).actions.length,0);
  store.learning(store.snapshot().checks[0].id,false);assert.equal(store.snapshot().checks[0].learning,false);
 });

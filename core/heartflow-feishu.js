@@ -9,6 +9,13 @@ function createPersonalFeishu({ cli = process.env.BYTEDCLI || 'bytedcli', execut
   }
   return {
     recent:(floor,upper,pageToken)=>call(['im','messages','search','--body-json',JSON.stringify({query:'',filter:{from_create_time:String(Math.floor(floor/1000)),to_create_time:String(Math.ceil(upper/1000))}}),'--page-size','50',...(pageToken?['--page-token',pageToken]:[])]),
+    reactions:id=>new Promise((resolve,reject)=>execute(cli,['--json','lark','im','reactions','list','--message-id',id,'--user-id-type','open_id','--as','user','--page-size','50'],{timeout:45000,maxBuffer:1024*1024},(error,stdout)=>{
+      let r;try{r=JSON.parse(stdout);}catch{return reject(new Error('表情回应接口未返回有效 JSON'));}
+      if(error||r.error||r.code)return reject(new Error(r.error?.message||r.msg||'无法读取表情回应，请检查用户授权 im:message.reactions:read'));
+      const data=r.data||r;
+      if(!Array.isArray(data.items))return reject(new Error('表情回应接口未返回完整列表'));
+      resolve(data);
+    })),
     identity:()=>call(['user','get']),
     messages:ids=>call(['im','messages','mget','--message-ids',ids.join(',')]),
     search:query=>call(['chat','search','--query',String(query).slice(0,100)]),

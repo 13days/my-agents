@@ -1,7 +1,7 @@
 const bytes=x=>Buffer.byteLength(JSON.stringify(x));
 const words=text=>new Set((String(text||'').toLowerCase().match(/[a-z0-9_./-]{3,}|[\p{Script=Han}]{2,}/gu)||[]).flatMap(w=>/[\p{Script=Han}]/u.test(w)?Array.from({length:Math.max(0,w.length-1)},(_,i)=>w.slice(i,i+2)):[w]));
 function relevance(text,query){const terms=words(text);return [...words(query)].reduce((n,w)=>n+(terms.has(w)?1:0),0);}
-function compactMessage(m){return Object.fromEntries(['id','chatId','senderId','senderName','senderType','mentions','mentionNames','createdAt','parentId','threadId','text','revision','deleted','textOffset','textComplete'].filter(k=>m[k]!==undefined).map(k=>[k,m[k]]));}
+function compactMessage(m){return Object.fromEntries(['id','chatId','senderId','senderName','senderType','mentions','mentionNames','createdAt','parentId','threadId','text','revision','deleted','textOffset','textComplete','reactions'].filter(k=>m[k]!==undefined).map(k=>[k,m[k]]));}
 function batchMessages(unread,state){
  if(!unread.length)return [];
  const seed=(state.source.analysisBatchTurn||0)%2?unread.at(-1):unread[0];

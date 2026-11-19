@@ -27,6 +27,7 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
       if(parents.length && source.messages){const refs=await source.messages(parents);store.ingest((refs.messages||refs.items||[]).filter(m=>require('./heartflow-discovery').inScope({chatId:m.chat_id},config)).map(normalizeMessage));}
       const missing=Object.values(store.snapshot().messages).filter(m=>require('./heartflow-discovery').inScope(m,config)&&!m.identityEnriched).slice(-30);
       if(missing.length&&source.messages){const refs=await source.messages(missing.map(m=>m.id));store.ingest((refs.messages||refs.items||[]).map(normalizeMessage));}
+      await require('./heartflow-completion').refresh({store,source,now});
       store.transaction(s=>{s.source={...s.source,ok:true,lastSync:now(),error:''};});
       return {ok:true};
     }catch(e){store.transaction(s=>{s.source={...s.source,ok:false,error:errorText(e)};});throw e;}finally{polling=false;}
@@ -34,7 +35,7 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
   async function followups(id,force=false) {
     const snapshot=store.snapshot();
     let checked=0;
-    for(const p of Object.values(snapshot.proposals).filter(p=>['pending','deferred'].includes(p.state)&&(!id||p.id===id)).sort((a,b)=>(a.lastFollowupCheck||0)-(b.lastFollowupCheck||0)).slice(0,50)){
+    for(const p of Object.values(snapshot.proposals).filter(p=>(['pending','deferred'].includes(p.state)||(p.state==='completed'&&p.completion?.source==='conversation'))&&(!id||p.id===id)).sort((a,b)=>(a.lastFollowupCheck||0)-(b.lastFollowupCheck||0)).slice(0,50)){
       if(!force&&checked>=2)break;
       const result=await require('./heartflow-followup').inspectFollowup(p,snapshot,analyze,force,now());
       if(!result)continue;checked++;
@@ -44,6 +45,19 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
         current.followupFingerprint=result.fingerprint;current.lastFollowupCheck=now();
         const topicChanged=contextChanged&&result.topic&&JSON.stringify(result.topic)!==JSON.stringify(current.topic);
         if(topicChanged){current.topic=result.topic;current.version++;current.updatedAt=now();if(['changed','cancelled'].includes(result.topic.status))current.sourceChanged=true;}
+        if(current.state==='completed'){
+          const lastEvidence=Math.max(...(current.completion?.evidence||[]).map(e=>s.messages[e.id]?.createdAt||0));
+          if(!result.reopen?.evidence.some(e=>s.messages[e.id]?.createdAt>lastEvidence))return;
+          current.previousCompletion=current.completion;delete current.completion;
+          current.actions=current.completionActions||[];delete current.completionActions;current.state='pending';current.sourceChanged=true;
+          current.version++;current.updatedAt=now();return;
+        }
+        if(result.completion){
+          current.completion={...result.completion,at:now()};
+          current.completionActions=current.actions;current.actions=[];
+          current.messageIds=[...new Set([...current.messageIds,...result.completion.evidence.map(e=>e.id)])];
+          current.state='completed';current.version++;current.updatedAt=now();current.sourceChanged=false;return;
+        }
         if(!result.resolutions.length)return;
         current.resolutions=[...(current.resolutions||[]),...result.resolutions];
         current.resolvedActions=[...(current.resolvedActions||[]),...current.actions.filter(a=>result.resolutions.some(r=>r.actionId===a.id))];
