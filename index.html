@@ -165,7 +165,7 @@ function renderUserGuide() {
 </script>
 <script src="/conversation-state.js"></script>
 <script src="/feishu-ui.js"></script>
-<script src="/heartflow-ui.js"></script>
+
 <script src="/mermaid-ui.js"></script>
 <script src="/vendor/qr.js"></script>
 <script>
@@ -200,6 +200,29 @@ function prepareIMPage() {
 function imChannelError(message) {
   $('#render').innerHTML = imHeader() + `<section class="chart im-channel-placeholder" role="alert"><p>${esc(message)}</p><button type="button" class="btn" data-im-channel="feishu">${esc(rt('重试', 'Retry'))}</button></section>`;
   bindIMChannelControls();
+}
+let heartflowLoadPromise;
+async function openHeartflow() {
+  prepareIMPage();
+  $('#title').firstChild.textContent = '心流';
+  try {
+    if (typeof renderHeartflow !== 'function') {
+      heartflowLoadPromise ||= (async () => {
+        const response = await fetch('/heartflow-ui.js', { cache: 'no-store' });
+        if (!response.ok || !/javascript/.test(response.headers.get('content-type') || '')) throw new Error('后台尚未加载心流版本');
+        await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = '/heartflow-ui.js'; script.onload = resolve; script.onerror = () => reject(new Error('心流脚本加载失败')); document.head.append(script); });
+        if (typeof renderHeartflow !== 'function') throw new Error('心流脚本未正确初始化');
+      })().catch(error => { heartflowLoadPromise = null; throw error; });
+      await heartflowLoadPromise;
+    }
+    if (state.type === 'heartflow') await renderHeartflow();
+  } catch (error) {
+    const health = await api('GET', 'health').catch(() => null);
+    if (state.type !== 'heartflow') return;
+    const tasks = health?.tasks || {};
+    $('#render').innerHTML = `<section class="chart"><h1>心流尚未启动</h1><p role="alert">${esc(error.message)}。当前页面已更新，但后台服务还未加载心流功能。</p><p>运行版本：${esc(health?.build?.gitCommit?.slice(0, 7) || '无法读取')} · 执行中 ${Number(tasks.running || 0)} · 准备中 ${Number(tasks.preparing || 0)} · 执行器任务 ${Number(tasks.executing || 0)}</p><p>后台会在任务空闲后重载。此状态下不会自动读取消息、生成建议或投递任务。</p><button class="btn" id="heartflow-retry">重新检查</button><a class="btn" href="/sessions">查看当前会话</a></section>`;
+    $('#heartflow-retry').onclick = openHeartflow;
+  }
 }
 async function renderIMAccess() {
   const revision = ++imRenderRevision;
@@ -752,7 +775,7 @@ async function switchType(type, updateRoute = true) {
   showEmpty();
   if (type === 'guide') { renderUserGuide(); return; }
   if (type === 'proxy') { await renderProxyTab(); return; }
-  if (type === 'heartflow') { await renderHeartflow(); return; }
+  if (type === 'heartflow') { await openHeartflow(); return; }
   if (type === 'im') { await renderIMAccess(); return; }
   if (type === 'voyage') { await renderVoyage(); return; }
   if (CAPS[type].dashboard) { await renderStatsTab(); return; }
@@ -2335,7 +2358,7 @@ async function setLang(code) {
   localStorage.setItem('panel-lang', lang);
   applyLang();
   // 重新拉取本地化的列表与详情
-  if (state.type === 'heartflow') { await renderHeartflow(); return; }
+  if (state.type === 'heartflow') { await openHeartflow(); return; }
   if (state.type === 'im') { await renderIMAccess(); return; }
   if (state.type === 'proxy') { await renderProxyTab(); return; }
   if (state.type === 'sessions' && $('#chat-messages') && !chatAbort) { chatView.sessionId ? openSessionChat(chatView.sessionId) : renderChat(); return; }

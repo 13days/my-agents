@@ -1,18 +1,23 @@
 /* Heartflow uses the panel's authenticated API and rendering helpers. */
-let heartflowView = 'pending', heartflowSelected = '', heartflowData = null;
+let heartflowView = 'pending', heartflowSelected = '', heartflowData = null, heartflowPulseTimer = null;
 const hfLabels = { pending:'待确认', deferred:'暂缓', approved:'已批准', ignored:'已忽略', merged:'已合并', queued:'等待投递', dispatching:'投递中', accepted:'已接收', running:'执行中', completed:'已完成', failed:'失败', unknown:'结果待核对', blocked:'需重新确认', save:'修改', approve:'批准', ignore:'忽略', defer:'暂缓', split:'拆分', merge:'合并' };
 const hfTime = n => n ? new Date(n).toLocaleString() : '—';
 const hfState = s => `<span class="hf-state hf-${esc(s)}">${esc(hfLabels[s] || s)}</span>`;
+function hfProgress(data) {
+  const pending=Object.values(data.proposals).filter(p=>p.state==='pending').length;
+  return `<div class="hf-status"><span class="hf-dot ${data.config.enabled?'on':''}"></span>${!data.config.enabled?'监听已暂停':data.runtime.polling?'正在同步消息':data.source.error?'同步异常':data.source.lastSync?'等待下次同步':'等待首次同步'} · 用户身份 · ${data.config.chats.length} 个选定聊天 · 协调节点 ${esc(data.coordinator)}<span>最近同步 ${esc(hfTime(data.source.lastSync))}</span></div>
+      ${data.source.error?`<p class="hf-error" role="alert">消息读取：${esc(data.source.error)}</p>`:''}${data.source.noticeError?`<p class="hf-error">${esc(data.source.noticeError)}</p>`:''}${data.source.analysisError?`<p class="hf-error" role="alert">建议分析：${esc(data.source.analysisError)}</p>`:''}
+      <div class="hf-toolbar" aria-label="心流工作状态"><span>已读取 ${Object.keys(data.messages).length} 条消息</span><span>${data.runtime.analyzing?'正在分析':data.source.lastAnalysis?'最近分析 '+esc(hfTime(data.source.lastAnalysis)):'尚未完成分析'}</span><span>待确认 ${pending}</span><span>等待投递 ${Object.values(data.deliveries).filter(d=>d.state==='queued').length}</span><span>执行中 ${Object.values(data.deliveries).filter(d=>['dispatching','accepted','running'].includes(d.state)).length}</span><span>已完成 ${Object.values(data.deliveries).filter(d=>d.state==='completed').length}</span></div>${data.source.analysisRetryAt>Date.now()?`<p class="hf-reason">分析失败后已退避，预计 ${esc(hfTime(data.source.analysisRetryAt))} 后重试。</p>`:''}`;
+}
 async function renderHeartflow() {
+  clearInterval(heartflowPulseTimer);
   $('#empty').style.display='none';$('#metabar').style.display='none';$('#render').style.display='block';$('#render').classList.add('wide');
   const root=$('#render'); root.innerHTML='<p role="status">正在加载心流…</p>';
   try {
     const data=await api('GET','heartflow');if(state.type!=='heartflow')return;heartflowData=data;
     const pending=Object.values(data.proposals).filter(p=>p.state==='pending').length;
     root.innerHTML=`<section class="hf"><header class="hf-header"><div><div class="hf-eyebrow">AMBIENT WORKSPACE</div><h1>心流 <span>${pending} 项待 check</span></h1><p>消息聚成事项，确认后交给正确的会话。</p></div><button class="btn" id="hf-refresh">刷新</button></header>
-      <div class="hf-status"><span class="hf-dot ${data.config.enabled?'on':''}"></span>${data.config.enabled?'监听中':'监听已暂停'} · 用户身份 · ${data.config.chats.length} 个选定聊天 · 协调节点 ${esc(data.coordinator)}<span>最近同步 ${esc(hfTime(data.source.lastSync))}</span></div>
-      ${data.source.error?`<p class="hf-error" role="alert">消息读取：${esc(data.source.error)}</p>`:''}${data.source.noticeError?`<p class="hf-error">${esc(data.source.noticeError)}</p>`:''}${data.source.analysisError?`<p class="hf-error" role="alert">建议分析：${esc(data.source.analysisError)}</p>`:''}
-      <nav class="hf-tabs">${[['pending','待确认'],['messages','消息'],['matters','事项'],['activity','执行动态'],['learning','Check 与学习'],['settings','接入设置']].map(([id,title])=>`<button class="btn ${heartflowView===id?'active':''}" data-hf-tab="${id}">${title}</button>`).join('')}</nav><div id="hf-notice" role="status"></div><div id="hf-content"></div></section>`;
+      <div id="hf-live-status">${hfProgress(data)}</div><p id="hf-live-update" role="status"></p><nav class="hf-tabs">${[['pending','待确认'],['messages','消息'],['matters','事项'],['activity','执行动态'],['learning','Check 与学习'],['settings','接入设置']].map(([id,title])=>`<button class="btn ${heartflowView===id?'active':''}" data-hf-tab="${id}">${title}</button>`).join('')}</nav><div id="hf-notice" role="status"></div><div id="hf-content"></div></section>`;
     root.querySelector('#hf-refresh').onclick=()=>renderHeartflow();
     root.querySelectorAll('[data-hf-tab]').forEach(b=>b.onclick=()=>{heartflowView=b.dataset.hfTab;renderHeartflow();});
     if(heartflowView==='pending')hfPending(data);
@@ -21,6 +26,19 @@ async function renderHeartflow() {
     else if(heartflowView==='activity')hfActivity(data);
     else if(heartflowView==='learning')hfLearning(data);
     else hfSettings(data);
+    let checking=false;
+    heartflowPulseTimer=setInterval(async()=>{
+      if(state.type!=='heartflow'){clearInterval(heartflowPulseTimer);return;}
+      if(checking || document.hidden)return;checking=true;
+      try{
+        const latest=await api('GET','heartflow');
+        if(state.type!=='heartflow' || !$('#hf-live-status'))return;
+        $('#hf-live-status').innerHTML=hfProgress(latest);
+        const changed=Object.values(latest.proposals).some(p=>p.version!==data.proposals[p.id]?.version);
+        $('#hf-live-update').textContent=changed?'有新建议或来源更新，请点刷新查看。当前编辑内容已保留。':'状态已更新 · '+hfTime(Date.now());
+      }catch(error){if(state.type==='heartflow' && $('#hf-live-update'))$('#hf-live-update').textContent='状态刷新失败：'+error.message;}
+      finally{checking=false;}
+    },10000);
   }catch(e){if(state.type==='heartflow')root.innerHTML=`<p role="alert">心流加载失败：${esc(e.message)}</p>`;}
 }
 async function hfDo(button,fn) {
