@@ -358,6 +358,11 @@ async function responseError(res) {
 function viewDescription(type) {
   if (isResourceType(type) && resourceCopy(type)) return resourceCopy(type);
   const descriptions = {
+    today:['待确认、进行中和需要处理的工作。','Review your work and next steps.'],
+    tasks:['跟进已发起的执行任务和结果。','Track tasks and results.'],
+    connections:['统一管理消息来源和执行环境。','Manage messaging and execution connections.'],
+    capabilities:['选用技能、助手与可复用的流程。','Browse reusable capabilities.'],
+    settings:['管理偏好与高级工具。','Manage preferences and advanced tools.'],
     stats: ['两个引擎，一个工作空间。随时掌握你的使用情况。', 'Two engines, one workspace. Keep your work and usage in view.'],
     im: ['在聊天工具中使用你的 Agent，统一管理消息渠道与会话。', 'Connect messaging channels to your agents and sessions.'],
     guide: ['从第一次对话到多机器协作，按任务找到使用方法。', 'Find your way from a first chat to work across machines.'],
@@ -378,6 +383,7 @@ function viewDescription(type) {
 function viewHeading(type, action = '') {
   return `<div class="view-heading"><div class="view-heading-left"><span class="view-icon">${icon(type)}</span><div><h2>${esc(t('tabs')[type])}</h2><p>${esc(viewDescription(type))}</p></div></div>${action}</div>`;
 }
+function productNavParent(type){return ['im','proxy'].includes(type)?'connections':['commands','skills','agents','plugins','workflows'].includes(type)?'capabilities':['config','inspector','stats','voyage'].includes(type)?'settings':type;}
 function updateWorkspaceChrome() {
   const dashboard = !!CAPS[state.type].dashboard;
   document.body.dataset.view = dashboard ? 'dashboard' : 'library';
@@ -386,7 +392,7 @@ function updateWorkspaceChrome() {
   const scopeLabel = isResourceType(state.type) ? engineLabel(state.resourceEngine) : state.type === 'voyage' ? engineLabel(LEGACY_ENGINE) : '';
   $('#sectionCrumb').textContent = (scopeLabel || ui('工作空间', 'Workspace', 'ワークスペース')) + ' / ' + t('tabs')[state.type];
   $('#libraryTitle').textContent = t('tabs')[state.type];
-  $('#workspaceScope').textContent = scopeLabel || ENGINES.map(engine => engine.label).join(' + ');
+  $('#workspaceScope').textContent = scopeLabel || ui('个人工作空间','Personal workspace');
   renderResourceEngines();
   renderSessionEngines();
   $('#projbar').hidden = !SCOPED.includes(state.type);
@@ -395,8 +401,8 @@ function updateWorkspaceChrome() {
   $('#libraryToggle').setAttribute('aria-expanded', 'false');
   syncPanelToggles();
   document.querySelectorAll('.tab').forEach(tab => {
-    tab.classList.toggle('active', tab.dataset.type === state.type);
-    tab.setAttribute('aria-current', tab.dataset.type === state.type ? 'page' : 'false');
+    tab.classList.toggle('active', tab.dataset.type === productNavParent(state.type));
+    tab.setAttribute('aria-current', tab.dataset.type === productNavParent(state.type) ? 'page' : 'false');
     tab.title = t('tabs')[tab.dataset.type];
     tab.setAttribute('aria-label', t('tabs')[tab.dataset.type]);
     const label = tab.querySelector('.nav-label'); if (label) label.textContent = t('tabs')[tab.dataset.type];
@@ -422,8 +428,8 @@ const LANGS = [
 const DEFAULT_LANG = 'zh';
 const I18N = {
   zh: {
-    tabs: { heartflow: '助理', guide: '使用指南', im: 'IM 接入', proxy: '机器与引擎', commands: '/ 命令', skills: '技能', agents: '智能体', plugins: '插件', config: '配置', workflows: '工作流', inspector: '抓包', sessions: '会话', voyage: '航程', stats: '工作台' },
-    typeLabel: { commands: '命令', skills: '技能', agents: '智能体', plugins: '插件', config: '配置', workflows: '工作流', inspector: '请求', sessions: '会话', voyage: '航程', stats: '工作台' },
+    tabs: { heartflow: '助理', settings: '设置', capabilities: '能力库', connections: '连接', tasks: '任务', today: '今日', guide: '使用指南', im: 'IM 接入', proxy: '机器与引擎', commands: '/ 命令', skills: '技能', agents: '智能体', plugins: '插件', config: '配置', workflows: '工作流', inspector: '请求诊断', sessions: '对话', voyage: '工作回顾', stats: '工作台' },
+    typeLabel: { commands: '命令', skills: '技能', agents: '智能体', plugins: '插件', config: '配置', workflows: '工作流', inspector: '请求', sessions: '对话', voyage: '工作回顾', stats: '工作台' },
     search: '搜索名称 / 描述…', mineOnly: '仅自建', all: '全部',
     newBtn: '＋ 新建', edit: '编辑', save: '保存', cancel: '取消', del: '删除', uninstall: '卸载', create: '创建',
     noSelection: '未选择', emptyHint: '← 从左侧选择一个资源，或点击「新建」',
@@ -476,7 +482,7 @@ const I18N = {
     },
   },
   en: {
-    tabs: { heartflow: 'Assistant', guide: 'User guide', im: 'IM connections', proxy: 'Machines & engines', commands: '/ Commands', skills: 'Skills', agents: 'Agents', plugins: 'Plugins', config: 'Config', workflows: 'Workflows', inspector: 'Inspector', sessions: 'Sessions', voyage: 'Voyage', stats: 'Overview' },
+    tabs: { heartflow: 'Assistant', settings: 'Settings', capabilities: 'Library', connections: 'Connections', tasks: 'Tasks', today: 'Today', guide: 'User guide', im: 'IM connections', proxy: 'Machines & engines', commands: '/ Commands', skills: 'Skills', agents: 'Agents', plugins: 'Plugins', config: 'Config', workflows: 'Workflows', inspector: 'Inspector', sessions: 'Sessions', voyage: 'Voyage', stats: 'Overview' },
     typeLabel: { commands: 'command', skills: 'skill', agents: 'agent', plugins: 'plugin', config: 'config', workflows: 'workflow', inspector: 'request', sessions: 'session', voyage: 'voyage', stats: 'stats' },
     search: 'Search name / description…', mineOnly: 'Mine', all: 'All',
     newBtn: '＋ New', edit: 'Edit', save: 'Save', cancel: 'Cancel', del: 'Delete', uninstall: 'Uninstall', create: 'Create',
@@ -530,7 +536,7 @@ const I18N = {
     },
   },
   ja: {
-    tabs: { heartflow: 'アシスタント', guide: '使い方ガイド', im: 'IM 接続', proxy: 'エンジンと接続', commands: '/ コマンド', skills: 'スキル', agents: 'エージェント', plugins: 'プラグイン', config: '設定', workflows: 'ワークフロー', inspector: 'キャプチャ', sessions: 'セッション', voyage: '航海', stats: 'ワークスペース' },
+    tabs: { heartflow: 'アシスタント', settings: '設定', capabilities: 'ライブラリ', connections: '接続', tasks: 'タスク', today: '今日', guide: '使い方ガイド', im: 'IM 接続', proxy: 'エンジンと接続', commands: '/ コマンド', skills: 'スキル', agents: 'エージェント', plugins: 'プラグイン', config: '設定', workflows: 'ワークフロー', inspector: 'キャプチャ', sessions: 'セッション', voyage: '航海', stats: 'ワークスペース' },
     typeLabel: { commands: 'コマンド', skills: 'スキル', agents: 'エージェント', plugins: 'プラグイン', config: '設定', workflows: 'ワークフロー', inspector: 'リクエスト', sessions: 'セッション', voyage: '航海', stats: 'ワークスペース' },
     search: '名前 / 説明を検索…', mineOnly: '自作のみ', all: 'すべて',
     newBtn: '＋ 新規', edit: '編集', save: '保存', cancel: 'キャンセル', del: '削除', uninstall: 'アンインストール', create: '作成',
@@ -608,6 +614,7 @@ const CAPS = {
   stats:    { new: false, edit: false, del: false, filter: false, dashboard: true },
 };
 // 支持项目作用域的专区
+for(const type of ['today','tasks','connections','capabilities','settings'])CAPS[type]={new:false,edit:false,del:false,filter:false,dashboard:true};
 const SCOPED = ['commands', 'skills', 'agents', 'workflows', 'config'];
 // resourceEngine is validated against the registry once /api/engines has loaded (see init).
 let state = { resourceEngine: localStorage.getItem('panel-resource-engine') || LEGACY_ENGINE, type: 'commands', items: [], current: null, editing: false, keyword: '', origin: 'user', scope: '', projects: [] };
@@ -615,10 +622,10 @@ let state = { resourceEngine: localStorage.getItem('panel-resource-engine') || L
 function renderResourceEngines() {
   const label = document.querySelector('[data-nav-group="资源管理"]');
   let host = $('#resource-engines');
-  if (!host) { host = document.createElement('div'); host.id = 'resource-engines'; host.className = 'resource-engine-switch'; host.setAttribute('role', 'group'); label.after(host); }
+  if (!host) { host = document.createElement('div'); host.id = 'resource-engines'; host.className = 'resource-engine-switch'; host.setAttribute('role', 'group'); $('#projbar').before(host); }
   host.setAttribute('aria-label', ui('资源引擎', 'Resource engine'));
   const engines = resourceEngines();
-  host.hidden = engines.length < 2;
+  host.hidden = engines.length < 2 || !isResourceType(state.type);
   host.innerHTML = engines.map(engine => `<button type="button" data-resource-engine="${esc(engine.id)}" class="${engineClass(engine.id)}" style="${engineStyle(engine.id)}" aria-pressed="${state.resourceEngine === engine.id}">${esc(engine.short)}</button>`).join('');
   host.querySelectorAll('button').forEach(button => button.onclick = async () => {
     if (state.resourceEngine === button.dataset.resourceEngine) return;
@@ -668,7 +675,7 @@ async function restoreRoute() {
   if (state.editing && !confirm(t('unsaved'))) { history.replaceState({}, '', previous); return; }
   state.editing = false;
   try {
-    const target = readRoute() || { type: Object.hasOwn(CAPS, localStorage.getItem('panel-section')) ? localStorage.getItem('panel-section') : 'stats', key: null, scope: '', view: '', engine: state.resourceEngine };
+    const target = readRoute() || { type: Object.hasOwn(CAPS, localStorage.getItem('panel-section')) ? localStorage.getItem('panel-section') : 'today', key: null, scope: '', view: '', engine: state.resourceEngine };
     if (isResourceType(target.type)) { state.resourceEngine = knownEngine(target.engine, defaultResourceEngine()); localStorage.setItem('panel-resource-engine', state.resourceEngine); }
     if (target.type === 'im' && target.channel) imSelectedChannel = target.channel;
     state.scope = SCOPED.includes(target.type) ? target.scope : '';
@@ -742,6 +749,41 @@ async function loadCounts() {
   }
 }
 
+async function renderProductPage(type) {
+  $('#empty').style.display='none';$('#metabar').style.display='none';$('#render').style.display='block';$('#render').classList.add('wide');
+  const root=$('#render');root.innerHTML='<p role="status">正在加载…</p>';
+  const tile=(target,title,description)=>`<button class="product-tile" data-product-target="${target}"><strong>${esc(title)}</strong><span>${esc(description)}</span><span aria-hidden="true">→</span></button>`;
+  const titles=t('tabs');
+  let body='';
+  try{
+    if(type==='today'||type==='tasks'){
+      const [taskResult,assistantResult]=await Promise.allSettled([api('GET','tasks'),api('GET','heartflow')]);if(state.type!==type)return;
+      const rows=taskResult.status==='fulfilled'?taskResult.value.items:[],assistant=assistantResult.status==='fulfilled'?assistantResult.value:null;
+      const active=rows.filter(t=>['running','preparing','queued','executing'].includes(t.state));
+      const attention=rows.filter(t=>['failed','unknown','blocked'].includes(t.state));
+      const pending=assistant?Object.values(assistant.proposals).filter(p=>p.state==='pending').length:null;
+      const labels={running:'进行中',executing:'进行中',preparing:'准备中',queued:'排队中',completed:'已完成',failed:'需要处理',unknown:'待核对',blocked:'需要处理',cancelled:'已取消',interrupted:'已中断'};
+      const list=items=>items.map(t=>`<article class="product-task"><span class="product-status">${esc(labels[t.state]||t.state)}</span><div><strong>${esc((t.prompt||'执行任务').slice(0,180))}</strong><small>${esc(new Date(t.updatedAt||t.createdAt).toLocaleString())}</small></div>${t.sessionId||t.conversationId?`<a href="/sessions/${encodeURIComponent(t.sessionId||t.conversationId)}">查看对话 →</a>`:''}</article>`).join('');
+      body=`${taskResult.status==='rejected'?'<p role="alert">任务记录暂时无法读取，请稍后刷新。</p>':''}<div class="product-summary">${tile('heartflow','待你确认 · '+(pending??'暂不可读'),'查看助理整理的判断与建议')}${tile('tasks','进行中 · '+active.length,'跟进已发起的任务')}${tile('connections','管理连接','消息渠道、执行设备与模型服务')}</div>`;
+      if(type==='today')body+=`<h3>正在推进</h3>${list(active.slice(0,8))||'<p class="product-empty">暂无正在执行的任务，可以从助理建议或新对话开始。</p>'}<h3>需要处理</h3>${list(attention.slice(0,5))||'<p class="product-empty">暂无执行异常。</p>'}${tile('sessions','开始对话','提出问题，或继续之前的工作')}`;
+      else body+=`<p class="product-muted">这里展示实际发起的执行任务及结果；讨论记录保留在对话中。</p><div class="product-filter"><label>状态 <select id="product-task-filter"><option value="all">全部</option><option value="active">进行中</option><option value="attention">需要处理</option><option value="completed">已完成</option></select></label></div><div id="product-task-list">${list(rows.slice(0,100))||'<p class="product-empty">还没有任务记录。</p>'}</div>`;
+      root._productTasks={rows,active,attention,list};
+    }else if(type==='connections'){
+      body=`<p class="product-muted">连接你的消息来源与执行环境。助理使用已授权的消息范围，任务使用可用的执行设备。</p><div class="product-grid">${tile('im','消息渠道','当前支持飞书 / Lark；更多渠道将在这里统一管理。')}${tile('proxy','执行设备与模型服务','管理任务运行位置、项目目录及模型账号。')}${tile('heartflow','助理关注范围','选择助理关注的聊天，以及通知与确认方式。')}</div><p class="product-note">机器人连接与个人聊天读取授权是不同能力。飞书机器人已连接，不代表助理可以读取你的所有聊天。</p>`;
+    }else if(type==='capabilities'){
+      body=`<p class="product-muted">把常用方法、专属助手和扩展能力放在一起，按需要选用。</p><label>适用工具 <select id="product-capability-engine">${resourceEngines().map(e=>`<option value="${esc(e.id)}" ${state.resourceEngine===e.id?'selected':''}>${esc(e.short)}</option>`).join('')}</select></label><div class="product-grid">${[['commands','快捷操作','复用常用指令，减少重复输入。'],['skills','技能','完成具体工作的知识与方法。'],['agents','专属助手','为不同工作准备合适的助手。'],['plugins','扩展','管理已安装的插件。'],['workflows','工作流','把多个步骤组织成可复用的流程。']].filter(([id])=>can(state.resourceEngine,'resources',id)).map(([id,title,description])=>tile(id,title,description)).join('')}</div>`;
+    }else{
+      body=`<div class="product-grid">${tile('config','偏好与指令','管理个人偏好及项目约定。')}${tile('connections','连接管理','消息渠道、设备与模型账号。')}${tile('guide','帮助与使用指南','了解如何开始对话和协作。')}</div><details class="product-advanced"><summary>高级工具</summary><p class="product-muted">需要排查问题或查看详细运行数据时使用。</p><div class="product-grid">${tile('inspector','请求诊断','查看模型请求、上下文和响应。')}${tile('stats','使用统计','查看用量、成本与运行情况。')}${tile('voyage','工作回顾','按时间回看历史活动；当前基于 Claude 记录。')}</div></details>`;
+    }
+    if(state.type!==type)return;
+    root.innerHTML=`<section class="product-page"><header><h1>${titles[type]}</h1><button class="btn" id="product-refresh">刷新</button></header>${body}</section>`;
+    root.querySelectorAll('[data-product-target]').forEach(b=>b.onclick=()=>switchType(b.dataset.productTarget));
+    $('#product-refresh').onclick=()=>renderProductPage(type);
+    if($('#product-capability-engine'))$('#product-capability-engine').onchange=e=>{state.resourceEngine=e.target.value;localStorage.setItem('panel-resource-engine',state.resourceEngine);renderResourceEngines();renderProductPage(type);};
+    if($('#product-task-filter'))$('#product-task-filter').onchange=e=>{const x=root._productTasks;const rows=e.target.value==='active'?x.active:e.target.value==='attention'?x.attention:e.target.value==='completed'?x.rows.filter(t=>t.state==='completed'):x.rows;$('#product-task-list').innerHTML=x.list(rows.slice(0,100))||'<p class="product-empty">此状态下没有任务。</p>';};
+  }catch(e){if(state.type===type)root.innerHTML=`<p role="alert">${esc(e.message)}</p>`;}
+}
+
 async function switchType(type, updateRoute = true) {
   if (isResourceType(type) && !can(state.resourceEngine, 'resources', type)) type = firstResourceType();
   clearCaptureSearch();
@@ -767,13 +809,14 @@ async function switchType(type, updateRoute = true) {
   $('#search').value = '';
   $('#search').placeholder = type === 'sessions' ? t('searchSessionsPh') : t('search');
   $('#footerBtns').style.display = type === 'config' && resourceCopy('bundle') !== false && state.resourceEngine === defaultResourceEngine() ? 'flex' : 'none';
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.type === type));
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.type === productNavParent(type)));
   $('#newbtn').style.display = CAPS[type].new ? 'block' : 'none';
   $('#newbtn').textContent = newBtnLabel(type);
   $('#filterbar').style.display = CAPS[type].filter ? 'flex' : 'none';
   $('#delBtn').textContent = type === 'plugins' ? t('uninstall') : t('del');
   localStorage.setItem('panel-section', type);
   showEmpty();
+  if (['today','tasks','connections','capabilities','settings'].includes(type)) { await renderProductPage(type); return; }
   if (type === 'guide') { renderUserGuide(); return; }
   if (type === 'proxy') { await renderProxyTab(); return; }
   if (type === 'heartflow') { await openHeartflow(); return; }
@@ -2321,6 +2364,15 @@ let navAnchor = workspaceNav;
 for (const type of ['stats', 'sessions', 'heartflow', 'inspector', 'proxy', 'im', 'voyage']) {
   const tab = document.querySelector(`.tab[data-type="${type}"]`); navAnchor.after(tab); navAnchor = tab;
 }
+// Keep technical routes accessible from hubs while simplifying primary navigation.
+for(const type of ['stats','inspector','proxy','im','voyage','commands','skills','agents','plugins','workflows','config'])document.querySelector(`.tab[data-type="${type}"]`).classList.add('product-hidden');
+const makeProductTab=(type,reference)=>{const tab=document.querySelector(`.tab[data-type="${reference}"]`).cloneNode(true);tab.classList.remove('product-hidden','active');tab.dataset.type=type;tab.querySelector('.cnt').textContent='';tab.onclick=()=>switchType(type);return tab;};
+const productTabs={today:makeProductTab('today','stats'),tasks:makeProductTab('tasks','workflows'),connections:makeProductTab('connections','im'),capabilities:makeProductTab('capabilities','skills'),settings:makeProductTab('settings','config')};
+let productAnchor=workspaceNav;
+for(const type of ['today','heartflow','tasks','sessions']){const tab=productTabs[type]||document.querySelector(`.tab[data-type="${type}"]`);productAnchor.after(tab);productAnchor=tab;}
+const managementNav=document.querySelector('[data-nav-group="资源管理"]');
+managementNav.after(productTabs.connections);productTabs.connections.after(productTabs.capabilities);
+document.querySelector('.tab[data-type="guide"]').before(productTabs.settings);
 // ---------- 语言切换 ----------
 function applyLang() {
   document.documentElement.lang = lang;
@@ -2328,7 +2380,7 @@ function applyLang() {
   if (!sel.options.length) LANGS.forEach(l => sel.add(new Option(l.label, l.code)));
   sel.value = lang;
   document.querySelectorAll('.tab').forEach(tb => { tb.querySelector('.nav-label').textContent = t('tabs')[tb.dataset.type]; });
-  document.querySelectorAll('[data-nav-group]').forEach(el => { el.textContent = el.dataset.navGroup === '工作空间' ? ui('工作空间', 'Workspace', 'ワークスペース') : ui('资源管理', 'Resources', 'リソース'); });
+  document.querySelectorAll('[data-nav-group]').forEach(el => { el.textContent = el.dataset.navGroup === '工作空间' ? ui('工作', 'Work', '仕事') : ui('管理', 'Manage', '管理'); });
   $('#localLabel').textContent = ui('本地工作区', 'Local workspace', 'ローカル環境');
   $('#libraryToggle').setAttribute('aria-label', ui('打开资源列表', 'Open resource list', 'リソース一覧を開く'));
   $('#search').setAttribute('aria-label', t('search'));
@@ -2364,6 +2416,7 @@ async function setLang(code) {
   if (state.type === 'proxy') { await renderProxyTab(); return; }
   if (state.type === 'sessions' && $('#chat-messages') && !chatAbort) { chatView.sessionId ? openSessionChat(chatView.sessionId) : renderChat(); return; }
   if (state.type === 'voyage') { await renderVoyage(); return; }
+  if (['today','tasks','connections','capabilities','settings'].includes(state.type)) { await renderProductPage(state.type); return; }
   if (CAPS[state.type].dashboard) { await renderStatsTab(); loadCounts(); return; }
   const cur = state.current;
   const type = state.type;
