@@ -36,7 +36,10 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
       if(!result)continue;
       store.transaction(s=>{const current=s.proposals[p.id];if(current.version!==p.version)return;
         if(JSON.stringify(require('./heartflow-followup').relatedMessages(current,s).map(m=>[m.id,m.revision]))!==JSON.stringify(result.messages.map(m=>[m.id,m.revision])))throw new Error('群聊消息已变化，请重新核对');
+        const contextChanged=current.followupFingerprint!==result.fingerprint;
         current.followupFingerprint=result.fingerprint;
+        const topicChanged=contextChanged&&result.topic&&JSON.stringify(result.topic)!==JSON.stringify(current.topic);
+        if(topicChanged){current.topic=result.topic;current.version++;current.updatedAt=now();if(['changed','cancelled'].includes(result.topic.status))current.sourceChanged=true;}
         if(!result.resolutions.length)return;
         current.resolutions=[...(current.resolutions||[]),...result.resolutions];
         current.resolvedActions=[...(current.resolvedActions||[]),...current.actions.filter(a=>result.resolutions.some(r=>r.actionId===a.id))];
@@ -76,15 +79,15 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
       await followups();
       await verify();
       const s=store.snapshot(),covered=new Set(Object.values(s.proposals).flatMap(p=>p.messageIds));
-      const messages=Object.values(s.messages).filter(m=>!m.deleted && (m.senderId!==s.config.selfId || Object.values(s.proposals).some(p=>['pending','deferred'].includes(p.state)&&p.messageIds.some(id=>s.messages[id]?.chatId===m.chatId))) && m.createdAt>=s.config.since && (!covered.has(m.id)||Object.values(s.proposals).some(p=>p.sourceChanged&&p.messageIds.includes(m.id))) && s.cursor['analyzed:'+m.id]!==m.revision).sort((a,b)=>a.createdAt-b.createdAt).slice(0,30);
+      const messages=Object.values(s.messages).filter(m=>!m.deleted && m.createdAt>=s.config.since && (!covered.has(m.id)||Object.values(s.proposals).some(p=>p.sourceChanged&&p.messageIds.includes(m.id))) && s.cursor['analyzed:'+m.id]!==m.revision).sort((a,b)=>a.createdAt-b.createdAt).slice(0,30);
       if(!messages.length){store.transaction(next=>{next.source.lastAnalysis=now();next.source.analysisError='';});return {created:0};}
       const catalog=(await sessions()).slice(0,100),candidates=catalog.map(x=>({id:x.id,title:x.title,engine:x.engine,machineId:x.machineId,cwd:x.project,latestPrompt:x.latestPrompt?.slice(0,600),running:x.running}));
       const chats=new Set(messages.map(m=>m.chatId));
       const learning=s.checks.filter(c=>c.learning && (Array.isArray(c.before)?c.before.flatMap(p=>p.messageIds||[]):c.before?.messageIds||[]).some(id=>chats.has(s.messages[id]?.chatId))).slice(-20).map(c=>({decision:c.decision,reason:c.reason,before:c.before,after:c.after,approvedActions:c.approvedActions,sourceMessages:(Array.isArray(c.before)?c.before.flatMap(p=>p.messageIds||[]):c.before?.messageIds||[]).map(id=>s.messages[id]).filter(Boolean).map(m=>({id:m.id,senderId:m.senderId,senderName:m.senderName,chatId:m.chatId,text:m.text,createdAt:m.createdAt}))}));
-      const threadKeys=new Set(messages.map(m=>m.chatId+':'+m.threadId).filter(k=>!k.endsWith(':')));
-      const supportingMessages=Object.values(s.messages).filter(m=>!messages.some(x=>x.id===m.id) && (messages.some(x=>x.parentId===m.id || x.chatId===m.chatId && Math.abs(x.createdAt-m.createdAt)<15*60000)||threadKeys.has(m.chatId+':'+m.threadId))).slice(-20);
+      const supportingMessages=require('./heartflow-context').topicContext(messages,s).filter(m=>!messages.some(x=>x.id===m.id));
       const pending=Object.values(s.proposals).filter(p=>['pending','deferred'].includes(p.state)).slice(-50).map(p=>({id:p.id,title:p.title,summary:p.summary,messageIds:p.messageIds,actions:p.actions}));
-      const context={pending,supportingMessages,selfId:s.config.selfId,messages,matters:Object.values(s.matters).slice(-100),sessions:candidates,learning};
+      const recentTopics=Object.values(s.proposals).slice(-50).map(p=>({id:p.id,title:p.title,state:p.state,topic:p.topic,messageIds:p.messageIds,resolutions:p.resolutions}));
+      const context={recentTopics,pending,supportingMessages,selfId:s.config.selfId,messages,matters:Object.values(s.matters).slice(-100),sessions:candidates,learning};
       const result=await analyze(context,s.config.model);let created=0;
       const latest=store.snapshot();if([...messages,...supportingMessages].some(m=>latest.messages[m.id]?.revision!==m.revision))throw new Error('分析期间来源消息已更新，将在下次重新分析');
       for(const draft of result.suggestions){
@@ -143,6 +146,7 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
         await followups(id,true);
         await verify(id,true);
         const p=store.snapshot().proposals[id],draft=input.draft||p;if(!draft)throw new Error('建议不存在');
+        if(p.sourceChanged&&['changed','cancelled'].includes(p.topic?.status))throw new Error('话题已改变行动范围，请先核对并保存行动，再确认执行');
         const all=await sessions();for(const a of draft.actions||[]){if(input.actionIds&&!input.actionIds.includes(a.id))continue;if(a.sessionId){const target=all.find(s=>s.id===a.sessionId);if(!target)throw new Error('目标会话不在当前可访问列表，请刷新后改派');if(a.machineId!==target.machineId || a.cwd!==target.project || a.engine!==target.engine)throw new Error('目标会话的位置或引擎已变化，请重新选择会话');}}
       }
       const p=store.review(id,input);if(input.decision==='approve')setImmediate(()=>deliver().catch(()=>{}));return p;

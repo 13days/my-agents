@@ -50,7 +50,7 @@ async function hfDo(button,fn) {
 function hfMessage(m, selectable=false, data=null) {
   if(!m)return '';
   const links=data?Object.values(data.proposals).filter(p=>p.messageIds.includes(m.id)):[];
-  const outcome=links.map(p=>`<p>${hfState(p.state)} ${esc(p.title)}${p.resolutions?.length?' · '+esc(p.resolutions.map(r=>r.reason).join('；')):''}</p>`).join('');
+  const outcome=links.map(p=>`${hfTopic(p)}<p>${hfState(p.state)} ${esc(p.title)}${p.resolutions?.length?' · '+esc(p.resolutions.map(r=>r.reason).join('；')):''}</p>`).join('');
   return `<article class="hf-source">${selectable?`<input type="checkbox" data-hf-msg="${esc(m.id)}" aria-label="选择来源消息">`:''}<strong>${esc(m.chatName)}</strong><small>${esc(m.senderName && m.senderName!==m.senderId ? m.senderName : '姓名未解析 · '+m.senderId)} · ${esc(hfTime(m.createdAt))}</small><p>${esc(m.text)}</p>${outcome}${m.deleted?'<b>消息已撤回</b>':''}<small>${esc(m.id)}${m.parentId?' · 回复 '+esc(m.parentId):''}</small></article>`;
 }
 function hfPending(data) {
@@ -62,10 +62,15 @@ function hfPending(data) {
   document.querySelectorAll('[data-hf-select]').forEach(b=>b.onclick=()=>{heartflowSelected=b.dataset.hfSelect;hfPending(data);});
   const p=data.proposals[heartflowSelected];if(p)hfDetail(p,data);
 }
+function hfTopic(p) {
+  if(!p.topic)return '';
+  const labels={discussing:'讨论中',decided:'已形成决定',changed:'范围已变化',cancelled:'已撤销',reported_complete:'群内反馈已完成'};
+  return `<section class="hf-card"><strong>话题最新状态：${esc(labels[p.topic.status]||p.topic.status)}</strong><p>${esc(p.topic.summary)}</p><details><summary>查看判断依据</summary>${p.topic.evidence.map(e=>`<p>${esc(e.senderName||e.senderId)} · ${esc(hfTime(e.timestamp))}</p><pre>${esc(e.quote)}</pre>`).join('')}</details>${p.sourceChanged?'<p class="hf-error">请根据最新决定核对并保存行动范围。</p>':''}</section>`;
+}
 function hfDetail(p,data) {
   const actions=JSON.parse(JSON.stringify(p.actions));
   $('#hf-detail').innerHTML=`<div class="hf-card"><div class="hf-toolbar">${hfState(p.state)}<span>版本 ${p.version} · ${p.model?'模型 '+esc(p.model):'人工整理'}</span></div>${p.sourceChanged?'<p class="hf-error">来源有更新，请重新核对摘要与执行范围。</p>':''}
-    <label>事项建议<input id="hf-title" value="${esc(p.title)}" maxlength="160"></label><label>汇总<textarea id="hf-summary" rows="3">${esc(p.summary)}</textarea></label><p class="hf-reason">推荐依据：${esc(p.reason||'人工整理')}</p>
+    ${hfTopic(p)}<label>事项建议<input id="hf-title" value="${esc(p.title)}" maxlength="160"></label><label>汇总<textarea id="hf-summary" rows="3">${esc(p.summary)}</textarea></label><p class="hf-reason">推荐依据：${esc(p.reason||'人工整理')}</p>
     <label>关联事项（可多选）<select id="hf-matters" multiple size="3">${Object.values(data.matters).map(m=>`<option value="${m.id}" ${p.matterIds.includes(m.id)?'selected':''}>${esc(m.title)}</option>`).join('')}</select></label><button class="btn" id="hf-create-matter">以此标题创建事项并关联</button>
     <h3>行动与目标会话</h3><div id="hf-actions"></div><button class="btn" id="hf-add-action">＋ 增加行动</button>
     <label>Check 说明 / 忽略原因<input id="hf-feedback" placeholder="例如：应归到个人 Tag，会话不要新建"></label>

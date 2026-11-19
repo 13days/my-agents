@@ -36,7 +36,7 @@ test('model receives check feedback and own supporting replies, cannot invent so
  const {store}=setup(t);store.configure({since:Date.now()-60000,selfId:'me'});const old=draft(store);store.review(old.id,{version:1,decision:'ignore',reason:'只在创建时关闭'});
  store.ingest([{id:'m3',chatId:'oc_a',text:'请修改默认配置',threadId:'thread',senderId:'other',createdAt:Date.now(),updatedAt:1},{id:'m4',chatId:'oc_a',text:'只在创建时关闭',threadId:'thread',senderId:'me',createdAt:Date.now(),updatedAt:1}]);
  let context;const flow=createHeartflow({store,source:{},sessions:async()=>[{id:'known',engine:'codex',machineId:'mac',project:'/work'}],analyze:async c=>{context=c;return {model:'test',suggestions:[{title:'修改',summary:'默认值',reason:'@用户',messageIds:['m3'],actions:[action('a','invented')]}]};},dispatch:()=>{throw Error('must not execute');}});
- await flow.suggest();assert.equal(context.learning.length,1);assert.ok(context.supportingMessages.some(m=>m.id==='m4')); assert.equal(Object.values(store.snapshot().proposals).at(-1).actions.length,0);
+ await flow.suggest();assert.equal(context.learning.length,1);assert.ok([...context.messages,...context.supportingMessages].some(m=>m.id==='m4')); assert.equal(Object.values(store.snapshot().proposals).at(-1).actions.length,0);
  store.learning(store.snapshot().checks[0].id,false);assert.equal(store.snapshot().checks[0].learning,false);
 });
 test('personal message pagination persists continuation across bounded ticks without dropping burst messages',async t=>{
@@ -113,10 +113,10 @@ test('group followup supersedes a pending action without any session history',as
  let calls=0;const flow=createHeartflow({store,source:{},sessions:async()=>[],analyze:async c=>{calls++;assert.equal(c.mode,'followup');assert.equal(c.messages.find(m=>m.id==='later').senderName,'请求人');return {suggestions:[],resolutions:[{actionId:p.actions[0].id,status:'superseded',reason:'请求人明确取消',evidence:[{messageId:'later',quote:'先不做默认回复模式的限制，取消刚刚的配置'}]}]};}});
  await flow.followups();await flow.followups();const next=store.snapshot().proposals[p.id];assert.equal(calls,1);assert.equal(next.state,'superseded');assert.equal(next.resolutions[0].evidence[0].senderId,'requester');assert.ok(next.messageIds.includes('later'));await assert.rejects(flow.review(p.id,{version:1,decision:'approve'}));
 });
-test('reply-chain matching excludes other topics and caches unchanged checks',async t=>{
+test('broad topic candidates allow the model to reject other topics and cache unchanged checks',async t=>{
  const {store}=setup(t),p=draft(store);
  store.ingest([{id:'other',chatId:'oc_a',parentId:'unrelated',senderId:'someone',text:'取消别的项目的配置修改',createdAt:Date.now()+1000,updatedAt:1}]);
- let calls=0;const flow=createHeartflow({store,source:{},sessions:async()=>[],analyze:async c=>{calls++;assert.ok(!c.messages.some(m=>m.id==='other'));return {suggestions:[],resolutions:[{actionId:p.actions[0].id,status:'superseded',evidence:[{messageId:'other',quote:'取消别的项目的配置修改'}]}]};}});
+ let calls=0;const flow=createHeartflow({store,source:{},sessions:async()=>[],analyze:async c=>{calls++;assert.ok(c.messages.some(m=>m.id==='other'));return {suggestions:[],resolutions:[]};}});
  await flow.followups();await flow.followups();assert.equal(calls,1);assert.equal(store.snapshot().proposals[p.id].state,'pending');
 });
 test('names enrich existing sender identities without changing source versions',t=>{
@@ -124,4 +124,22 @@ test('names enrich existing sender identities without changing source versions',
  store.ingest([normalizeMessage(base)]);const revision=store.snapshot().messages.identity.revision;
  store.ingest([normalizeMessage({...base,message_id:'mention',sender:{id:'ou_other'},mentions:[{id:'ou_person',name:'张三',key:'@_1'}]})]);
  store.ingest([normalizeMessage(base)]);assert.equal(store.snapshot().messages.identity.senderName,'张三');assert.equal(store.snapshot().messages.identity.revision,revision);
+});
+
+test('unthreaded decisions without mentions update a topic and invalidate old approval',async t=>{
+ const {store}=setup(t),p=draft(store);
+ store.ingest([{id:'decision',chatId:'oc_a',senderId:'owner',text:'最终只调整团队版本，个人版本保持原样',createdAt:Date.now()+1000,updatedAt:1}]);
+ const flow=createHeartflow({store,source:{},sessions:async()=>[],analyze:async c=>{assert.ok(c.messages.some(m=>m.id==='decision'));return {suggestions:[],topic:{status:'changed',summary:'范围改为团队版本',evidence:[{messageId:'decision',quote:'最终只调整团队版本，个人版本保持原样'}]},resolutions:[]};}});
+ await flow.followups();const next=store.snapshot().proposals[p.id];assert.equal(next.topic.status,'changed');assert.equal(next.version,2);assert.equal(next.sourceChanged,true);await assert.rejects(flow.review(p.id,{version:2,decision:'approve'}),/核对并保存/);assert.equal(Object.keys(store.snapshot().deliveries).length,0);
+});
+test('topic retrieval keeps sources, expands same-chat discussion, and limits cross-chat links',t=>{
+ const {topicContext}=require('../core/heartflow-context');const {store}=setup(t);const at=Date.now();
+ store.ingest([{id:'anchor',chatId:'oc_a',senderId:'me',text:'处理 https://example.com/tasks/123',createdAt:at,updatedAt:1},
+ {id:'cross',chatId:'oc_b',senderId:'other',text:'https://example.com/tasks/123 范围已经变了',createdAt:at+1,updatedAt:1},
+ {id:'irrelevant',chatId:'oc_c',text:'取消另一个任务 https://example.com/tasks/999',createdAt:at+2,updatedAt:1}]);
+ const s=store.snapshot(),ids=topicContext([s.messages.anchor],s).map(m=>m.id);assert.ok(ids.includes('anchor'));assert.ok(ids.includes('cross'));assert.ok(!ids.includes('irrelevant'));
+});
+test('a new followup arriving during interpretation prevents applying a stale conclusion',async t=>{
+ const {store}=setup(t),p=draft(store);let release;const model=new Promise(r=>release=r);
+ const flow=createHeartflow({store,source:{},sessions:async()=>[],analyze:()=>model});const result=flow.followups();await new Promise(r=>setImmediate(r));store.ingest([{id:'newer',chatId:'oc_a',senderId:'me',text:'仍然按原方案执行，不撤回',createdAt:Date.now()+1000,updatedAt:1}]);release({suggestions:[],resolutions:[]});await assert.rejects(result,/群聊消息已变化/);assert.equal(store.snapshot().proposals[p.id].state,'pending');
 });
