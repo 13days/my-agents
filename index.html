@@ -773,7 +773,7 @@ async function renderProductPage(type) {
     }else if(type==='capabilities'){
       body=`<p class="product-muted">把常用方法、专属助手和扩展能力放在一起，按需要选用。</p><label>适用工具 <select id="product-capability-engine">${resourceEngines().map(e=>`<option value="${esc(e.id)}" ${state.resourceEngine===e.id?'selected':''}>${esc(e.short)}</option>`).join('')}</select></label><div class="product-grid">${[['commands','快捷操作','复用常用指令，减少重复输入。'],['skills','技能','完成具体工作的知识与方法。'],['agents','专属助手','为不同工作准备合适的助手。'],['plugins','扩展','管理已安装的插件。'],['workflows','工作流','把多个步骤组织成可复用的流程。']].filter(([id])=>can(state.resourceEngine,'resources',id)).map(([id,title,description])=>tile(id,title,description)).join('')}</div>`;
     }else{
-      body=`<div class="product-grid">${tile('config','偏好与指令','管理个人偏好及项目约定。')}${tile('connections','连接管理','消息渠道、设备与模型账号。')}${tile('guide','帮助与使用指南','了解如何开始对话和协作。')}</div><details class="product-advanced"><summary>高级工具</summary><p class="product-muted">需要排查问题或查看详细运行数据时使用。</p><div class="product-grid">${tile('inspector','请求诊断','查看模型请求、上下文和响应。')}${tile('stats','使用统计','查看用量、成本与运行情况。')}${tile('voyage','工作回顾','按时间回看历史活动；当前基于 Claude 记录。')}</div></details>`;
+      body=`<div class="product-grid">${tile('config','偏好与指令','管理个人偏好及项目约定。')}${tile('connections','连接管理','消息渠道、设备与模型账号。')}${tile('guide','帮助与使用指南','了解如何开始对话和协作。')}</div><section class="product-advanced"><h3>工具与记录</h3><p class="product-muted">需要排查问题或查看详细运行数据时使用。</p><div class="product-grid">${tile('inspector','请求诊断','查看模型请求、上下文和响应。')}${tile('stats','使用统计','查看用量、成本与运行情况。')}${tile('voyage','工作回顾','按时间回看历史活动；当前基于 Claude 记录。')}</div></section>`;
     }
     if(state.type!==type)return;
     root.innerHTML=`<section class="product-page"><header><h1>${titles[type]}</h1><button class="btn" id="product-refresh">刷新</button></header>${body}</section>`;
@@ -785,10 +785,12 @@ async function renderProductPage(type) {
 }
 
 async function switchType(type, updateRoute = true) {
+  if(updateRoute&&type==='sessions'&&state.type==='sessions'&&$('#chat-messages'))return;
   if (isResourceType(type) && !can(state.resourceEngine, 'resources', type)) type = firstResourceType();
   clearCaptureSearch();
   if (state.editing && !confirm(t('unsaved'))) return;
   closeExpandedWindow();
+  if(state.type==='sessions'){rememberChatPage();sessionNavigation={items:state.items.slice(),current:chatView.sessionId||($('#chat-messages')?'__draft__':''),keyword:state.keyword,scroll:$('#list').scrollTop,page:{...listPage}};}
   ++detailRevision;
   routeView = '';
   state.sessionDetail = false;
@@ -824,7 +826,13 @@ async function switchType(type, updateRoute = true) {
   if (type === 'voyage') { await renderVoyage(); return; }
   if (CAPS[type].dashboard) { await renderStatsTab(); return; }
   if (type === 'inspector') startInspectorPoll(); else stopInspectorPoll();
-  if (type === 'sessions') startRoutePoll();
+  if (type === 'sessions') {
+    if(sessionNavigation){state.items=sessionNavigation.items;state.keyword=sessionNavigation.keyword;$('#search').value=state.keyword;listPage={...sessionNavigation.page};renderList();$('#list').scrollTop=sessionNavigation.scroll;
+      if(updateRoute&&sessionNavigation.current){if(sessionNavigation.current==='__draft__'){state.current=null;restoreChatPage('__draft__');}else openSessionChat(sessionNavigation.current);}
+      startRoutePoll();return;
+    }
+    startRoutePoll();
+  }
   try {
     const resourceEngine = state.resourceEngine, scope = state.scope;
     const { items, usagePending } = await api('GET', type);
@@ -977,7 +985,7 @@ function editSession(item, action) {
     e.preventDefault(); const submit = dialog.querySelector('button[type="submit"]'); submit.disabled = true;
     try {
       const result = await api(removing ? 'DELETE' : 'PATCH', `sessions/${encodeURIComponent(id)}`, removing ? undefined : { title: input.value });
-      if (removing) state.items = state.items.filter(it => it.key !== id);
+      if (removing) {state.items = state.items.filter(it => it.key !== id);chatPageCache.delete(id);if(sessionNavigation?.current===id)sessionNavigation.current='';}
       else { item.name = result.title; item.titleSource = 'manual'; const stored = state.items.find(it => it.key === id); if (stored) { stored.name = result.title; stored.titleSource = 'manual'; } }
       if (state.type === 'sessions') {
         renderList(); document.querySelector('.tab[data-type="sessions"] .cnt').textContent = state.items.length;
@@ -1008,6 +1016,7 @@ async function openItem(key, displayName) {
   closeExpandedWindow();
   if (state.type === 'inspector') return openInspect(key);
   if (state.type === 'sessions' && !state.sessionDetail && chatView.sessionId === key && chatView.run && $('#chat-messages')) return;
+  rememberChatPage();
   chatAbort?.abort();
   // 会话默认打开为可接续的对话；“详情”按钮才走原来的说明页
   if (state.type === 'sessions' && !state.sessionDetail) return openSessionChat(key);
@@ -2528,6 +2537,28 @@ async function loadChatModels(force = false) {
 }
 function replayLabel(engine) { const name = engineLabel(engine, true); return rt(`查看 ${name} 提示词`, `View ${name} prompts`, `${name} のプロンプトを表示`); }
 let chatScrollObserver = null;
+const chatPageCache = new Map();
+let sessionNavigation = null;
+function rememberChatPage() {
+  if(state.type!=='sessions'||!$('#chat-messages'))return;
+  const key=chatView.sessionId||'__draft__',box=$('#chat-messages');
+  chatPageCache.delete(key);
+  chatPageCache.set(key,{view:chatView,nodes:Array.from($('#render').childNodes),title:$('#title').firstChild.textContent,path:$('#fpath').textContent,scroll:box.scrollTop});
+  while(chatPageCache.size>8)chatPageCache.delete(chatPageCache.keys().next().value);
+}
+function restoreChatPage(key) {
+  const cached=chatPageCache.get(key);if(!cached)return false;
+  chatPageCache.delete(key);chatPageCache.set(key,cached);
+  chatScrollObserver?.disconnect();chatView=cached.view;
+  chatChrome(state.items.find(item=>item.key===key)?.name||cached.title,cached.path);
+  $('#render').replaceChildren(...cached.nodes);
+  const box=$('#chat-messages');box.scrollTop=cached.scroll;box.updateScrollControls?.();
+  chatScrollObserver=new ResizeObserver(()=>box.updateScrollControls?.());chatScrollObserver.observe(box);
+  // Catch up without hiding the cached transcript or sending another prompt.
+  const refresh=()=>{if(state.type==='sessions'&&chatView===cached.view)refreshOpenChat();};
+  if(chatView.run)chatView.run.finished.then(refresh);else refresh();
+  return true;
+}
 let chatView = { sessionId: '', cwd: '', messages: [] };
 // 每个会话的代理账号：Claude Code 请求里带 session id，代理据此记录实时账号，也可把单个会话固定到某个账号
 let routeInfo = null, routeTimer = null, sessionListEpoch = 0, sessionListRefreshing = false, openChatRefreshing = false;
@@ -2788,6 +2819,7 @@ async function openNewChat() {
     cwd = result.path;
   } catch (e) { toast(e.message, false); return; }
   finally { choosingChatProject = false; button.disabled = false; }
+  rememberChatPage();
   chatAbort?.abort();
   state.current = null; routeView = ''; writeRoute(); renderList();
   sessionEngine = 'all'; localStorage.setItem('panel-session-engine', 'all'); renderSessionEngines();
@@ -2795,10 +2827,13 @@ async function openNewChat() {
   chatChrome(ui('新对话', 'New chat', '新しいチャット'), '');
   renderChat();
 }
-async function openSessionChat(id) {
+async function openSessionChat(id, { fresh=false } = {}) {
+  rememberChatPage();
+  chatAbort?.abort();
   closeExpandedWindow();
   const revision = ++detailRevision;
   state.current = id; routeView = ''; writeRoute(); renderList();
+  if(!fresh&&restoreChatPage(id))return;
   chatChrome(ui('会话', 'Session', 'セッション'), '');
   $('#render').innerHTML = `<p class="route-muted">${esc(rt('正在读取会话…', 'Loading session…'))}</p>`;
   try {
@@ -3317,7 +3352,7 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
       if (lost.status === 404 && resume && attempt) {
         // The run finished while we were away: show the saved transcript instead of a half-replayed stream.
         run.ended = true; run.lastStatus = rt('任务已结束', 'Task finished', 'タスクは終了しました');
-        if (visible() && state.type === 'sessions' && state.current === v.sessionId) setTimeout(() => openSessionChat(v.sessionId));
+        if (visible() && state.type === 'sessions' && state.current === v.sessionId) setTimeout(() => openSessionChat(v.sessionId,{fresh:true}));
         break;
       }
       // Only resume once the server has acknowledged the run; retrying a POST that never landed could send the prompt twice.
