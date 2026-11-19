@@ -52,6 +52,10 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
           current.actions=current.completionActions||[];delete current.completionActions;current.state='pending';current.sourceChanged=true;
           current.version++;current.updatedAt=now();return;
         }
+        if(result.exclusion){
+          current.exclusion={...result.exclusion,at:now()};current.state='ignored';
+          current.version++;current.updatedAt=now();current.sourceChanged=false;return;
+        }
         if(result.completion){
           current.completion={...result.completion,at:now()};
           current.completionActions=current.actions;current.actions=[];
@@ -109,6 +113,7 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
       const result=await analyze(context,s.config.model);let created=0;
       const latest=store.snapshot();if([...messages,...supportingMessages,...context.topicMemories.flatMap(m=>m.refs)].some(m=>latest.messages[m.id]?.revision!==m.revision))throw new Error('分析期间来源消息已更新，将在下次重新分析');
       for(const draft of result.suggestions){
+        if(draft.responsibility==='delegated_others')continue;
         if((draft.messageIds||[]).some(id=>messages.some(m=>m.id===id&&!m.textComplete)))continue;
         if(!Array.isArray(draft.messageIds)||!draft.messageIds.length||draft.messageIds.some(id=>![...messages,...supportingMessages].some(m=>m.id===id)) || !draft.messageIds.some(id=>messages.some(m=>m.id===id)))continue;
         if((draft.matterIds||[]).some(id=>!s.matters[id]))continue;

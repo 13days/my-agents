@@ -5,7 +5,7 @@ async function inspectFollowup(p,state,analyze,force=false,now=Date.now()) {
   if(!force && p.lastFollowupCheck && now-p.lastFollowupCheck<(state.config.checkIntervalSeconds??600)*1000)return null;
   const messages=relatedMessages(p,state);
   if(!messages.length)return null;
-  const fingerprint=createHash('sha256').update(JSON.stringify([p.actions,messages])).digest('hex');
+  const fingerprint=createHash('sha256').update(JSON.stringify(['responsibility-v1',p.actions,messages])).digest('hex');
   if(!force&&p.followupFingerprint===fingerprint)return null;
   const result=await analyze({mode:'followup',selfId:state.config.selfId,proposal:{id:p.id,title:p.title,summary:p.summary,actions:p.actions,state:p.state,completion:p.completion},messages:messages.map(require('./heartflow-compact').compactMessage)},state.config.model);
   const resolutions=[];
@@ -40,6 +40,12 @@ async function inspectFollowup(p,state,analyze,force=false,now=Date.now()) {
     });
     if(evidence.length&&evidence.length<=10&&evidence.every(Boolean))completion={source:'conversation',reason:c.reason.slice(0,2000),evidence};
   }
-  return {fingerprint,resolutions,messages,topic,completion:result.completion?completion:null,reopen:result.reopen&&!result.completion?completion:null};
+  let exclusion=null;
+  const x=result.exclusion;
+  if(state.config.selfId&&x?.scope==='entire_proposal'&&x.kind==='delegated_others'&&typeof x.reason==='string'&&x.reason.trim()){
+    const evidence=(x.evidence||[]).map(e=>{const m=messages.find(m=>m.id===e.messageId);return m&&!m.deleted&&m.senderId===state.config.selfId&&typeof e.quote==='string'&&e.quote.trim().length>=2&&m.text.includes(e.quote)?{id:m.id,revision:m.revision,senderId:m.senderId,quote:e.quote}:null;});
+    if(evidence.length&&evidence.length<=10&&evidence.every(Boolean))exclusion={kind:x.kind,reason:x.reason.slice(0,2000),evidence};
+  }
+  return {fingerprint,resolutions,messages,topic,exclusion,completion:result.completion?completion:null,reopen:result.reopen&&!result.completion?completion:null};
 }
 module.exports={inspectFollowup,relatedMessages};
