@@ -36,7 +36,7 @@ function createCodexEngine({ sessions, nativeSessions = null, capture = () => nu
       // Resumed threads keep their original provider: terminal threads (openai) cannot move to the panel and vice versa.
       const provider = sessionId ? sessions.provider(sessionId) : '';
       const relayed = routeEnv?.MY_AGENTS_CODEX_BASE && routeEnv[RELAY_TOKEN_ENV] ? routeEnv : null;
-      const proxy = relayed ? { config: codexRelayConfig(relayed.MY_AGENTS_CODEX_BASE, { accountId: relayed.MY_AGENTS_CODEX_ACCOUNT || accountId }) } : capture({ provider, accountId });
+      const proxy = relayed ? { config: codexRelayConfig(relayed.MY_AGENTS_CODEX_BASE, { accountId: relayed.MY_AGENTS_CODEX_ACCOUNT || accountId, provider: provider || 'panel' }) } : capture({ provider, accountId });
       const info = resolveCodex({ env });
       let stopping = false, closed = false;
       const close = () => {
@@ -46,7 +46,7 @@ function createCodexEngine({ sessions, nativeSessions = null, capture = () => nu
         onClosed();
       };
       const runner = createCodexRunner({
-        cli: info.path, cwd, threadId: sessionId, model, config: proxy?.config || [],
+        cli: info.path, cwd, threadId: sessionId, model, config: [...(proxy?.config || []), ...(provider ? [`model_provider=${JSON.stringify(provider)}`] : [])],
         env: codexEnvironment({ ...env, ...(proxy?.env || {}), ...(relayed ? { [RELAY_TOKEN_ENV]: relayed[RELAY_TOKEN_ENV], NO_PROXY: relayed.NO_PROXY, no_proxy: relayed.no_proxy } : {}), PWD: cwd }, info), spawnImpl: host.spawn, tmpDir: host.join(host.tmpDir(), 'my-agents-codex'),
         emit: (event, data) => {
           emit(event, data);

@@ -225,3 +225,37 @@ test('an exhausted egress with HTTP 502 still follows account-pool failover', as
   const response = await fetch(`http://127.0.0.1:${server.address().port}/backend-api/codex/responses`, { method: 'POST', headers: { authorization: 'Bearer pool' }, body: '{}' });
   assert.equal(response.status, 200); await response.text(); assert.deepEqual(sent, ['Bearer broken', 'Bearer healthy']); assert.equal(failed.sent.length, 1);
 });
+
+for (const provider of ['openai', 'panel', 'custom-provider']) {
+  for (const relayed of [false, true]) {
+    test(`resuming ${provider} preserves its identity with relay=${relayed}`, async () => {
+      const spawned = [];
+      const host = { ...createLocalHost(), spawn(cli, args, options) {
+        spawned.push({ args, env: options.env });
+        const child = new EventEmitter();
+        Object.assign(child, { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), kill() {} });
+        setImmediate(() => { child.stdout.end(); child.emit('close', 0); });
+        return child;
+      } };
+      const engine = createCodexEngine({ sessions: { provider: () => provider },
+        capture: () => null, env: { ...process.env, CODEX_CLI: '/usr/bin/true' } });
+      const noop = () => {};
+      let idle;
+      const done = new Promise(resolve => { idle = resolve; });
+      const session = await engine.open({ host, sessionId: 'existing-thread', cwd: os.tmpdir(), emit: noop, onIdle: idle, onClosed: noop,
+        routeEnv: relayed ? { MY_AGENTS_CODEX_BASE: 'http://127.0.0.1:9999/backend-api/codex', [RELAY_TOKEN_ENV]: 'test-token' } : undefined });
+      session.submit('resume-turn', { prompt: 'continue' });
+      await done;
+      const args = spawned[0].args;
+      assert.ok(args.includes('resume'));
+      assert.ok(args.includes('existing-thread'));
+      const selected = args.filter(arg => arg.startsWith('model_provider='));
+      assert.equal(selected.at(-1), `model_provider=${JSON.stringify(provider)}`, 'override any global provider default');
+      if (relayed) {
+        assert.ok(args.some(arg => arg.startsWith(`model_providers.${provider}=`) && arg.includes('env_key="MY_AGENTS_CODEX_TOKEN"')));
+        assert.ok(selected.every(arg => arg === `model_provider=${JSON.stringify(provider)}`));
+      }
+      session.close();
+    });
+  }
+}

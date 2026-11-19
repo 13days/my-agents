@@ -30,8 +30,8 @@ function codexProviderConfig(proxyPort, { apiKey = false } = {}) {
 // Same, for Codex on a remote node: `base` is the node's relay URL plus the route prefix,
 // the relay token comes from MY_AGENTS_CODEX_TOKEN and never Codex's own (absent) login.
 const RELAY_TOKEN_ENV = 'MY_AGENTS_CODEX_TOKEN';
-function codexRelayConfig(base, { accountId = '' } = {}) {
-  return [`model_providers.panel={name="my-agents",base_url="${base}",wire_api="responses",env_key="${RELAY_TOKEN_ENV}",requires_openai_auth=false${accountId ? ',http_headers={"x-my-agents-codex-account"=' + JSON.stringify(accountId) + '}' : ''}}`, 'model_provider="panel"'];
+function codexRelayConfig(base, { accountId = '', provider = 'panel' } = {}) {
+  return [`model_providers.${/^[A-Za-z0-9_-]+$/.test(provider) ? provider : JSON.stringify(provider)}={name="my-agents",base_url="${base}",wire_api="responses",env_key="${RELAY_TOKEN_ENV}",requires_openai_auth=false${accountId ? ',http_headers={"x-my-agents-codex-account"=' + JSON.stringify(accountId) + '}' : ''}}`, `model_provider=${JSON.stringify(provider)}`];
 }
 
 // Headers that replace the relay token, from this machine's ~/.codex/auth.json.
