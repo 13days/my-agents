@@ -775,6 +775,10 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     const msg = { messageId: evt.messageId, senderId: evt.operator?.openId, chatId: evt.chatId, chatType: evt.chatType || inbox.chatType(config.appId, evt.chatId) || state.cards[evt.messageId]?.chatType || keyChatType || 'group', content: '' };
     if (!value || typeof value !== 'object' || !allowed(msg)) return;
     if (value.owner !== msg.senderId) return send(msg, { text: '这张卡片仅限发起人操作，请发送 /sessions 获取自己的会话列表。' });
+    if (value.action === 'heartflow_review') {
+      try { if(!panel.heartflowReview)throw new Error('当前节点尚未支持心流，请同步升级');await panel.heartflowReview(value,msg.senderId);return send(msg,{text:'心流 check 已记录；执行进度可在心流页面查看。'}); }
+      catch(error) { return send(msg,{text:'心流：'+error.message}); }
+    }
     if (!detailed(msg) && value.action !== 'new_submit') return managementNotice(msg);
     if (value.key) {
       let parts;
@@ -988,6 +992,11 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     start, stop, configure, status, receive, action, repairCard, sendReply, labelContact, refreshContacts,
     bootstrapRuntime: applyRuntime,
     async reload() { await stop(); reloadFiles(); applyRuntime(); return status(); },
+    async heartflowNotice({owner,card}) {
+      if(!config.allowedUserIds.includes(owner) || config.disabledUserIds.includes(owner)) throw new Error('心流通知对象必须是已配对的机器人用户');
+      if(phase!=='connected'||!channel)throw new Error('飞书机器人尚未连接');
+      return channel.send(owner,{card});
+    },
     revealSecret: () => config.appSecret,
     hasReplyTarget: token => typeof token === 'string' && replyTargets.has(token),
     messages: options => inbox.messages(config.appId, options),
