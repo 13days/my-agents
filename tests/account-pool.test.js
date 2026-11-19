@@ -330,3 +330,14 @@ test('the default model for new sessions is one shared setting replicated to eve
   assert.throws(() => owner.pool.setDefaultModel('gemini', 'x'), /引擎无效/);
   assert.throws(() => owner.pool.setDefaultModel('codex', 'bad model id'), /模型名称无效/);
 });
+
+test('subscription status exposes email metadata without credentials and preserves account names',t=>{
+ const {accountEmail}=require('../core/codex-credentials');
+ const token=claims=>'header.'+Buffer.from(JSON.stringify(claims)).toString('base64url')+'.sig';
+ const login={tokens:{account_id:'email-user',access_token:'private-access',refresh_token:'private-refresh',id_token:token({email:'person@example.com'})}};
+ const node=fixture(t).add('owner');node.pool.importCodex(login,'My subscription');
+ const status=node.pool.codexStatus();assert.equal(status.accounts[0].email,'person@example.com');assert.equal(status.accounts[0].name,'My subscription');
+ for(const secret of Object.values(login.tokens))assert.ok(!JSON.stringify(status).includes(secret));
+ assert.equal(accountEmail({tokens:{id_token:'broken',access_token:token({'https://api.openai.com/profile':{email:'fallback@example.com'}})}}),'fallback@example.com');
+ assert.equal(accountEmail({tokens:{id_token:token({email:'<invalid>'})}}),'');assert.equal(accountEmail({}), '');
+});

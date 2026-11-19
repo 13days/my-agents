@@ -2,7 +2,7 @@ const { cooldownSeconds } = require('./route-policy');
 const { createRelayClient } = require('../node/relay');
 const { createAccountVault } = require('./account-vault');
 const claudeCredentials = require('./claude-credentials');
-const { fingerprint, accountId, issued, expiresSoon, renewCodex, codexCredentials } = require('./codex-credentials');
+const { accountEmail, fingerprint, accountId, issued, expiresSoon, renewCodex, codexCredentials } = require('./codex-credentials');
 const codexUsage = require('./codex-usage');
 
 function createAccountPool({ accounts, codex, claude = { read: () => null }, renewClaude = claudeCredentials.renewClaude, identity, peers, dir, secret, fallbackSecret, coordination = null, relayClient = createRelayClient, renew = renewCodex, usage = codexUsage.fetchUsage, now = Date.now }) {
@@ -175,7 +175,7 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
     return { ...routing(), routes: Object.fromEntries(Object.entries(vault.preferences()).filter(([key]) => key.startsWith('codex-pin:')).map(([key, row]) => [key.slice(10), row.value?.accountId || ''])), accounts: Object.values(vault.codexAccounts()).filter(row => !row.deleted).map(row => {
       const auth = vault.credential(row.id, row.auth), health = vault.preference('codex-health:' + row.id) || {};
       let expiresAt = ''; try { const exp = JSON.parse(Buffer.from(auth.tokens.access_token.split('.')[1], 'base64url')).exp; if (exp) expiresAt = new Date(exp * 1000).toISOString(); } catch {}
-      return { id: row.id, name: row.name, origin: row.origin, enabled: row.enabled, mode: row.mode, usage: vault.preference('codex-usage:' + row.id) || null, url:auth.base_url || (row.mode === 'api-key' ? 'https://api.openai.com/v1' : ''), available: !!codexCredentials(auth, row.mode), renewable: !!auth.tokens?.refresh_token, expiresAt, lastRefresh: auth.last_refresh || '', ...health };
+      return { id: row.id, name: row.name, email:row.mode==='chatgpt'?accountEmail(auth):'', origin: row.origin, enabled: row.enabled, mode: row.mode, usage: vault.preference('codex-usage:' + row.id) || null, url:auth.base_url || (row.mode === 'api-key' ? 'https://api.openai.com/v1' : ''), available: !!codexCredentials(auth, row.mode), renewable: !!auth.tokens?.refresh_token, expiresAt, lastRefresh: auth.last_refresh || '', ...health };
     }) };
   }
   function importCodex(auth, name) {

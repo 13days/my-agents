@@ -2,6 +2,18 @@ const crypto = require('crypto');
 const { codexCredentials } = require('../engines/codex/proxy');
 const fingerprint = value => crypto.createHash('sha256').update(String(value || '')).digest('hex');
 function tokenClaims(auth) { try { return JSON.parse(Buffer.from(auth.tokens.access_token.split('.')[1], 'base64url').toString()); } catch { return {}; } }
+// Display metadata only; never use decoded claims to authorize requests.
+function accountEmail(auth) {
+  for(const token of [auth?.tokens?.id_token,auth?.tokens?.access_token]){
+    try{
+      const claims=JSON.parse(Buffer.from(token.split('.')[1],'base64url').toString());
+      for(const value of [claims.email,claims['https://api.openai.com/profile']?.email]){
+        if(typeof value==='string'&&value.length<=254&&/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(value))return value;
+      }
+    }catch{}
+  }
+  return '';
+}
 function accountId(auth, mode) {
   if (mode === 'api-key') return 'api:' + fingerprint(auth.base_url ? auth.base_url + ':' + auth.OPENAI_API_KEY : auth.OPENAI_API_KEY);
   let subject = tokenClaims(auth).sub || '';
@@ -28,4 +40,4 @@ async function renewCodex(auth, { fetchImpl = fetch, now = Date.now } = {}) {
   if (typeof body.access_token !== 'string' || !body.access_token) throw new Error('共享 Codex 登录刷新没有返回有效凭证');
   return { ...auth, last_refresh: new Date(now()).toISOString(), tokens: { ...tokens, access_token: body.access_token, refresh_token: body.refresh_token || tokens.refresh_token, id_token: body.id_token || tokens.id_token } };
 }
-module.exports = { fingerprint, accountId, issued, expiresSoon, renewCodex, codexCredentials };
+module.exports = { accountEmail, fingerprint, accountId, issued, expiresSoon, renewCodex, codexCredentials };
