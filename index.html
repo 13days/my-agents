@@ -749,6 +749,23 @@ async function loadCounts() {
   }
 }
 
+function groupTasksByProject(items, allItems = items) {
+  const context = new Map();
+  const identity = task => JSON.stringify([task.node || 'local', task.sessionId || task.conversationId || task.requestedId || task.id]);
+  for (const task of allItems) {
+    const cwd = task.jobMeta?.worktree?.repository || task.jobMeta?.cwd || task.cwd;
+    if (cwd && !context.has(identity(task))) context.set(identity(task), cwd);
+  }
+  const groups = new Map();
+  for (const task of items) {
+    const cwd = task.jobMeta?.worktree?.repository || task.jobMeta?.cwd || task.cwd || context.get(identity(task)) || '';
+    const node = task.node || 'local', key = JSON.stringify([node, cwd]);
+    if (!groups.has(key)) groups.set(key, { cwd, node, items: [] });
+    groups.get(key).items.push(task);
+  }
+  return [...groups.values()];
+}
+
 async function renderProductPage(type) {
   $('#empty').style.display='none';$('#metabar').style.display='none';$('#render').style.display='block';$('#render').classList.add('wide');
   const root=$('#render');root.innerHTML='<p role="status">正在加载…</p>';
@@ -764,10 +781,11 @@ async function renderProductPage(type) {
       const pending=assistant?Object.values(assistant.proposals).filter(p=>p.state==='pending').length:null;
       const labels={running:'进行中',executing:'进行中',preparing:'准备中',queued:'排队中',completed:'已完成',failed:'需要处理',unknown:'待核对',blocked:'需要处理',cancelled:'已取消',interrupted:'已中断'};
       const list=items=>items.map(t=>`<article class="product-task"><span class="product-status">${esc(labels[t.state]||t.state)}</span><div><strong>${esc((t.prompt||'执行任务').slice(0,180))}</strong><small>${esc(new Date(t.updatedAt||t.createdAt).toLocaleString())}</small></div>${t.sessionId||t.conversationId?`<a href="/sessions/${encodeURIComponent(t.sessionId||t.conversationId)}">查看对话 →</a>`:''}</article>`).join('');
+      const groupedList=items=>groupTasksByProject(items,rows).map(group=>`<section class="task-project"><header class="task-project-heading"><div><h2>${esc(group.cwd.split(/[\\/]/).filter(Boolean).pop()||'未记录项目目录')} <span>${group.items.length}</span></h2><p>${esc(group.cwd||'这些历史任务没有可用的目录信息')}</p></div><span class="task-project-node">${esc(group.node==='local'?'本机':group.node)}</span></header>${list(group.items)}</section>`).join('');
       body=`${taskResult.status==='rejected'?'<p role="alert">任务记录暂时无法读取，请稍后刷新。</p>':''}<div class="product-summary">${tile('heartflow','待你确认 · '+(pending??'暂不可读'),'查看助理整理的判断与建议')}${tile('tasks','进行中 · '+active.length,'跟进已发起的任务')}${tile('connections','管理连接','消息渠道、执行设备与模型服务')}</div>`;
       if(type==='today')body+=`<h3>正在推进</h3>${list(active.slice(0,8))||'<p class="product-empty">暂无正在执行的任务，可以从助理建议或新对话开始。</p>'}<h3>需要处理</h3>${list(attention.slice(0,5))||'<p class="product-empty">暂无执行异常。</p>'}${tile('sessions','开始对话','提出问题，或继续之前的工作')}`;
-      else body+=`<p class="product-muted">这里展示实际发起的执行任务及结果；讨论记录保留在对话中。</p><div class="product-filter"><label>状态 <select id="product-task-filter"><option value="all">全部</option><option value="active">进行中</option><option value="attention">需要处理</option><option value="completed">已完成</option></select></label></div><div id="product-task-list">${list(rows.slice(0,100))||'<p class="product-empty">还没有任务记录。</p>'}</div>`;
-      root._productTasks={rows,active,attention,list};
+      else body+=`<p class="product-muted">这里展示实际发起的执行任务及结果；讨论记录保留在对话中。</p><div class="product-filter"><label for="product-task-filter">状态</label><select id="product-task-filter"><option value="all">全部</option><option value="active">进行中</option><option value="attention">需要处理</option><option value="completed">已完成</option></select></div><div id="product-task-list">${groupedList(rows)||'<p class="product-empty">还没有任务记录。</p>'}</div>`;
+      root._productTasks={rows,active,attention,list:groupedList};
     }else if(type==='connections'){
       body=`<p class="product-muted">连接你的消息来源与执行环境。助理使用已授权的消息范围，任务使用可用的执行设备。</p><div class="product-grid">${tile('im','聊天软件','当前支持飞书 / Lark；更多渠道将在这里统一管理。')}${tile('proxy','执行设备与模型服务','管理任务运行位置、项目目录及模型账号。')}${tile('heartflow','助理关注范围','选择助理关注的聊天，以及通知与确认方式。')}</div><p class="product-note">机器人连接与个人聊天读取授权是不同能力。飞书机器人已连接，不代表助理可以读取你的所有聊天。</p>`;
     }else if(type==='capabilities'){
@@ -780,7 +798,7 @@ async function renderProductPage(type) {
     root.querySelectorAll('[data-product-target]').forEach(b=>b.onclick=()=>switchType(b.dataset.productTarget));
     $('#product-refresh').onclick=()=>renderProductPage(type);
     if($('#product-capability-engine'))$('#product-capability-engine').onchange=e=>{state.resourceEngine=e.target.value;localStorage.setItem('panel-resource-engine',state.resourceEngine);renderResourceEngines();renderProductPage(type);};
-    if($('#product-task-filter'))$('#product-task-filter').onchange=e=>{const x=root._productTasks;const rows=e.target.value==='active'?x.active:e.target.value==='attention'?x.attention:e.target.value==='completed'?x.rows.filter(t=>t.state==='completed'):x.rows;$('#product-task-list').innerHTML=x.list(rows.slice(0,100))||'<p class="product-empty">此状态下没有任务。</p>';};
+    if($('#product-task-filter'))$('#product-task-filter').onchange=e=>{const x=root._productTasks;const rows=e.target.value==='active'?x.active:e.target.value==='attention'?x.attention:e.target.value==='completed'?x.rows.filter(t=>t.state==='completed'):x.rows;$('#product-task-list').innerHTML=x.list(rows)||'<p class="product-empty">此状态下没有任务。</p>';};
   }catch(e){if(state.type===type)root.innerHTML=`<p role="alert">${esc(e.message)}</p>`;}
 }
 

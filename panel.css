@@ -1302,3 +1302,26 @@ body[data-nav-collapsed="false"] #tabs{gap:2px}
 body[data-nav-collapsed="false"] #tabs .tab{padding-top:9px;padding-bottom:9px;min-height:38px}
 body[data-nav-collapsed="false"] #tabs .nav-group-label{margin-top:16px;margin-bottom:4px}
 body[data-nav-collapsed="false"] #tabs .nav-group-label:first-child{margin-top:2px}
+
+/* Shared action controls: quiet surfaces, clear focus and consistent spacing. */
+.btn,.panel-select-trigger{min-height:32px;padding:5px 11px;border-radius:6px;border-color:var(--border-strong);background:transparent;box-shadow:none;font-size:12px;line-height:20px;color:var(--text)}
+.btn:hover,.panel-select-trigger:hover{background:var(--hover);border-color:var(--muted)}
+.btn.primary{background:#6263d9;border-color:transparent;box-shadow:none;text-shadow:none;color:#fff}
+.btn.primary:hover{background:#7273e5;box-shadow:none}
+.btn.danger{color:var(--danger)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn:focus-visible,.panel-select-trigger:focus-visible{outline:2px solid var(--accent2);outline-offset:3px}
+.panel-select-trigger{gap:10px}
+.panel-select-trigger[aria-expanded="true"]{background:var(--hover);border-color:var(--accent2)}
+.panel-select-menu{border-color:var(--border-strong);background:var(--panel,#17181c);border-radius:8px;box-shadow:0 8px 28px #0005}
+.panel-select-option{min-height:32px;padding:6px 9px;color:var(--text)}
+.panel-select-option + .panel-select-option{border-top:0}
+.product-filter{display:flex;align-items:center;gap:10px;margin:24px 0;color:var(--muted);font-size:12px}
+.task-project{margin:24px 0 32px}
+.task-project-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 16px;background:var(--hover);border:1px solid var(--border);border-radius:8px}
+.task-project-heading>div{min-width:0}.task-project-heading h2{margin:0!important;font-size:15px!important;line-height:1.5}
+.task-project-heading h2 span{margin-left:8px;font-size:12px;font-weight:400;color:var(--muted)}
+.task-project-heading p{margin:4px 0 0;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.task-project-node{flex-shrink:0;font-size:12px;color:var(--muted)}
+.task-project .product-task{padding:16px}.product-task a{font-size:12px;text-decoration:none;color:var(--accent2);padding:5px 8px;border-radius:6px}.product-task a:hover{background:var(--hover)}
+@media(max-width:700px){.task-project-heading{align-items:flex-start}.task-project .product-task{padding:14px 4px}.btn,.panel-select-trigger{min-height:36px}}
