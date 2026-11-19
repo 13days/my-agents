@@ -106,6 +106,12 @@ function createHeartflowStore({ dir, now = Date.now }) {
       for (const old of ps) { old.version++; if(splitIds) {old.messageIds=old.messageIds.filter(id=>!ids.includes(id));old.actions=[];} else old.state='merged'; }
       s.checks.push({id:uid(),at:now(),decision:splitIds?'split':'merge',before,after:copy(p),learning:true}); return p;
     }); },
+    feedback(id,input) {return transaction(s=>{
+      const p=proposal(s,id,input.version),reason=String(input.reason||'').trim();
+      if(!reason||reason.length>2000)fail('请填写 1–2000 字的纠正内容');
+      const check={id:uid(),proposalId:id,at:now(),decision:'feedback',reason,before:copy(p),after:copy(p),learning:true};
+      s.checks.push(check);return check;
+    });},
     learning(id, enabled) { return transaction(s=>{const check=s.checks.find(c=>c.id===id);if(!check)fail('记录不存在',404);check.learning=!!enabled;return check;}); },
     claim(id) { return transaction(s=>{const d=s.deliveries[id];if(!d || d.state!=='queued')return null;d.state='dispatching';d.updatedAt=now();return d;}); },
     delivery(id, patch) { return transaction(s=>Object.assign(s.deliveries[id],patch,{updatedAt:now()})); },

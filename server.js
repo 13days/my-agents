@@ -2182,6 +2182,7 @@ const server = http.createServer(async (req, res) => {
         if(op==='drafts')return sendJSON(res,201,heartflowStore.draft(input));
         if(op==='review')return sendJSON(res,200,await heartflow.review(id,input));
         if(op==='organize')return sendJSON(res,200,heartflowStore.combine(input.proposals,input.splitIds));
+        if(op==='feedback')return sendJSON(res,200,heartflowStore.feedback(id,input));
         if(op==='learning')return sendJSON(res,200,heartflowStore.learning(id,input.enabled));
         if(op==='reconcile'){await heartflow.deliver();return sendJSON(res,200,{ok:true});}
         return sendJSON(res,404,{error:'接口不存在'});

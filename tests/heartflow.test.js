@@ -143,3 +143,10 @@ test('a new followup arriving during interpretation prevents applying a stale co
  const {store}=setup(t),p=draft(store);let release;const model=new Promise(r=>release=r);
  const flow=createHeartflow({store,source:{},sessions:async()=>[],analyze:()=>model});const result=flow.followups();await new Promise(r=>setImmediate(r));store.ingest([{id:'newer',chatId:'oc_a',senderId:'me',text:'仍然按原方案执行，不撤回',createdAt:Date.now()+1000,updatedAt:1}]);release({suggestions:[],resolutions:[]});await assert.rejects(result,/群聊消息已变化/);assert.equal(store.snapshot().proposals[p.id].state,'pending');
 });
+
+test('feedback on a resolved proposal is retained for learning without reopening or executing work',t=>{
+ const {store}=setup(t),p=draft(store);const resolved=store.review(p.id,{version:1,decision:'ignore'});
+ const check=store.feedback(p.id,{version:resolved.version,reason:'取消的是其他需求，这件事仍需跟进'});
+ assert.equal(check.decision,'feedback');assert.equal(check.learning,true);assert.equal(check.before.state,'ignored');assert.equal(store.snapshot().proposals[p.id].state,'ignored');assert.equal(Object.keys(store.snapshot().deliveries).length,0);
+ assert.throws(()=>store.feedback(p.id,{version:1,reason:'旧版本'}),/已经更新/);assert.throws(()=>store.feedback(p.id,{version:resolved.version,reason:' '}));
+});
