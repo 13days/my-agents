@@ -364,7 +364,7 @@ function viewDescription(type) {
     capabilities:['选用技能、助手与可复用的流程。','Browse reusable capabilities.'],
     settings:['管理偏好与高级工具。','Manage preferences and advanced tools.'],
     stats: ['两个引擎，一个工作空间。随时掌握你的使用情况。', 'Two engines, one workspace. Keep your work and usage in view.'],
-    im: ['在聊天工具中使用你的 Agent，统一管理消息渠道与会话。', 'Connect messaging channels to your agents and sessions.'],
+    im: ['连接飞书等聊天软件，接收通知、确认建议，并通过聊天发起和跟进任务。个人消息读取需单独授权。', 'Connect chat apps for notifications, approvals and task control. Reading personal messages requires separate authorization.'],
     guide: ['从第一次对话到多机器协作，按任务找到使用方法。', 'Find your way from a first chat to work across machines.'],
     proxy: ['管理能运行任务的机器、每台机器上的项目目录，以及模型账号。', 'Manage the machines that run tasks, their project folders, and model accounts.'],
     inspector: ['还原每次模型调用，看清请求、上下文与响应。', 'Inspect every model request, context, and response.'],
@@ -383,7 +383,7 @@ function viewDescription(type) {
 function viewHeading(type, action = '') {
   return `<div class="view-heading"><div class="view-heading-left"><span class="view-icon">${icon(type)}</span><div><h2>${esc(t('tabs')[type])}</h2><p>${esc(viewDescription(type))}</p></div></div>${action}</div>`;
 }
-function productNavParent(type){return ['im','proxy'].includes(type)?'connections':['commands','skills','agents','plugins','workflows'].includes(type)?'capabilities':['config','inspector','stats','voyage'].includes(type)?'settings':type;}
+function productNavParent(type){return ({today:'tasks',connections:'im',capabilities:'skills',config:'settings'})[type]||type;}
 function updateWorkspaceChrome() {
   const dashboard = !!CAPS[state.type].dashboard;
   document.body.dataset.view = dashboard ? 'dashboard' : 'library';
@@ -428,8 +428,8 @@ const LANGS = [
 const DEFAULT_LANG = 'zh';
 const I18N = {
   zh: {
-    tabs: { heartflow: '助理', settings: '设置', capabilities: '能力库', connections: '连接', tasks: '任务', today: '今日', guide: '使用指南', im: 'IM 接入', proxy: '机器与引擎', commands: '/ 命令', skills: '技能', agents: '智能体', plugins: '插件', config: '配置', workflows: '工作流', inspector: '请求诊断', sessions: '对话', voyage: '工作回顾', stats: '工作台' },
-    typeLabel: { commands: '命令', skills: '技能', agents: '智能体', plugins: '插件', config: '配置', workflows: '工作流', inspector: '请求', sessions: '对话', voyage: '工作回顾', stats: '工作台' },
+    tabs: { heartflow: '助理', settings: '设置', capabilities: '能力库', connections: '连接', tasks: '任务', today: '今日', guide: '帮助', im: '聊天软件', proxy: '设备与模型', commands: '快捷操作', skills: '技能', agents: '专属助手', plugins: '扩展', config: '配置', workflows: '工作流', inspector: '诊断工具', sessions: '对话', voyage: '工作回顾', stats: '使用统计' },
+    typeLabel: { commands: '命令', skills: '技能', agents: '专属助手', plugins: '扩展', config: '配置', workflows: '工作流', inspector: '请求', sessions: '对话', voyage: '工作回顾', stats: '使用统计' },
     search: '搜索名称 / 描述…', mineOnly: '仅自建', all: '全部',
     newBtn: '＋ 新建', edit: '编辑', save: '保存', cancel: '取消', del: '删除', uninstall: '卸载', create: '创建',
     noSelection: '未选择', emptyHint: '← 从左侧选择一个资源，或点击「新建」',
@@ -482,7 +482,7 @@ const I18N = {
     },
   },
   en: {
-    tabs: { heartflow: 'Assistant', settings: 'Settings', capabilities: 'Library', connections: 'Connections', tasks: 'Tasks', today: 'Today', guide: 'User guide', im: 'IM connections', proxy: 'Machines & engines', commands: '/ Commands', skills: 'Skills', agents: 'Agents', plugins: 'Plugins', config: 'Config', workflows: 'Workflows', inspector: 'Inspector', sessions: 'Sessions', voyage: 'Voyage', stats: 'Overview' },
+    tabs: { heartflow: 'Assistant', settings: 'Settings', capabilities: 'Library', connections: 'Connections', tasks: 'Tasks', today: 'Today', guide: 'Help', im: 'Chat apps', proxy: 'Devices & models', commands: 'Quick actions', skills: 'Skills', agents: 'Agents', plugins: 'Plugins', config: 'Config', workflows: 'Workflows', inspector: 'Inspector', sessions: 'Sessions', voyage: 'Voyage', stats: 'Overview' },
     typeLabel: { commands: 'command', skills: 'skill', agents: 'agent', plugins: 'plugin', config: 'config', workflows: 'workflow', inspector: 'request', sessions: 'session', voyage: 'voyage', stats: 'stats' },
     search: 'Search name / description…', mineOnly: 'Mine', all: 'All',
     newBtn: '＋ New', edit: 'Edit', save: 'Save', cancel: 'Cancel', del: 'Delete', uninstall: 'Uninstall', create: 'Create',
@@ -620,7 +620,6 @@ const SCOPED = ['commands', 'skills', 'agents', 'workflows', 'config'];
 let state = { resourceEngine: localStorage.getItem('panel-resource-engine') || LEGACY_ENGINE, type: 'commands', items: [], current: null, editing: false, keyword: '', origin: 'user', scope: '', projects: [] };
 
 function renderResourceEngines() {
-  const label = document.querySelector('[data-nav-group="资源管理"]');
   let host = $('#resource-engines');
   if (!host) { host = document.createElement('div'); host.id = 'resource-engines'; host.className = 'resource-engine-switch'; host.setAttribute('role', 'group'); $('#projbar').before(host); }
   host.setAttribute('aria-label', ui('资源引擎', 'Resource engine'));
@@ -635,7 +634,7 @@ function renderResourceEngines() {
     await switchType(isResourceType(state.type) && can(state.resourceEngine, 'resources', state.type) ? state.type : firstResourceType()); loadCounts();
   });
   document.querySelectorAll('.tab').forEach(tab => {
-    tab.hidden = isResourceType(tab.dataset.type) && !can(state.resourceEngine, 'resources', tab.dataset.type);
+    tab.hidden = false;
   });
 }
 
@@ -656,6 +655,7 @@ function writeRoute(mode = 'push') {
 function readRoute() {
   const parts = location.pathname.split('/').filter(Boolean);
   if (!parts.length) return null;
+  if (parts[0] === 'today') parts[0] = 'tasks';
   if (parts[0] === 'assistant') parts[0] = 'heartflow';
   if (parts[0] === 'feishu') parts[0] = 'im'; // Existing bookmarks keep working.
   if (!Object.hasOwn(CAPS, parts[0]) || parts.length > 2) throw new Error(ui('页面不存在', 'Page not found'));
@@ -675,7 +675,7 @@ async function restoreRoute() {
   if (state.editing && !confirm(t('unsaved'))) { history.replaceState({}, '', previous); return; }
   state.editing = false;
   try {
-    const target = readRoute() || { type: Object.hasOwn(CAPS, localStorage.getItem('panel-section')) ? localStorage.getItem('panel-section') : 'today', key: null, scope: '', view: '', engine: state.resourceEngine };
+    const target = readRoute() || { type: Object.hasOwn(CAPS, localStorage.getItem('panel-section')) ? localStorage.getItem('panel-section') : 'tasks', key: null, scope: '', view: '', engine: state.resourceEngine };
     if (isResourceType(target.type)) { state.resourceEngine = knownEngine(target.engine, defaultResourceEngine()); localStorage.setItem('panel-resource-engine', state.resourceEngine); }
     if (target.type === 'im' && target.channel) imSelectedChannel = target.channel;
     state.scope = SCOPED.includes(target.type) ? target.scope : '';
@@ -769,7 +769,7 @@ async function renderProductPage(type) {
       else body+=`<p class="product-muted">这里展示实际发起的执行任务及结果；讨论记录保留在对话中。</p><div class="product-filter"><label>状态 <select id="product-task-filter"><option value="all">全部</option><option value="active">进行中</option><option value="attention">需要处理</option><option value="completed">已完成</option></select></label></div><div id="product-task-list">${list(rows.slice(0,100))||'<p class="product-empty">还没有任务记录。</p>'}</div>`;
       root._productTasks={rows,active,attention,list};
     }else if(type==='connections'){
-      body=`<p class="product-muted">连接你的消息来源与执行环境。助理使用已授权的消息范围，任务使用可用的执行设备。</p><div class="product-grid">${tile('im','消息渠道','当前支持飞书 / Lark；更多渠道将在这里统一管理。')}${tile('proxy','执行设备与模型服务','管理任务运行位置、项目目录及模型账号。')}${tile('heartflow','助理关注范围','选择助理关注的聊天，以及通知与确认方式。')}</div><p class="product-note">机器人连接与个人聊天读取授权是不同能力。飞书机器人已连接，不代表助理可以读取你的所有聊天。</p>`;
+      body=`<p class="product-muted">连接你的消息来源与执行环境。助理使用已授权的消息范围，任务使用可用的执行设备。</p><div class="product-grid">${tile('im','聊天软件','当前支持飞书 / Lark；更多渠道将在这里统一管理。')}${tile('proxy','执行设备与模型服务','管理任务运行位置、项目目录及模型账号。')}${tile('heartflow','助理关注范围','选择助理关注的聊天，以及通知与确认方式。')}</div><p class="product-note">机器人连接与个人聊天读取授权是不同能力。飞书机器人已连接，不代表助理可以读取你的所有聊天。</p>`;
     }else if(type==='capabilities'){
       body=`<p class="product-muted">把常用方法、专属助手和扩展能力放在一起，按需要选用。</p><label>适用工具 <select id="product-capability-engine">${resourceEngines().map(e=>`<option value="${esc(e.id)}" ${state.resourceEngine===e.id?'selected':''}>${esc(e.short)}</option>`).join('')}</select></label><div class="product-grid">${[['commands','快捷操作','复用常用指令，减少重复输入。'],['skills','技能','完成具体工作的知识与方法。'],['agents','专属助手','为不同工作准备合适的助手。'],['plugins','扩展','管理已安装的插件。'],['workflows','工作流','把多个步骤组织成可复用的流程。']].filter(([id])=>can(state.resourceEngine,'resources',id)).map(([id,title,description])=>tile(id,title,description)).join('')}</div>`;
     }else{
@@ -786,7 +786,11 @@ async function renderProductPage(type) {
 
 async function switchType(type, updateRoute = true) {
   if(updateRoute&&type==='sessions'&&state.type==='sessions'&&$('#chat-messages'))return;
-  if (isResourceType(type) && !can(state.resourceEngine, 'resources', type)) type = firstResourceType();
+  if (isResourceType(type) && !can(state.resourceEngine, 'resources', type)) {
+    const compatible=resourceEngines().find(engine=>can(engine.id,'resources',type));
+    if(!compatible){toast(ui('当前没有支持此能力的工具','No compatible tool is available'),false);return;}
+    state.resourceEngine=compatible.id;localStorage.setItem('panel-resource-engine',compatible.id);
+  }
   clearCaptureSearch();
   if (state.editing && !confirm(t('unsaved'))) return;
   closeExpandedWindow();
@@ -2367,21 +2371,19 @@ function statsHTML(d) {
   return h + '</div>';
 }
 
-// Shared tasks come first; Claude-only resources carry an explicit scope.
-const workspaceNav = $('.nav-group-label[data-nav-group="工作空间"]');
-let navAnchor = workspaceNav;
-for (const type of ['stats', 'sessions', 'heartflow', 'inspector', 'proxy', 'im', 'voyage']) {
-  const tab = document.querySelector(`.tab[data-type="${type}"]`); navAnchor.after(tab); navAnchor = tab;
-}
-// Keep technical routes accessible from hubs while simplifying primary navigation.
-for(const type of ['stats','inspector','proxy','im','voyage','commands','skills','agents','plugins','workflows','config'])document.querySelector(`.tab[data-type="${type}"]`).classList.add('product-hidden');
-const makeProductTab=(type,reference)=>{const tab=document.querySelector(`.tab[data-type="${reference}"]`).cloneNode(true);tab.classList.remove('product-hidden','active');tab.dataset.type=type;tab.querySelector('.cnt').textContent='';tab.onclick=()=>switchType(type);return tab;};
-const productTabs={today:makeProductTab('today','stats'),tasks:makeProductTab('tasks','workflows'),connections:makeProductTab('connections','im'),capabilities:makeProductTab('capabilities','skills'),settings:makeProductTab('settings','config')};
-let productAnchor=workspaceNav;
-for(const type of ['today','heartflow','tasks','sessions']){const tab=productTabs[type]||document.querySelector(`.tab[data-type="${type}"]`);productAnchor.after(tab);productAnchor=tab;}
-const managementNav=document.querySelector('[data-nav-group="资源管理"]');
-managementNav.after(productTabs.connections);productTabs.connections.after(productTabs.capabilities);
-document.querySelector('.tab[data-type="guide"]').before(productTabs.settings);
+if(localStorage.getItem('panel-section')==='today')localStorage.setItem('panel-section','tasks');
+// Visible groups keep every capability one click away; old hub URLs remain valid.
+const navTab=type=>document.querySelector(`.tab[data-type="${type}"]`);
+const makeProductTab=(type,reference)=>{const tab=navTab(reference).cloneNode(true);tab.classList.remove('active');tab.dataset.type=type;tab.querySelector('.cnt').textContent='';tab.onclick=()=>switchType(type);return tab;};
+const taskNav=makeProductTab('tasks','workflows'),settingsNav=makeProductTab('settings','config');
+const navigationGroups=[['工作',['heartflow','tasks','sessions']],['连接',['im','proxy']],['能力库',['commands','skills','agents','plugins','workflows']],['更多',['stats','voyage','inspector']]];
+const navigationNodes=new Map(Array.from(document.querySelectorAll('#tabs .tab')).map(tab=>[tab.dataset.type,tab]));navigationNodes.set('tasks',taskNav);
+const navFragment=document.createDocumentFragment();
+for(const [label,types] of navigationGroups){const heading=document.createElement('div');heading.className='nav-group-label';heading.dataset.navGroup=label;heading.textContent=label;navFragment.append(heading);for(const type of types)navFragment.append(navigationNodes.get(type));}
+// Hidden configuration tab remains addressable for compatibility and counters.
+const legacyConfig=navigationNodes.get('config');legacyConfig.classList.add('product-hidden');navFragment.append(legacyConfig);
+$('#tabs').replaceChildren(navFragment);
+navTab('guide').before(settingsNav);
 // ---------- 语言切换 ----------
 function applyLang() {
   document.documentElement.lang = lang;
@@ -2389,7 +2391,7 @@ function applyLang() {
   if (!sel.options.length) LANGS.forEach(l => sel.add(new Option(l.label, l.code)));
   sel.value = lang;
   document.querySelectorAll('.tab').forEach(tb => { tb.querySelector('.nav-label').textContent = t('tabs')[tb.dataset.type]; });
-  document.querySelectorAll('[data-nav-group]').forEach(el => { el.textContent = el.dataset.navGroup === '工作空间' ? ui('工作', 'Work', '仕事') : ui('管理', 'Manage', '管理'); });
+  document.querySelectorAll('[data-nav-group]').forEach(el => { el.textContent = ({工作:ui('工作','Work','仕事'),连接:ui('连接','Connections','接続'),能力库:ui('能力库','Library','ライブラリ'),更多:ui('更多','More','その他')})[el.dataset.navGroup]||el.dataset.navGroup; });
   $('#localLabel').textContent = ui('本地工作区', 'Local workspace', 'ローカル環境');
   $('#libraryToggle').setAttribute('aria-label', ui('打开资源列表', 'Open resource list', 'リソース一覧を開く'));
   $('#search').setAttribute('aria-label', t('search'));
