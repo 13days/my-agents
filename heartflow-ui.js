@@ -7,17 +7,17 @@ function hfProgress(data) {
   const pending=Object.values(data.proposals).filter(p=>p.state==='pending').length;
   return `<div class="hf-status"><span class="hf-dot ${data.config.enabled?'on':''}"></span>${!data.config.enabled?'监听已暂停':data.runtime.polling?'正在同步消息':data.source.error?'同步异常':data.source.lastSync?'等待下次同步':'等待首次同步'} · 用户身份 · ${data.config.chats.length} 个选定聊天 · 协调节点 ${esc(data.coordinator)}<span>最近同步 ${esc(hfTime(data.source.lastSync))}</span></div>
       ${data.source.error?`<p class="hf-error" role="alert">消息读取：${esc(data.source.error)}</p>`:''}${data.source.noticeError?`<p class="hf-error">${esc(data.source.noticeError)}</p>`:''}${data.source.analysisError?`<p class="hf-error" role="alert">建议分析：${esc(data.source.analysisError)}</p>`:''}
-      <div class="hf-toolbar" aria-label="心流工作状态"><span>已读取 ${Object.keys(data.messages).length} 条消息</span><span>${data.runtime.analyzing?'正在分析':data.source.lastAnalysis?'最近分析 '+esc(hfTime(data.source.lastAnalysis)):'尚未完成分析'}</span><span>待确认 ${pending}</span><span>等待投递 ${Object.values(data.deliveries).filter(d=>d.state==='queued').length}</span><span>执行中 ${Object.values(data.deliveries).filter(d=>['dispatching','accepted','running'].includes(d.state)).length}</span><span>已完成 ${Object.values(data.deliveries).filter(d=>d.state==='completed').length}</span></div>${data.source.analysisRetryAt>Date.now()?`<p class="hf-reason">分析失败后已退避，预计 ${esc(hfTime(data.source.analysisRetryAt))} 后重试。</p>`:''}`;
+      <div class="hf-toolbar" aria-label="助理工作状态"><span>已读取 ${Object.keys(data.messages).length} 条消息</span><span>${data.runtime.analyzing?'正在分析':data.source.lastAnalysis?'最近分析 '+esc(hfTime(data.source.lastAnalysis)):'尚未完成分析'}</span><span>待确认 ${pending}</span><span>等待投递 ${Object.values(data.deliveries).filter(d=>d.state==='queued').length}</span><span>执行中 ${Object.values(data.deliveries).filter(d=>['dispatching','accepted','running'].includes(d.state)).length}</span><span>已完成 ${Object.values(data.deliveries).filter(d=>d.state==='completed').length}</span></div>${data.source.analysisRetryAt>Date.now()?`<p class="hf-reason">分析失败后已退避，预计 ${esc(hfTime(data.source.analysisRetryAt))} 后重试。</p>`:''}`;
 }
 async function renderHeartflow() {
   clearInterval(heartflowPulseTimer);
   $('#empty').style.display='none';$('#metabar').style.display='none';$('#render').style.display='block';$('#render').classList.add('wide');
-  const root=$('#render'); root.innerHTML='<p role="status">正在加载心流…</p>';
+  const root=$('#render'); root.innerHTML='<p role="status">正在加载助理…</p>';
   try {
     const data=await api('GET','heartflow');if(state.type!=='heartflow')return;heartflowData=data;
     const pending=Object.values(data.proposals).filter(p=>p.state==='pending').length;
-    root.innerHTML=`<section class="hf"><header class="hf-header"><div><div class="hf-eyebrow">AMBIENT WORKSPACE</div><h1>心流 <span>${pending} 项待 check</span></h1><p>消息聚成事项，确认后交给正确的会话。</p></div><button class="btn" id="hf-refresh">刷新</button></header>
-      <div id="hf-live-status">${hfProgress(data)}</div><p id="hf-live-update" role="status"></p><nav class="hf-tabs">${[['pending','待确认'],['messages','消息'],['matters','事项'],['activity','执行动态'],['learning','Check 与学习'],['settings','接入设置']].map(([id,title])=>`<button class="btn ${heartflowView===id?'active':''}" data-hf-tab="${id}">${title}</button>`).join('')}</nav><div id="hf-notice" role="status"></div><div id="hf-content"></div></section>`;
+    root.innerHTML=`<section class="hf"><header class="hf-header"><div><div class="hf-eyebrow">PERSONAL ASSISTANT</div><h1>助理 <span>${pending} 项待确认</span></h1><p>帮你跟进消息、理解最新决定、整理待办，并衔接正在进行的任务。</p></div><button class="btn" id="hf-refresh">刷新</button></header>
+      <div id="hf-live-status">${hfProgress(data)}</div><p id="hf-live-update" role="status"></p><nav class="hf-tabs">${[['pending','待确认'],['messages','消息'],['matters','事项'],['activity','执行动态'],['learning','反馈与学习'],['settings','接入设置']].map(([id,title])=>`<button class="btn ${heartflowView===id?'active':''}" data-hf-tab="${id}">${title}</button>`).join('')}</nav><div id="hf-notice" role="status"></div><div id="hf-content"></div></section>`;
     root.querySelector('#hf-refresh').onclick=()=>renderHeartflow();
     root.querySelectorAll('[data-hf-tab]').forEach(b=>b.onclick=()=>{heartflowView=b.dataset.hfTab;renderHeartflow();});
     if(heartflowView==='pending')hfPending(data);
@@ -39,7 +39,7 @@ async function renderHeartflow() {
       }catch(error){if(state.type==='heartflow' && $('#hf-live-update'))$('#hf-live-update').textContent='状态刷新失败：'+error.message;}
       finally{checking=false;}
     },10000);
-  }catch(e){if(state.type==='heartflow')root.innerHTML=`<p role="alert">心流加载失败：${esc(e.message)}</p>`;}
+  }catch(e){if(state.type==='heartflow')root.innerHTML=`<p role="alert">助理加载失败：${esc(e.message)}</p>`;}
 }
 async function hfDo(button,fn) {
   if(button)button.disabled=true;
@@ -56,7 +56,7 @@ function hfMessage(m, selectable=false, data=null) {
 function hfPending(data) {
   const ps=Object.values(data.proposals).filter(p=>['pending','deferred'].includes(p.state)).sort((a,b)=>b.updatedAt-a.updatedAt);
   if(!ps.some(p=>p.id===heartflowSelected))heartflowSelected=ps[0]?.id || '';
-  $('#hf-content').innerHTML=`<div class="hf-toolbar"><button class="btn" id="hf-analyze">生成新建议</button><button class="btn" id="hf-merge">合并选中建议</button><span>整理后重新 check；只执行选中的行动。</span></div><div class="hf-grid"><div class="hf-list">${ps.map(p=>`<div class="hf-list-item ${p.id===heartflowSelected?'selected':''}"><input type="checkbox" data-hf-proposal="${p.id}" aria-label="选择建议 ${esc(p.title)}"><button data-hf-select="${p.id}"><strong>${esc(p.title)}</strong><small>${p.messageIds.length} 条消息 · ${p.actions.length} 项行动</small>${hfState(p.state)}</button></div>`).join('')||'<div class="hf-empty">暂无待确认建议。到接入设置选择聊天，然后同步并分析。</div>'}</div><div id="hf-detail"></div></div>`;
+  $('#hf-content').innerHTML=`<div class="hf-toolbar"><button class="btn" id="hf-analyze">生成新建议</button><button class="btn" id="hf-merge">合并选中建议</button><span>整理后重新确认；只执行选中的行动。</span></div><div class="hf-grid"><div class="hf-list">${ps.map(p=>`<div class="hf-list-item ${p.id===heartflowSelected?'selected':''}"><input type="checkbox" data-hf-proposal="${p.id}" aria-label="选择建议 ${esc(p.title)}"><button data-hf-select="${p.id}"><strong>${esc(p.title)}</strong><small>${p.messageIds.length} 条消息 · ${p.actions.length} 项行动</small>${hfState(p.state)}</button></div>`).join('')||'<div class="hf-empty">暂无待确认建议。到接入设置选择聊天，然后同步并分析。</div>'}</div><div id="hf-detail"></div></div>`;
   $('#hf-analyze').onclick=e=>hfDo(e.target,()=>api('POST','heartflow/analyze',{}));
   $('#hf-merge').onclick=e=>hfDo(e.target,()=>{const ids=[...document.querySelectorAll('[data-hf-proposal]:checked')].map(x=>x.dataset.hfProposal);if(ids.length<2)throw new Error('请至少选择两项建议');return api('POST','heartflow/organize',{proposals:ids.map(id=>({id,version:data.proposals[id].version}))});});
   document.querySelectorAll('[data-hf-select]').forEach(b=>b.onclick=()=>{heartflowSelected=b.dataset.hfSelect;hfPending(data);});
@@ -112,7 +112,7 @@ function hfActivity(data) {
   $('#hf-reconcile').onclick=e=>hfDo(e.target,()=>api('POST','heartflow/reconcile',{}));
 }
 function hfLearning(data) {
-  $('#hf-content').innerHTML=`<div class="hf-card"><h3>从你的 check 学习</h3><p>同一聊天的历史纠正会作为后续模型推荐的参考。关闭参考不会删除审计记录。批准次数不会自动扩大执行权限。</p></div>${data.checks.slice().reverse().map(c=>`<article class="hf-card"><div class="hf-toolbar"><strong>${esc(hfLabels[c.decision]||c.decision)}</strong><small>${esc(hfTime(c.at))}</small><label><input type="checkbox" data-learning="${c.id}" ${c.learning?'checked':''}> 用于后续推荐</label></div><p>${esc(c.reason||'未填写原因')}</p><details><summary>查看 check 前后内容</summary><div class="hf-diff"><div><h4>推荐 / 修改前</h4><pre>${esc(JSON.stringify(c.before,null,2))}</pre></div><div><h4>你的选择 / 修改后</h4><pre>${esc(JSON.stringify(c.after,null,2))}</pre></div></div></details></article>`).join('')||'<p class="hf-empty">首次确认、修改、改派、拆分或忽略后，记录会出现在这里。</p>'}`;
+  $('#hf-content').innerHTML=`<div class="hf-card"><h3>从你的反馈学习</h3><p>同一聊天的历史纠正会作为后续模型推荐的参考。关闭参考不会删除审计记录。批准次数不会自动扩大执行权限。</p></div>${data.checks.slice().reverse().map(c=>`<article class="hf-card"><div class="hf-toolbar"><strong>${esc(hfLabels[c.decision]||c.decision)}</strong><small>${esc(hfTime(c.at))}</small><label><input type="checkbox" data-learning="${c.id}" ${c.learning?'checked':''}> 用于后续推荐</label></div><p>${esc(c.reason||'未填写原因')}</p><details><summary>查看 check 前后内容</summary><div class="hf-diff"><div><h4>推荐 / 修改前</h4><pre>${esc(JSON.stringify(c.before,null,2))}</pre></div><div><h4>你的选择 / 修改后</h4><pre>${esc(JSON.stringify(c.after,null,2))}</pre></div></div></details></article>`).join('')||'<p class="hf-empty">首次确认、修改、改派、拆分或忽略后，记录会出现在这里。</p>'}`;
   document.querySelectorAll('[data-learning]').forEach(el=>el.onchange=()=>hfDo(el,()=>api('POST','heartflow/learning/'+el.dataset.learning,{enabled:el.checked})));
 }
 function hfSettings(data) {

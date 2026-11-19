@@ -2001,7 +2001,7 @@ const heartflowSource = require('./core/heartflow-feishu').createPersonalFeishu(
 const heartflow = HISTORY_WORKER ? null : require('./core/heartflow').createHeartflow({
   store: heartflowStore, source: heartflowSource,
   history: conversationHistory,
-  notifyResult: (delivery,config) => sharedGateway('heartflowNotice',{owner:config.notifyUserId,card:{header:{title:{tag:'plain_text',content:'心流 · '+({completed:'任务已完成',failed:'任务失败',unknown:'结果待核对',blocked:'需重新确认'}[delivery.state]||delivery.state)}},elements:[{tag:'div',text:{tag:'plain_text',content:[delivery.action.prompt,delivery.result||delivery.error||'', '会话：'+(delivery.sessionId||delivery.action.sessionId||'待创建')].join('\n\n').slice(0,12000)}}]}}),
+  notifyResult: (delivery,config) => sharedGateway('heartflowNotice',{owner:config.notifyUserId,card:{header:{title:{tag:'plain_text',content:'助理 · '+({completed:'任务已完成',failed:'任务失败',unknown:'结果待核对',blocked:'需重新确认'}[delivery.state]||delivery.state)}},elements:[{tag:'div',text:{tag:'plain_text',content:[delivery.action.prompt,delivery.result||delivery.error||'', '会话：'+(delivery.sessionId||delivery.action.sessionId||'待创建')].join('\n\n').slice(0,12000)}}]}}),
   notify: (proposal,config) => sharedGateway('heartflowNotice',{owner:config.notifyUserId,messageId:proposal.noticeOwner===config.notifyUserId?proposal.noticeMessageId:undefined,card:require('./core/heartflow-card').heartflowCard({proposal,owner:config.notifyUserId,coordinator:machineId(),panelUrl:config.panelUrl})}),
   sessions: async () => (await sessionDirectory.list()).sessions,
   analyze: require('./core/heartflow-model').createHeartflowModel({
@@ -2955,7 +2955,7 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
   clusterNetwork.handle('workspaces.save', async (_, input) => { if (!cluster.canStart()) throw new Error('当前节点没有主节点租约，请刷新后重试'); return workspaceStore.save(input); });
   clusterNetwork.handle('conversations.put', (_, record) => { if (!cluster.canStart()) throw new Error('当前节点没有共享状态写入租约'); conversations.merge(record); return { ok: true }; });
   clusterNetwork.handle('heartflow.review', async (_, {value,sender}) => {
-    if(value.coordinator!==machineId() || heartflowStore.snapshot().config.notifyUserId!==sender)throw new Error('心流确认目标或用户不匹配');
+    if(value.coordinator!==machineId() || heartflowStore.snapshot().config.notifyUserId!==sender)throw new Error('助理确认目标或用户不匹配');
     return heartflow.review(value.id,{version:value.version,decision:value.decision,reason:'飞书卡片 check'});
   });
   clusterNetwork.handle('gateway.invoke', async (_, { method, input }) => {

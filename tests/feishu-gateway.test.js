@@ -1344,7 +1344,7 @@ test('without a default project, a new chat uses the last project on the default
 test('heartflow cards require a paired recipient and matching owner before review dispatch', async t => {
   const f=await fixture(t);await f.pair();let checks=0;f.panel.heartflowReview=async(value,sender)=>{assert.equal(sender,'ou_owner');assert.equal(value.version,3);checks++;};
   await assert.rejects(f.gateway.heartflowNotice({owner:'ou_stranger',card:{}}),/已配对/);
-  await f.gateway.heartflowNotice({owner:'ou_owner',card:{header:{title:{tag:'plain_text',content:'心流'}}}});
+  await f.gateway.heartflowNotice({owner:'ou_owner',card:{header:{title:{tag:'plain_text',content:'助理'}}}});
   assert.equal(f.sent.at(-1).chatId,'ou_owner');
   const event={messageId:'card',chatId:'oc_private',chatType:'p2p',operator:{openId:'ou_owner'},action:{value:{action:'heartflow_review',owner:'ou_stranger',version:3,decision:'approve'}}};
   await f.gateway.action(event);assert.equal(checks,0);

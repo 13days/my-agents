@@ -9,8 +9,8 @@ function heartflowCard({proposal:p,owner,coordinator,panelUrl=''}) {
   // Never approve a truncated action description from a card.
   if(active&&content.length<=16000&&p.actions.length)buttons.push({tag:'button',text:{tag:'plain_text',content:'确认全部行动'},type:'primary',value:value('approve')});
   if(active)buttons.push({tag:'button',text:{tag:'plain_text',content:'暂缓'},value:value('defer')},{tag:'button',text:{tag:'plain_text',content:'忽略'},value:value('ignore')});
-  if(panelUrl)buttons.push({tag:'button',text:{tag:'plain_text',content:'查看来源 / 修改关联'},url:panelUrl.replace(/\/$/,'')+'/heartflow'});
+  if(panelUrl)buttons.push({tag:'button',text:{tag:'plain_text',content:'查看来源 / 修改关联'},url:panelUrl.replace(/\/$/,'')+'/assistant'});
   if(buttons.length)elements.push({tag:'action',actions:buttons});
-  return {config:{wide_screen_mode:true},header:{title:{tag:'plain_text',content:'心流 · '+p.title},template:'purple'},elements};
+  return {config:{wide_screen_mode:true},header:{title:{tag:'plain_text',content:'助理 · '+p.title},template:'purple'},elements};
 }
 module.exports={heartflowCard};

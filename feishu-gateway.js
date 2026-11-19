@@ -776,8 +776,8 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (!value || typeof value !== 'object' || !allowed(msg)) return;
     if (value.owner !== msg.senderId) return send(msg, { text: '这张卡片仅限发起人操作，请发送 /sessions 获取自己的会话列表。' });
     if (value.action === 'heartflow_review') {
-      try { if(!panel.heartflowReview)throw new Error('当前节点尚未支持心流，请同步升级');await panel.heartflowReview(value,msg.senderId);return send(msg,{text:'心流 check 已记录；执行进度可在心流页面查看。'}); }
-      catch(error) { return send(msg,{text:'心流：'+error.message}); }
+      try { if(!panel.heartflowReview)throw new Error('当前节点尚未支持助理，请同步升级');await panel.heartflowReview(value,msg.senderId);return send(msg,{text:'助理 check 已记录；执行进度可在助理页面查看。'}); }
+      catch(error) { return send(msg,{text:'助理：'+error.message}); }
     }
     if (!detailed(msg) && value.action !== 'new_submit') return managementNotice(msg);
     if (value.key) {
@@ -993,7 +993,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     bootstrapRuntime: applyRuntime,
     async reload() { await stop(); reloadFiles(); applyRuntime(); return status(); },
     async heartflowNotice({owner,card,messageId}) {
-      if(!config.allowedUserIds.includes(owner) || config.disabledUserIds.includes(owner)) throw new Error('心流通知对象必须是已配对的机器人用户');
+      if(!config.allowedUserIds.includes(owner) || config.disabledUserIds.includes(owner)) throw new Error('助理通知对象必须是已配对的机器人用户');
       if(phase!=='connected'||!channel)throw new Error('飞书机器人尚未连接');
       if(messageId){await channel.updateCard(messageId,card);return {messageId};}
       return channel.send(owner,{card});
