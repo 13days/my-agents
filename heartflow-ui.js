@@ -1,6 +1,6 @@
 /* Heartflow uses the panel's authenticated API and rendering helpers. */
 let heartflowView = 'pending', heartflowSelected = '', heartflowData = null, heartflowPulseTimer = null;
-const hfLabels = { pending:'待确认', deferred:'暂缓', approved:'已批准', ignored:'已忽略', merged:'已合并', queued:'等待投递', dispatching:'投递中', accepted:'已接收', running:'执行中', completed:'已完成', failed:'失败', unknown:'结果待核对', blocked:'需重新确认', save:'修改', approve:'批准', ignore:'忽略', defer:'暂缓', split:'拆分', merge:'合并' };
+const hfLabels = { superseded:'已被后续决定替代', in_progress:'已在原会话发起', pending:'待确认', deferred:'暂缓', approved:'已批准', ignored:'已忽略', merged:'已合并', queued:'等待投递', dispatching:'投递中', accepted:'已接收', running:'执行中', completed:'已完成', failed:'失败', unknown:'结果待核对', blocked:'需重新确认', save:'修改', approve:'批准', ignore:'忽略', defer:'暂缓', split:'拆分', merge:'合并' };
 const hfTime = n => n ? new Date(n).toLocaleString() : '—';
 const hfState = s => `<span class="hf-state hf-${esc(s)}">${esc(hfLabels[s] || s)}</span>`;
 function hfProgress(data) {
@@ -101,6 +101,7 @@ function hfMatters(data) {
 }
 function hfActivity(data) {
   $('#hf-content').innerHTML=`<div class="hf-toolbar"><button class="btn" id="hf-reconcile">核对执行状态</button><span>结果不明的行动不会自动重发。</span></div>${Object.values(data.deliveries).reverse().map(d=>`<article class="hf-card">${hfState(d.state)} <small>${esc(hfTime(d.updatedAt))}</small><h3>${esc(data.proposals[d.proposalId]?.title||'行动')}</h3><p>${esc(d.action.prompt)}</p><small>${esc(d.action.machineId)} · ${esc(d.action.cwd)} · 建议版本 ${d.version}</small>${d.error?`<p class="hf-error">${esc(d.error)}</p>`:''}${d.sessionId||d.action.sessionId?`<p><a href="/sessions/${encodeURIComponent(d.sessionId||d.action.sessionId)}">查看执行会话</a></p>`:''}</article>`).join('')||'<p class="hf-empty">还没有批准的行动。</p>'}`;
+  $('#hf-content').insertAdjacentHTML('beforeend',Object.values(data.proposals).filter(p=>p.resolutions?.length).map(p=>`<article class="hf-card">${hfState(p.state)}<h3>${esc(p.title)}</h3>${p.resolutions.map(r=>`<p>${esc(r.reason)}</p><a href="/sessions/${encodeURIComponent(r.sessionId)}">查看原会话</a><pre>${esc(r.evidence.map(e=>e.quote).join('\n'))}</pre>`).join('')}</article>`).join(''));
   $('#hf-reconcile').onclick=e=>hfDo(e.target,()=>api('POST','heartflow/reconcile',{}));
 }
 function hfLearning(data) {

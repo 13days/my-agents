@@ -80,3 +80,29 @@ test('a source update while the model is thinking cannot silently approve an out
  const {store}=setup(t);store.configure({since:Date.now()-60000});let release;const pending=new Promise(r=>{release=r;});
  const flow=createHeartflow({store,source:{},sessions:async()=>[],dispatch:()=>{},analyze:()=>pending});const result=flow.suggest();await new Promise(r=>setImmediate(r));store.ingest([{id:'m1',chatId:'oc_a',text:'撤销原请求',updatedAt:2}]);release({model:'test',suggestions:[]});await assert.rejects(result,/来源消息已更新/);assert.equal(Object.keys(store.snapshot().proposals).length,0);
 });
+
+test('concurrent notices send once and later versions update the same receipt',async t=>{
+ const {store}=setup(t);store.configure({notifyEnabled:true,notifyUserId:'ou_owner'});const p=draft(store),seen=[];
+ const flow=createHeartflow({store,source:{},sessions:async()=>[],notify:async p=>{seen.push(p.noticeMessageId);await new Promise(r=>setTimeout(r,5));return {messageId:'card-1'};}});
+ await Promise.all([flow.notices(),flow.notices()]);store.review(p.id,{version:1,decision:'save'});await flow.notices();assert.deepEqual(seen,[undefined,'card-1']);
+});
+test('later reversal closes the exact action with evidence and invalidates old approvals',async t=>{
+ const {store}=setup(t),p=draft(store),timestamp=new Date(Date.now()+1000).toISOString();
+ const flow=createHeartflow({store,source:{},sessions:async()=>[],history:async()=>({messages:[{role:'user',timestamp,text:'这个改回来吧，先保持原样，不用关了'}]}),analyze:async c=>({suggestions:[],resolutions:[{actionId:p.actions[0].id,sessionId:'session-a',status:'superseded',reason:'用户已撤回',evidence:[{messageId:c.transcripts[0].messages[0].id,quote:'这个改回来吧，先保持原样，不用关了'}]}]})});
+ await flow.verify();const next=store.snapshot().proposals[p.id];assert.equal(next.state,'superseded');assert.equal(next.actions.length,0);assert.equal(next.resolutions.length,1);assert.throws(()=>store.review(p.id,{version:1,decision:'approve'}),/已经更新/);assert.ok(!JSON.stringify(heartflowCard({proposal:next})).includes('heartflow_review'));
+});
+test('fabricated evidence and checkpoint transcripts cannot resolve work',async t=>{
+ const {store}=setup(t),p=draft(store);let checkpoint=false;
+ const flow=createHeartflow({store,source:{},sessions:async()=>[],history:async()=>({checkpoint,messages:[]}),analyze:async()=>({suggestions:[],resolutions:[{actionId:p.actions[0].id,sessionId:'session-a',status:'completed',evidence:[{messageId:'invented',quote:'已经完成整个需求'}]}]})});
+ await flow.verify();assert.equal(store.snapshot().proposals[p.id].state,'pending');checkpoint=true;await assert.rejects(flow.verify(),/实时记录/);
+});
+test('failed card updates never fall back to sending another card',async t=>{
+ const {store}=setup(t);store.configure({notifyEnabled:true,notifyUserId:'ou_owner'});const p=draft(store);let calls=0;
+ const flow=createHeartflow({store,source:{},sessions:async()=>[],notify:async p=>{calls++;if(p.noticeMessageId)throw Error('update failed');return {messageId:'card-1'};}});
+ await flow.notices();store.review(p.id,{version:1,decision:'save'});await flow.notices();await flow.notices();assert.equal(calls,2);assert.equal(store.snapshot().proposals[p.id].noticeMessageId,'card-1');
+});
+test('partial history resolution preserves other actions and checkpoint checks block approval',async t=>{
+ const {store}=setup(t),p=draft(store,[action('a'),action('b','session-b')]);let checkpoint=false;
+ const flow=createHeartflow({store,source:{},sessions:async()=>[],history:async()=>({checkpoint,messages:[{role:'user',timestamp:new Date(Date.now()+1000).toISOString(),text:'这个改回来吧，先保持原样，不用关了'}]}),analyze:async c=>({suggestions:[],resolutions:[{actionId:'a',sessionId:'session-a',status:'superseded',reason:'撤回',evidence:[{messageId:c.transcripts[0].messages[0].id,quote:'这个改回来吧，先保持原样，不用关了'}]}]})});
+ await flow.verify();assert.equal(store.snapshot().proposals[p.id].state,'pending');assert.deepEqual(store.snapshot().proposals[p.id].actions.map(a=>a.id),['b']);checkpoint=true;await assert.rejects(flow.review(p.id,{version:2,decision:'approve'}),/实时记录/);assert.equal(Object.keys(store.snapshot().deliveries).length,0);
+});

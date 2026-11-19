@@ -2000,8 +2000,9 @@ const heartflowStore = HISTORY_WORKER ? null : require('./core/heartflow-store')
 const heartflowSource = require('./core/heartflow-feishu').createPersonalFeishu();
 const heartflow = HISTORY_WORKER ? null : require('./core/heartflow').createHeartflow({
   store: heartflowStore, source: heartflowSource,
+  history: conversationHistory,
   notifyResult: (delivery,config) => sharedGateway('heartflowNotice',{owner:config.notifyUserId,card:{header:{title:{tag:'plain_text',content:'心流 · '+({completed:'任务已完成',failed:'任务失败',unknown:'结果待核对',blocked:'需重新确认'}[delivery.state]||delivery.state)}},elements:[{tag:'div',text:{tag:'plain_text',content:[delivery.action.prompt,delivery.result||delivery.error||'', '会话：'+(delivery.sessionId||delivery.action.sessionId||'待创建')].join('\n\n').slice(0,12000)}}]}}),
-  notify: (proposal,config) => sharedGateway('heartflowNotice',{owner:config.notifyUserId,card:require('./core/heartflow-card').heartflowCard({proposal,owner:config.notifyUserId,coordinator:machineId(),panelUrl:config.panelUrl})}),
+  notify: (proposal,config) => sharedGateway('heartflowNotice',{owner:config.notifyUserId,messageId:proposal.noticeOwner===config.notifyUserId?proposal.noticeMessageId:undefined,card:require('./core/heartflow-card').heartflowCard({proposal,owner:config.notifyUserId,coordinator:machineId(),panelUrl:config.panelUrl})}),
   sessions: async () => (await sessionDirectory.list()).sessions,
   analyze: require('./core/heartflow-model').createHeartflowModel({
     url: `http://127.0.0.1:${PROXY_PORT}/backend-api/codex/responses`, token: codexRelayToken,

@@ -98,6 +98,7 @@ function createHeartflowStore({ dir, now = Date.now }) {
       const before=copy(ps); let ids=[...new Set(ps.flatMap(p=>p.messageIds))];
       if (splitIds) { if (ps.length!==1 || !splitIds.length || splitIds.length>=ids.length || splitIds.some(id=>!ids.includes(id))) fail('拆分需选择部分来源消息'); ids=[...new Set(splitIds)]; }
       const id=uid(), p={...copy(ps[0]),id,version:1,messageIds:ids,matterIds:[...new Set(ps.flatMap(p=>p.matterIds))],actions:[],summary:ps.map(p=>p.summary).join('\n').slice(0,12000),reason:'整理后请重新确认行动范围',createdAt:now(),updatedAt:now()};
+      for(const key of ['noticeMessageId','noticeOwner','noticeState','notifiedVersion','historyFingerprint','resolutions','resolvedActions'])delete p[key];
       s.proposals[id]=p;
       for (const old of ps) { old.version++; if(splitIds) {old.messageIds=old.messageIds.filter(id=>!ids.includes(id));old.actions=[];} else old.state='merged'; }
       s.checks.push({id:uid(),at:now(),decision:splitIds?'split':'merge',before,after:copy(p),learning:true}); return p;

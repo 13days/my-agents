@@ -1,6 +1,6 @@
 const { normalizeMessage } = require('./heartflow-feishu');
-function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>null,notify=null,notifyResult=null,now=Date.now}) {
-  let polling=false,analyzing=false,dispatching=false,timer;
+function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>null,notify=null,notifyResult=null,history=null,now=Date.now}) {
+  let polling=false,analyzing=false,dispatching=false,notifying=false,checking=false,timer;
   store.recover();
   const errorText=e=>String(e.message||e).slice(0,1000);
   async function sync() {
@@ -27,11 +27,34 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
       return {ok:true};
     }catch(e){store.transaction(s=>{s.source={...s.source,ok:false,error:errorText(e)};});throw e;}finally{polling=false;}
   }
+  async function verify(id,force=false) {
+    if(!history)return;
+    if(checking)throw new Error('正在核对执行记录，请稍后重试');
+    checking=true;
+    try {
+      const snapshot=store.snapshot();
+      for(const p of Object.values(snapshot.proposals).filter(p=>['pending','deferred'].includes(p.state)&&(!id||p.id===id)).slice(-50)){
+        const result=await require('./heartflow-history').inspectProposal(p,snapshot,history,analyze,force);
+        if(!result)continue;
+        store.transaction(s=>{const current=s.proposals[p.id];if(current.version!==p.version)return;
+          if(p.messageIds.some(id=>s.messages[id]?.revision!==snapshot.messages[id]?.revision))throw new Error('来源已变化，请重新核对');
+          current.historyFingerprint=result.fingerprint;
+          if(!result.resolutions.length)return;
+          current.resolutions=[...(current.resolutions||[]),...result.resolutions];
+          current.resolvedActions=[...(current.resolvedActions||[]),...current.actions.filter(a=>result.resolutions.some(r=>r.actionId===a.id))];
+          current.actions=current.actions.filter(a=>!result.resolutions.some(r=>r.actionId===a.id));
+          current.version++;current.updatedAt=now();
+          if(!current.actions.length)current.state=result.resolutions.some(r=>r.status==='superseded')?'superseded':result.resolutions.some(r=>r.status==='in_progress')?'in_progress':'completed';
+        });
+      }
+    }finally{checking=false;}
+  }
   async function suggest() {
     if(analyzing)return {busy:true};analyzing=true;
     try{
+      await verify();
       const s=store.snapshot(),covered=new Set(Object.values(s.proposals).flatMap(p=>p.messageIds));
-      const messages=Object.values(s.messages).filter(m=>!m.deleted && m.senderId!==s.config.selfId && m.createdAt>=s.config.since && (!covered.has(m.id)||Object.values(s.proposals).some(p=>p.sourceChanged&&p.messageIds.includes(m.id))) && s.cursor['analyzed:'+m.id]!==m.revision).sort((a,b)=>a.createdAt-b.createdAt).slice(0,30);
+      const messages=Object.values(s.messages).filter(m=>!m.deleted && (m.senderId!==s.config.selfId || Object.values(s.proposals).some(p=>['pending','deferred'].includes(p.state)&&p.messageIds.some(id=>s.messages[id]?.chatId===m.chatId))) && m.createdAt>=s.config.since && (!covered.has(m.id)||Object.values(s.proposals).some(p=>p.sourceChanged&&p.messageIds.includes(m.id))) && s.cursor['analyzed:'+m.id]!==m.revision).sort((a,b)=>a.createdAt-b.createdAt).slice(0,30);
       if(!messages.length)return {created:0};
       const catalog=(await sessions()).slice(0,100),candidates=catalog.map(x=>({id:x.id,title:x.title,engine:x.engine,machineId:x.machineId,cwd:x.project,latestPrompt:x.latestPrompt?.slice(0,600),running:x.running}));
       const chats=new Set(messages.map(m=>m.chatId));
@@ -47,7 +70,7 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
         if((draft.matterIds||[]).some(id=>!s.matters[id]))continue;
         if(draft.relatedProposalId && pending.some(p=>p.id===draft.relatedProposalId)){
           const previous=s.proposals[draft.relatedProposalId];
-          const merged=store.transaction(next=>{const p=next.proposals[previous.id];if(p.version!==previous.version || !['pending','deferred'].includes(p.state))return false;const ids=[...new Set([...p.messageIds,...draft.messageIds])];if(ids.length>30)return false;p.messageIds=ids;p.version++;p.sourceChanged=true;p.state='pending';p.updatedAt=now();return true;});
+          const merged=store.transaction(next=>{const p=next.proposals[previous.id];if(p.version!==previous.version || !['pending','deferred'].includes(p.state))return false;const ids=[...new Set([...p.messageIds,...draft.messageIds])];if(ids.length>30)return false;p.messageIds=ids;p.summary=String(draft.summary||p.summary).slice(0,12000);p.reason=String(draft.reason||p.reason).slice(0,3000);p.version++;p.sourceChanged=true;p.state='pending';p.updatedAt=now();return true;});
           if(merged){created++;continue;}
         }
         const actions=(draft.actions||[]).filter(a=>a.sessionId?candidates.some(c=>c.id===a.sessionId):candidates.some(c=>c.cwd===a.cwd&&c.machineId===a.machineId)).map(a=>{
@@ -57,7 +80,7 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
         if(draft.messageIds.every(id=>covered.has(id)))continue;
         store.draft({...draft,actions,model:result.model});created++;
       }
-      store.transaction(next=>{for(const m of messages)next.cursor['analyzed:'+m.id]=m.revision;next.source.analysisError='';next.source.lastAnalysis=now();next.source.analysisFailures=0;next.source.analysisRetryAt=0;});return {created};
+      store.transaction(next=>{for(const m of messages)next.cursor['analyzed:'+m.id]=m.revision;next.source.analysisError='';next.source.lastAnalysis=now();next.source.analysisFailures=0;next.source.analysisRetryAt=0;});await verify();return {created};
     }catch(e){store.transaction(s=>{s.source.analysisError=errorText(e);s.source.analysisFailures=(s.source.analysisFailures||0)+1;s.source.analysisRetryAt=now()+Math.min(3600000,60000*2**Math.min(s.source.analysisFailures,6));});throw e;}finally{analyzing=false;}
   }
   async function deliver() {
@@ -76,21 +99,26 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
     }finally{dispatching=false;}
   }
   async function notices() {
+    if(notifying)return;notifying=true;
+    try {
     const s=store.snapshot();if(!notify || !s.config.notifyEnabled || !s.config.notifyUserId)return;
     if(notifyResult)for(const d of Object.values(s.deliveries).filter(d=>['completed','failed','unknown','blocked'].includes(d.state) && d.notifiedState!==d.state)){
       store.delivery(d.id,{notifiedState:d.state});
       try{await notifyResult(d,s.config);}catch(e){store.transaction(next=>{next.source.noticeError=errorText(e);});}
     }
-    for(const p of Object.values(s.proposals).filter(p=>p.state==='pending' && p.notifiedVersion!==p.version)){
+    for(const p of Object.values(s.proposals).filter(p=>(p.state==='pending'||p.noticeMessageId) && p.notifiedVersion!==p.version)){
       store.transaction(next=>{next.proposals[p.id].notifiedVersion=p.version;next.proposals[p.id].noticeState='sending';});
-      try{await notify(p,s.config);store.transaction(next=>{next.proposals[p.id].noticeState='sent';});}
+      try{if((p.noticeState==='unknown'||p.noticeState==='sent')&&!p.noticeMessageId)throw new Error('上次通知结果不明，需核对原卡片');const receipt=await notify(p,s.config);store.transaction(next=>{const current=next.proposals[p.id];current.noticeState='sent';if(receipt?.messageId){current.noticeMessageId=receipt.messageId;current.noticeOwner=s.config.notifyUserId;}});}
       catch(e){store.transaction(next=>{next.proposals[p.id].noticeState='unknown';next.source.noticeError=errorText(e)+'；未自动重发通知';});}
     }
+    }finally{notifying=false;}
   }
   async function tick() {if(store.snapshot().config.enabled){try{await sync();if(store.snapshot().config.modelEnabled && (store.snapshot().source.analysisRetryAt||0)<=now())await suggest();}catch{}}await deliver();await notices();}
-  return {sync,suggest,deliver,notices,status:()=>({polling,analyzing,dispatching}),start(){if(timer)return;const schedule=()=>{timer=setTimeout(async()=>{await tick().catch(()=>{});schedule();},Math.max(30,store.snapshot().config.intervalSeconds)*1000);timer.unref();};schedule();},stop(){clearTimeout(timer);timer=null;},
+  return {sync,suggest,deliver,notices,verify,status:()=>({polling,analyzing,dispatching}),start(){if(timer)return;const schedule=()=>{timer=setTimeout(async()=>{await tick().catch(()=>{});schedule();},Math.max(30,store.snapshot().config.intervalSeconds)*1000);timer.unref();};schedule();},stop(){clearTimeout(timer);timer=null;},
     async review(id,input){
       if(input.decision==='approve'){
+        if(history && input.draft && JSON.stringify(input.draft.actions)!==JSON.stringify(store.snapshot().proposals[id]?.actions))throw new Error('请先保存修改，再确认执行，以便核对修改后的范围');
+        await verify(id,true);
         const p=store.snapshot().proposals[id],draft=input.draft||p;if(!draft)throw new Error('建议不存在');
         const all=await sessions();for(const a of draft.actions||[]){if(input.actionIds&&!input.actionIds.includes(a.id))continue;if(a.sessionId){const target=all.find(s=>s.id===a.sessionId);if(!target)throw new Error('目标会话不在当前可访问列表，请刷新后改派');if(a.machineId!==target.machineId || a.cwd!==target.project || a.engine!==target.engine)throw new Error('目标会话的位置或引擎已变化，请重新选择会话');}}
       }

@@ -992,9 +992,10 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     start, stop, configure, status, receive, action, repairCard, sendReply, labelContact, refreshContacts,
     bootstrapRuntime: applyRuntime,
     async reload() { await stop(); reloadFiles(); applyRuntime(); return status(); },
-    async heartflowNotice({owner,card}) {
+    async heartflowNotice({owner,card,messageId}) {
       if(!config.allowedUserIds.includes(owner) || config.disabledUserIds.includes(owner)) throw new Error('心流通知对象必须是已配对的机器人用户');
       if(phase!=='connected'||!channel)throw new Error('飞书机器人尚未连接');
+      if(messageId){await channel.updateCard(messageId,card);return {messageId};}
       return channel.send(owner,{card});
     },
     revealSecret: () => config.appSecret,
