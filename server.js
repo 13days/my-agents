@@ -1985,13 +1985,23 @@ proxyServer.on('error', e => {
 if (!HISTORY_WORKER) proxyServer.listen(PROXY_PORT, '127.0.0.1');
 
 
-function saveClaudeProxy({ id, input, add = false }) {
+async function setValidatedDefaultModel(engine,model){
+  if(model){
+    const catalog=engine==='codex'?await codexPoolModels({refresh:true}):await accountRouter.models({refresh:true});
+    if(catalog.available===false||!Array.isArray(catalog.models))throw new Error('无法验证当前账号的模型列表，默认模型未保存');
+    const effective=engine==='claude'?(accountRouter.configuredTarget('',model)?.model||model):model;
+    if(!catalog.models.some(x=>x.id===effective))throw new Error('当前账号不支持模型 '+model+'，请选择可用列表中的模型');
+  }
+  return accountPool.setDefaultModel(engine,model);
+}
+
+async function saveClaudeProxy({ id, input, add = false }) {
   const state=accountRouter.status();
   let rows=state.accounts;
   if (add) rows=[...rows,{...input,id:crypto.randomUUID(),name:input.name || 'Claude '+new URL(input.url).hostname,modelMap:input.modelMap || {},authType:input.authType || 'bearer'}];
   else rows=input.deleted ? rows.filter(row=>row.id!==id) : rows.map(row=>row.id===id ? {...row,...input} : row);
   const selected=rows.some(row=>row.id===state.selected&&row.enabled) ? state.selected : rows.find(row=>row.enabled)?.id || '';
-  return accountRouter.save({...state,accounts:rows,selected});
+  return accountRouter.saveValidated({...state,accounts:rows,selected});
 }
 
 // Heartflow is deliberately local to its configured coordinator. It does not
@@ -2067,10 +2077,16 @@ const feishuGateway = require('./feishu-bots').createFeishuBots({
     engine: id => sessionEngine(id),
     engines: () => registry.list().map(engine => ({ id: engine.id, ...engine.meta, capabilities: engine.capabilities })),
     engineInfo: (engine, node = 'local') => registry.adapter(engine, node)?.detect?.() || {},
-    models: ({ engine, sessionId, refresh }) => engine === 'codex' ? codexPoolModels({ sessionId, refresh }) : registry.get(engine)?.capabilities?.accounts ? accountRouter.models({ sessionId, refresh }) : Promise.resolve({ models: [] }),
+    models: ({ engine, sessionId, refresh, node = 'local' }) => {
+      if(node!=='local'&&node!==machineId()){
+        if(!clusterNetwork)throw new Error('无法连接执行机器验证模型，请恢复连接后重试');
+        return clusterNetwork.call(node,'accounts.models',{engine,sessionId,refresh},{timeout:10000});
+      }
+      return engine==='codex'?codexPoolModels({sessionId,refresh}):accountRouter.models({sessionId,refresh});
+    },
     validModel: (engine, model, node = 'local') => !!(registry.adapter(engine, node) || registry.get(engine))?.validModel(model),
     defaultModel: engine => accountPool?.defaultModels()[engine] || '',
-    setDefaultModel: async (engine, model) => { if (!accountPool) throw new Error('账号池未就绪'); return accountPool.setDefaultModel(engine, model); },
+    setDefaultModel: async (engine, model) => { if (!accountPool) throw new Error('账号池未就绪'); return setValidatedDefaultModel(engine, model); },
     currentModel: id => { const run = manager.get(id); return run && !run.job.closed ? run.job.meta.model || '' : ''; },
     nodes: () => executionMachines().filter(item => item.id !== machineId()).map(item => ({ ...item, connected: item.online, home: registry.node(item.id)?.host.homeDir() })),
     routes: engine => engine === 'codex' ? { ...accountPool.codexStatus(), engine: 'codex', pins: accountPool.codexStatus().routes } : ({ ...accountRouter.status(), pins: accountRouter.sessions().routes }),
@@ -2392,7 +2408,7 @@ const server = http.createServer(async (req, res) => {
         }
         if (req.method === 'POST' && operation === 'proxy') {
           if (engine === 'codex') accountPool.importCodex({OPENAI_API_KEY:input.token,base_url:input.url},input.name);
-          else saveClaudeProxy({ input:{...input,enabled:true}, add:true });
+          else await saveClaudeProxy({ input:{...input,enabled:true}, add:true });
         } else if (req.method === 'POST' && !operation) {
           if (engine === 'codex') accountPool.importCodex(input.auth || readCodexAuth(),input.name);
           else accountPool.importClaude(input.auth,input.name);
@@ -2409,7 +2425,7 @@ const server = http.createServer(async (req, res) => {
             const account=accountRouter.status().accounts.find(row=>row.id===id);
             if (!account) throw new Error('Claude 账号不存在');
             if (account.shared && account.sourceNode) await clusterNetwork.call(account.sourceNode,'accounts.configureProxy',{id:id.split(':').slice(2).join(':'),input:patch},{timeout:5000});
-            else saveClaudeProxy({id,input:patch});
+            else await saveClaudeProxy({id,input:patch});
           }
         } else return sendJSON(res,405,{error:'method not allowed'});
         await accountPool.refresh(); return sendJSON(res,200,status());
@@ -2432,7 +2448,7 @@ const server = http.createServer(async (req, res) => {
           try {
             const body = JSON.parse(await readBody(req) || '{}'), model = typeof body.model === 'string' ? body.model.trim() : '';
             if (model && !(registry.get(body.engine)?.validModel(model))) throw new Error('该引擎的模型 ID 无效');
-            return sendJSON(res, 200, accountPool.setDefaultModel(body.engine, model));
+            return sendJSON(res, 200, await setValidatedDefaultModel(body.engine, model));
           } catch (error) { return sendJSON(res, 400, { error: error instanceof SyntaxError ? 'JSON 格式无效' : error.message }); }
         }
       }
@@ -2442,7 +2458,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (!String(req.headers['content-type'] || '').startsWith('application/json')) return sendJSON(res, 415, { error: '需要 application/json' });
       try {
-        if (req.method === 'PUT' && parts.length === 2) return sendJSON(res, 200, accountRouter.save(JSON.parse(await readBody(req))));
+        if (req.method === 'PUT' && parts.length === 2) return sendJSON(res, 200, await accountRouter.saveValidated(JSON.parse(await readBody(req))));
         if (req.method === 'POST' && parts[2] === 'import') return sendJSON(res, 200, accountRouter.importSettings());
         if (req.method === 'POST' && parts[2] === 'setup') return sendJSON(res, 200, accountRouter.setup());
         if (req.method === 'POST' && parts[2] === 'reset') return sendJSON(res, 200, accountRouter.reset());
@@ -2948,6 +2964,7 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
   } });
   cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: feishuGateway, canTransfer: () => manager.running().length === 0 && executionRuntime.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });
   clusterNetwork.handle('accounts.configureProxy', (_, input) => saveClaudeProxy(input));
+  clusterNetwork.handle('accounts.models', (_, {engine,sessionId,refresh}) => engine==='codex'?codexPoolModels({sessionId,refresh}):accountRouter.models({sessionId,refresh}));
   clusterNetwork.handle('accounts.catalog', () => accountPool.catalog());
   clusterNetwork.handle('accounts.key', () => accountPool.exchangeKey());
   clusterNetwork.handle('accounts.exchange', (source, packet) => { if (clusterConfig.members.find(item => item.id === source)?.witness) throw new Error('见证节点不参与凭证同步'); return accountPool.exchangeWire(packet); });

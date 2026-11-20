@@ -400,3 +400,12 @@ test('unsupported model falls back but invalid request does not',async t=>{
  let second=0;const f=await fixture(t,[(_req,res,body)=>{res.writeHead(400);res.end(JSON.parse(body).model==='missing'?'model not found':'messages must be an array');},(_req,res)=>{second++;res.end('backup');}]);f.router.save({mode:'manual',selected:'a0',accounts:f.accounts});
  assert.equal(await (await f.send({model:'missing'})).text(),'backup');const r=await f.send({model:'valid'});assert.equal(r.status,400);assert.equal(await r.text(),'messages must be an array');assert.equal(second,1);
 });
+test('known unavailable model is skipped on the next first attempt',async t=>{
+ let bad=0,good=0;const f=await fixture(t,[(_req,res)=>{bad++;res.writeHead(404);res.end('model not found');},(_req,res)=>{good++;res.end('ok');}]);f.router.save({mode:'manual',selected:'a0',accounts:f.accounts});await (await f.send()).text();await (await f.send()).text();assert.equal(bad,1);assert.equal(good,2);
+});
+test('model mappings are validated before saving, failed discovery preserves configuration',async t=>{
+ let online=true;const f=await fixture(t,[(req,res)=>{if(!online){res.writeHead(503);res.end('down');return;}res.end(JSON.stringify({data:[{id:'valid'}]}));}]);
+ await assert.rejects(f.router.saveValidated({mode:'manual',selected:'a0',accounts:[{...f.accounts[0],modelMap:{'*':'missing'}}]}),/不可用/);assert.equal(f.router.status().accounts.length,0);
+ await f.router.saveValidated({mode:'manual',selected:'a0',accounts:[{...f.accounts[0],modelMap:{'*':'valid'}}]});assert.equal(f.router.status().accounts[0].modelMap['*'],'valid');
+ online=false;await assert.rejects(f.router.saveValidated({mode:'manual',selected:'a0',accounts:[{...f.accounts[0],token:'changed',modelMap:{'*':'other'}}]}),/无法验证/);assert.equal(f.router.status().accounts[0].modelMap['*'],'valid');
+});

@@ -165,7 +165,7 @@ function modelPicker({ engine, sessionId, model = '', models = [], accountName =
     ...Array.from(options, ([id, name]) => ({ text: plain(clip(name, 48)), value: id })),
   ], behaviors: [{ type: 'callback', value: action(context, { action: 'set_model', id: sessionId, engine }) }] });
   elements.push(muted('下一轮生效，当前任务不受影响。/model 模型ID 可手动指定；/model default 恢复默认。模型选择按会话保存。'));
-  if (!models.length) elements.push(muted('该引擎暂未返回模型列表，可使用命令输入模型 ID。'));
+  if (!models.length) elements.push(muted('暂未获取可用模型列表，请恢复连接后刷新；无法验证的新模型不会保存。'));
   if (models.length > 50) elements.push(muted('下拉框展示前 50 个模型，其余可用 /model 模型ID 指定。'));
   const global = [];
   if (model && model !== defaultModel) global.push(button('设为全局默认', action(context, { action: 'set_default_model', id: sessionId, engine, model })));
@@ -180,7 +180,7 @@ function currentSession({ binding, item, switched = false, exists = false, runni
   const pending = !item && !exists, title = item?.title || '新会话', engines = catalogOf(context), engineId = item?.engine || binding.engine || 'claude', engine = engines.label(engineId);
   const projectName = path.posix.basename(binding.worktree?.repository || binding.cwd) || binding.cwd, project = escape(projectName), where = escape(nodeLabel);
   const elements = pending ? [markdown(`**当前项目：${project}**`), muted(`${context.location || '当前位置'} · ${engine} · ${where} · 项目确认后，直接发送问题开始对话`)] : [markdown(`**${escape(clip(title, 100))}**`), muted(`${context.location ? context.location + ' · ' : ''}${engine} · ${where} · ${project} · ${running ? '● 正在运行' : '已就绪，直接发消息继续'}`)];
-  elements.push(muted(`模型：${escape(model)}`));
+  elements.push(muted(`请求模型：${escape(model)}（代理可能映射为其他模型）`));
   if (nodeLabel) elements.push(muted(`执行机器：${escape(nodeLabel)}`));
   if (binding.handoff) elements.push(markdown(`**${binding.handoff.from === binding.handoff.to ? '已创建接续会话 · ' + escape(binding.handoff.to) : '执行位置已切换：' + escape(binding.handoff.from) + ' → ' + escape(binding.handoff.to)}**\n${binding.handoff.reason === 'offline' ? '原机器离线，接管机器已接续新一轮。' : '已按手动选择创建接续会话。'}${binding.handoff.context === 'checkpoint' ? '上下文来自有限的对话检查点，文件和工具状态需核对。' : '没有可恢复的对话检查点，请补充必要上下文。'}`));
   if (binding.worktree) elements.push(muted(`独立工作区 · ${escape(binding.worktree.branch)}`));
@@ -213,7 +213,7 @@ function task({ binding, title, view, elapsed, nodeLabel = '', model = '默认�
     return card(view.phase, elements, { subtitle: '工具执行状态与最终回复', template, summary: `${view.phase}${view.done ? ' · ' + clip(view.text, 90) : ''}` });
   }
   const elements = [muted(`${context.location ? context.location + ' · ' : ''}${catalogOf(context).label(binding.engine || 'claude')} · ${escape(path.basename(binding.cwd) || '项目')} · ${Math.max(0, Math.floor(elapsed / 1000))} 秒${tools.length ? ` · 工具 ${done}/${tools.length}` : ''}`)];
-  elements.push(muted(`模型：${escape(model)}`));
+  elements.push(muted(`请求模型：${escape(model)}（代理可能映射为其他模型）`));
   if (nodeLabel) elements.push(muted(`执行机器：${escape(nodeLabel)}`));
   if (view.nativeSession?.name) elements.push(muted(`原终端会话：${escape(clip(view.nativeSession.name, 80))} · ${escape(String(view.nativeSession.id || binding.id).slice(0, 8))}`));
   if (binding.handoff) elements.push(markdown(`**${binding.handoff.from === binding.handoff.to ? '已创建接续会话 · ' + escape(binding.handoff.to) : '执行位置已切换：' + escape(binding.handoff.from) + ' → ' + escape(binding.handoff.to)}**\n${binding.handoff.reason === 'offline' ? '原机器离线，接管机器已接续新一轮。' : '已按手动选择创建接续会话。'}${binding.handoff.context === 'checkpoint' ? '上下文来自有限的对话检查点，文件和工具状态需核对。' : '没有可恢复的对话检查点，请补充必要上下文。'}`));

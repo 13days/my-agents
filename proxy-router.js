@@ -59,7 +59,33 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
   const accountsOf = () => [...config.accounts, ...shared];
   const health = new Map();
   const live = new Map(); // sessionId -> { accountId, accountName, inflight, lastAt, lastStatus, model, pinned }
-  const modelCache = new Map();
+  const modelCache = new Map(), modelHealth = new Map();
+  const modelKey = (a,m) => JSON.stringify([a.id,a.url,a.token,m]);
+  const mappedModel = (a,m) => {const map=a.modelMap||{},key=Object.keys(map).find(k=>k!=='*'&&m.toLowerCase().includes(k.toLowerCase()));return map[m]||map[key]||map['*']||m;};
+  function modelRank(a,m){
+    const actual=mappedModel(a,m),h=modelHealth.get(modelKey(a,actual));
+    if(h&&Date.now()-h.at<300000)return h.ok?0:3;
+    const c=modelCache.get(a.id+a.url+a.token);
+    if(c?.value?.available&&Date.now()-c.at<300000)return c.value.models.some(x=>x.id===actual)?1:2;
+    return 2;
+  }
+  async function validateModels(input){
+    if(!Array.isArray(input.accounts))throw new Error('请选择有效账号列表');
+    for(const source of input.accounts){
+      if(source.enabled===false||shared.some(a=>a.id===source.id))continue;
+      const old=config.accounts.find(a=>a.id===source.id)||{};
+      const parsed=source.env===undefined?{}:parseEnvInput(source.env);
+      const a={...old,...parsed,...source,token:parsed.token||source.token||old.token};
+      const map=source.modelMap||parsed.modelMap||old.modelMap||{};
+      if(!Object.values(map).length)continue;
+      if(old.url===a.url&&old.token===a.token&&JSON.stringify(old.modelMap)===JSON.stringify(map))continue;
+      const catalog=await discoverModels(a);
+      if(!catalog.available)throw new Error('无法验证 '+a.name+' 的模型列表，配置未保存，请恢复连接后重试');
+      for(const model of Object.values(map))if(!catalog.models.some(x=>x.id===model)||modelRank({...a,modelMap:{}},model)===3)throw new Error('模型 '+model+' 当前不可用于 '+a.name+'，配置未保存');
+    }
+  }
+  async function saveValidated(input){await validateModels(input);return save(input);}
+
   let cursor = 0, lastUsed = '';
   const localURL = `http://127.0.0.1:${port}`;
   function connectionStatus() {
@@ -230,6 +256,8 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
       } else if (preferred && candidates.includes(preferred)) {
         candidates = [preferred, ...candidates.filter(a => a !== preferred)];
       }
+      if(!delegated&&!isOAuth&&!pinned&&snapshot.mode==='failover')candidates.sort((a,b)=>modelRank(a,model)-modelRank(b,model));
+      candidates=candidates.filter(a=>delegated||isOAuth||modelRank(a,model)<3);
       // Only real turns (not count_tokens) mark a session as running.
       if (sessionId && /\/messages(\?|$)/.test(req.url)) {
         const entry = live.get(sessionId) || { inflight: 0 };
@@ -321,7 +349,7 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
             if (delay > 0) health.get(account.id).cooldownUntil = Date.now() + Math.min(delay, 86400000);
           }
           const shouldRetry = retry && index < candidates.length && !isOAuth && !delegated;
-          const inspectModelError = [400,404].includes(code) && index < candidates.length && !isOAuth && !delegated;
+          const inspectModelError = [400,404].includes(code) && !isOAuth;
           const captured = [];
           let finished = false;
           const saveResponse = incomplete => { if (finished) return; finished = true; saveAttempt(code, Buffer.concat(captured), String(response.headers['content-type']).includes('event-stream'), response.headers['content-encoding'], incomplete); };
@@ -333,7 +361,7 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
             if(inspectModelError){
               const errorText=Buffer.concat(captured).toString();
               const unavailable=/model/i.test(errorText)&&/not.found|not.exist|unavailable|unsupported|not.support|no.access|not.have.access|不存在|不支持|不可用/i.test(errorText);
-              if(unavailable){moved=true;attempt();return;}
+              if(unavailable){modelHealth.set(modelKey(account,attemptInfo.routing.actualModel),{ok:false,at:Date.now()});if(index<candidates.length&&!delegated){moved=true;attempt();return;}}
               res.writeHead(code,cleanHeaders(response.headers));res.end(Buffer.concat(captured));return;
             }
             if(shouldRetry){moved=true;attempt();}
@@ -341,6 +369,7 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
           response.on('close', () => saveResponse(!response.complete));
           response.on('error', () => { saveResponse(true); res.destroy(); });
           if (shouldRetry || inspectModelError) { response.resume(); return; }
+          if(code>=200&&code<300)modelHealth.set(modelKey(account,attemptInfo.routing.actualModel),{ok:true,at:Date.now()});
           if (!retry) health.set(account.id, { lastStatus: code, cooldownUntil: 0, lastUsedAt: Date.now() });
           lastUsed = account.id;
           if (sessionId) {
@@ -373,7 +402,7 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
             timer = setTimeout(done, delay + 5);res.once('close', done);
           });
           if (res.destroyed) return;
-          candidates = routable.filter(a => (health.get(a.id)?.cooldownUntil || 0) <= Date.now());
+          candidates = routable.filter(a => (health.get(a.id)?.cooldownUntil || 0) <= Date.now()&&modelRank(a,model)<3);
           if (preferred && candidates.includes(preferred)) candidates = [preferred, ...candidates.filter(a => a !== preferred)];
         }
         if (!candidates.length) res.setHeader('Retry-After', String(Math.max(1, Math.ceil((readyAt-Date.now())/1000))));
@@ -415,7 +444,7 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
           return { available: true, models: body.data.filter(model => model && typeof model.id === 'string' && model.id.trim()).map(model => ({ id: model.id, name: typeof (model.display_name || model.name) === 'string' ? (model.display_name || model.name) : model.id })) };
         } catch { return { models: [], available: false }; }
       })();
-      entry = { at: Date.now(), request }; modelCache.set(cacheKey, entry);
+      entry = { at: Date.now(), request }; modelCache.set(cacheKey, entry);request.then(value=>{entry.value=value;});
     }
     return entry.request;
   }
@@ -464,6 +493,6 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
     if (!accountsOf().some(a => a.id === selected && a.enabled)) selected = '';
     return save({ mode, selected, accounts: accountsOf().map(({ token, env, delegateAccount, ...a }) => a) });
   }
-  return { requirePool: value => { poolRequired=!!value; }, setRoutingObserver: fn => { routeObserver = fn; }, applyPoolRouting: input => { if (config.mode === input.mode && config.selected === input.selected) return; config={...config,mode:input.mode,selected:input.selected};atomicJSON(file,config); }, setPreparation: fn => { prepare = fn; }, exportAccounts: () => JSON.parse(JSON.stringify(config.accounts)), sharedCatalog: () => ({ token: config.localToken, accounts: config.accounts.filter(a => a.enabled && a.authType !== 'passthrough').map(({ id, name, modelMap }) => ({ id, name, modelMap })) }), setShared: accounts => { for (const account of accounts) {const old=shared.find(row=>row.id===account.id);if(old&&old.token!==account.token)health.delete(account.id);} shared = accounts; }, status, save, route, importSettings, setup, handle, clientEnv, modelEnvForSession, models, configuredTarget, sessions, setSessionRoute, reset: () => { health.clear(); return status(); } };
+  return { requirePool: value => { poolRequired=!!value; }, setRoutingObserver: fn => { routeObserver = fn; }, applyPoolRouting: input => { if (config.mode === input.mode && config.selected === input.selected) return; config={...config,mode:input.mode,selected:input.selected};atomicJSON(file,config); }, setPreparation: fn => { prepare = fn; }, exportAccounts: () => JSON.parse(JSON.stringify(config.accounts)), sharedCatalog: () => ({ token: config.localToken, accounts: config.accounts.filter(a => a.enabled && a.authType !== 'passthrough').map(({ id, name, modelMap }) => ({ id, name, modelMap })) }), setShared: accounts => { for (const account of accounts) {const old=shared.find(row=>row.id===account.id);if(old&&old.token!==account.token)health.delete(account.id);} shared = accounts; }, status, save, saveValidated, route, importSettings, setup, handle, clientEnv, modelEnvForSession, models, configuredTarget, sessions, setSessionRoute, reset: () => { health.clear(); modelHealth.clear(); return status(); } };
 }
 module.exports = { createRouter, parseEnvInput };

@@ -1350,3 +1350,11 @@ test('heartflow cards require a paired recipient and matching owner before revie
   await f.gateway.action(event);assert.equal(checks,0);
   event.action.value.owner='ou_owner';await f.gateway.action(event);assert.equal(checks,1);
 });
+test('session model validation rejects unavailable choices without overwriting a valid selection',async t=>{
+ const f=await fixture(t);await f.pair();let available=true;
+ f.panel.models=async()=>({available,models:[{id:'supported'}]});
+ await f.gateway.receive(f.msg('/new'));await f.gateway.receive(f.msg('/model supported'));
+ await f.gateway.receive(f.msg('/model missing'));assert.match(JSON.stringify(f.sent.at(-1).content),/不支持此模型/);
+ available=false;await f.gateway.receive(f.msg('/model unknown'));assert.match(JSON.stringify(f.sent.at(-1).content),/无法验证/);
+ const state=JSON.parse(fs.readFileSync(path.join(f.dir,'panel-feishu-state.json')));assert.deepEqual(Object.values(state.sessionModels),['supported']);
+});

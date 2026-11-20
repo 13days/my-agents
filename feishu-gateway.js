@@ -367,6 +367,11 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (typeof input !== 'string') throw new Error('请选择模型，或发送 /model 模型ID');
     const model = input.trim(), reset = model === 'default' || model === '__default__';
     if (!reset && (!/^[\w.\/:\[\]-]{1,100}$/.test(model) || panel.validModel && !panel.validModel(engine, model, nodeOf(binding)))) throw new Error('该引擎的模型 ID 无效');
+    if(!reset&&panel.models){
+      const data=await panel.models({engine,sessionId:binding.id,node:nodeOf(binding),refresh:true});
+      if(data?.available===false||!Array.isArray(data?.models))throw new Error('无法验证模型列表，模型设置未保存');
+      if(!data.models.some(x=>x.id===(data.forcedModel||model)))throw new Error('该账号不支持此模型，模型设置未保存');
+    }
     if (reset) delete state.sessionModels[binding.id]; else state.sessionModels[binding.id] = model;
     persist();
     return modelsCard(msg, `已${reset ? '恢复默认模型' : '选择模型：' + model}。下一轮生效，当前任务不受影响；完成后发送消息继续。`);
