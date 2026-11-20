@@ -104,11 +104,11 @@ test('rate limit fails over, honors cooldown, and reset clears it', async t => {
   assert.ok(f.router.status().accounts[0].cooldownUntil > Date.now() + 100000);
   f.router.reset(); await f.send(); assert.equal(first, 2);
 });
-test('manual mode returns upstream errors without trying another account', async t => {
+test('manual mode prefers selection but fails over before returning an error', async t => {
   let second = 0;
   const f = await fixture(t, [(req, res) => { res.writeHead(429); res.end('limited'); }, (req, res) => { second++; res.end('unexpected'); }]);
   f.router.save({ mode: 'manual', selected: 'a0', accounts: f.accounts });
-  const response = await f.send(); assert.equal(response.status, 429); assert.equal(await response.text(), 'limited'); assert.equal(second, 0);
+  const response = await f.send(); assert.equal(response.status, 200); assert.equal(await response.text(), 'unexpected'); assert.equal(second, 1);
 });
 test('round robin distributes requests and API key replaces client auth', async t => {
   const handler = (req, res) => res.end(JSON.stringify({ bearer: req.headers.authorization || null, apiKey: req.headers['x-api-key'] }));
@@ -376,4 +376,27 @@ test('model discovery distinguishes an empty catalog from an unreachable provide
   f.router.save({ mode: 'manual', selected: 'a0', accounts: f.accounts });
   assert.equal((await f.router.models({ accountId: 'a0' })).available, true);
   assert.equal((await f.router.models({ accountId: 'a1' })).available, false);
+});
+
+test('a disappeared selected shared account falls back to another enabled route', async t => {
+  const f=await fixture(t,[reply,reply]);f.router.setShared(f.accounts);f.router.route({mode:'manual',selected:'a0'});f.router.setShared([f.accounts[1]]);
+  assert.equal((await (await f.send()).json()).id,'Bearer secret-1');
+});
+test('a pinned session can fail over with the backup model mapping', async t => {
+  const f=await fixture(t,[(_req,res)=>{res.writeHead(503);res.end('down');},(_req,res,body)=>res.end(body)]);
+  f.accounts[1].modelMap={'*':'compatible-backup'};f.router.save({mode:'manual',selected:'a0',accounts:f.accounts});
+  const sid='11111111-1111-4111-8111-111111111111';f.router.setSessionRoute(sid,'a0');
+  const r=await f.send({model:'opus',metadata:{user_id:'account_session_'+sid}});assert.equal(r.status,200);assert.equal((await r.json()).model,'compatible-backup');
+  assert.equal(f.captures.at(-1)[10].routing.reason,'failover');
+});
+test('short all-account cooldown is awaited instead of returning an empty pool error', async t=>{
+  let calls=0;const f=await fixture(t,[(_req,res)=>{if(++calls===1){res.writeHead(429,{'retry-after':'0.05'});res.end('cooling');}else res.end('recovered');}],{recoveryWaitMs:1000});f.router.save({mode:'failover',accounts:f.accounts});
+  assert.equal((await f.send()).status,429);const r=await f.send();assert.equal(r.status,200);assert.equal(await r.text(),'recovered');assert.equal(calls,2);
+});
+test('long cooldown is not bypassed and exposes retry timing',async t=>{
+  let calls=0;const f=await fixture(t,[(_req,res)=>{calls++;res.writeHead(429,{'retry-after':'120'});res.end('cooling');}],{recoveryWaitMs:10});f.router.save({mode:'failover',accounts:f.accounts});await (await f.send()).text();const r=await f.send();assert.equal(r.status,503);assert.ok(Number(r.headers.get('retry-after'))>100);assert.equal(calls,1);
+});
+test('unsupported model falls back but invalid request does not',async t=>{
+ let second=0;const f=await fixture(t,[(_req,res,body)=>{res.writeHead(400);res.end(JSON.parse(body).model==='missing'?'model not found':'messages must be an array');},(_req,res)=>{second++;res.end('backup');}]);f.router.save({mode:'manual',selected:'a0',accounts:f.accounts});
+ assert.equal(await (await f.send({model:'missing'})).text(),'backup');const r=await f.send({model:'valid'});assert.equal(r.status,400);assert.equal(await r.text(),'messages must be an array');assert.equal(second,1);
 });

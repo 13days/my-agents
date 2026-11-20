@@ -50,7 +50,7 @@ function sessionIdOf(parsed) {
   return m ? m[1].toLowerCase() : '';
 }
 const SESSION_ROUTES_MAX = 500, LIVE_TTL = 30 * 60 * 1000;
-function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCapture = () => ({}), observeRoute = () => {}, associateBridge = () => '' }) {
+function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCapture = () => ({}), observeRoute = () => {}, associateBridge = () => '', recoveryWaitMs = 65000 }) {
   const file = path.join(dir, 'panel-proxy.json');
   let config = { mode: 'manual', selected: '', accounts: [], localToken: crypto.randomBytes(32).toString('hex') };
   if (fs.existsSync(file)) config = { ...config, ...JSON.parse(fs.readFileSync(file, 'utf8')) };
@@ -218,13 +218,17 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
       const trusted = req.headers.authorization === 'Bearer ' + config.localToken || req.headers['x-api-key'] === config.localToken;
       if (delegated && (!trusted || !config.accounts.some(a => a.id === delegated && a.enabled))) { res.writeHead(403); return res.end(JSON.stringify({ error: '共享账号不可用或转发凭证无效' })); }
       const pinned = !isOAuth ? (delegated ? config.accounts.find(a => a.id === delegated) : sessionId && enabled.find(a => a.id === snapshot.sessionRoutes?.[sessionId])) : null;
-      // With no configured accounts, retain the original Inspector passthrough.
-      let candidates = pinned ? [pinned] : !snapshot.accounts.length || isOAuth ? [{ id: '', name: 'Anthropic', url: isOAuth && req.url.startsWith('/v1/oauth/') ? 'https://platform.claude.com' : 'https://api.anthropic.com', authType: 'passthrough', modelMap: {} }]
-        : snapshot.mode === 'manual' ? (snapshot.selected ? enabled.filter(a => a.id === snapshot.selected) : enabled)
-        : enabled.filter(a => (health.get(a.id)?.cooldownUntil || 0) <= Date.now());
+      // A selected account is a preference, not a single point of failure. Owner
+      // forwarding stays exact to avoid bouncing a request between pool members.
+      const routable = enabled.filter(a => !(a.authType === 'passthrough' && trusted));
+      const preferred = pinned || routable.find(a => a.id === snapshot.selected);
+      let candidates = delegated ? [pinned] : !snapshot.accounts.length || isOAuth ? [{ id: '', name: 'Anthropic', url: isOAuth && req.url.startsWith('/v1/oauth/') ? 'https://platform.claude.com' : 'https://api.anthropic.com', authType: 'passthrough', modelMap: {} }]
+        : routable.filter(a => (health.get(a.id)?.cooldownUntil || 0) <= Date.now());
       if (snapshot.mode === 'round-robin' && candidates.length && !isOAuth && !pinned) {
         const offset = cursor++ % candidates.length;
         candidates = candidates.slice(offset).concat(candidates.slice(0, offset));
+      } else if (preferred && candidates.includes(preferred)) {
+        candidates = [preferred, ...candidates.filter(a => a !== preferred)];
       }
       // Only real turns (not count_tokens) mark a session as running.
       if (sessionId && /\/messages(\?|$)/.test(req.url)) {
@@ -249,12 +253,13 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
         if (res.destroyed) return;
         lastAttemptCaptured = false;
         const account = candidates[index++];
-        if (!account) return fail(503, '没有可用账号：请检查启用状态、手动选择或冷却时间');
+        if (!account) return fail(503, routable.length ? '所有可用上游仍在冷却，请按 Retry-After 重试；未禁用账号或更改会话引擎' : '没有已启用且可连接的模型路由，请恢复账号或来源节点连接');
+        if (account.id && !accountsOf().some(a => a.id === account.id && a.enabled)) return attempt();
         const entry = sessionId && live.get(sessionId);
         if (entry) Object.assign(entry, { accountId: account.id, accountName: account.name });
         const target = new URL(account.url);
         const attemptInfo = { ...(index === 1 ? requestInfo : reserveCapture()), requestOrder: requestInfo.id, sessionId, method: req.method,
-          routing: { mode: snapshot.mode, reason: pinned ? 'session_pin' : !snapshot.accounts.length || isOAuth ? 'passthrough' : snapshot.mode === 'manual' ? 'manual' : index > 1 ? 'failover' : snapshot.mode, attempt: index, requestedModel: model, actualModel: model } };
+          routing: { mode: snapshot.mode, reason: index > 1 ? 'failover' : pinned ? 'session_pin' : !snapshot.accounts.length || isOAuth ? 'passthrough' : snapshot.mode === 'manual' ? 'manual' : index > 1 ? 'failover' : snapshot.mode, attempt: index, requestedModel: model, actualModel: model } };
         const saveAttempt = (code, responseBody, stream = false, encoding = '', incomplete = false) => {
           if (lastAttemptCaptured) return; lastAttemptCaptured = true;
           try { record(req.url, code, Date.now() - started, data, responseBody, stream, req.headers, encoding, account.id, account.name, { ...attemptInfo, incomplete }); } catch {}
@@ -315,16 +320,27 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
             const delay = /^\d+(\.\d+)?$/.test(retryAfter || '') ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now();
             if (delay > 0) health.get(account.id).cooldownUntil = Date.now() + Math.min(delay, 86400000);
           }
-          const shouldRetry = retry && index < candidates.length && snapshot.mode !== 'manual' && !isOAuth && !pinned;
+          const shouldRetry = retry && index < candidates.length && !isOAuth && !delegated;
+          const inspectModelError = [400,404].includes(code) && index < candidates.length && !isOAuth && !delegated;
           const captured = [];
           let finished = false;
           const saveResponse = incomplete => { if (finished) return; finished = true; saveAttempt(code, Buffer.concat(captured), String(response.headers['content-type']).includes('event-stream'), response.headers['content-encoding'], incomplete); };
           cancelCapture = () => saveResponse(true);
           response.on('data', c => captured.push(c));
-          response.on('end', () => { saveResponse(false); if (shouldRetry && !res.destroyed) { moved = true; attempt(); } });
+          response.on('end', () => {
+            saveResponse(false);
+            if(res.destroyed)return;
+            if(inspectModelError){
+              const errorText=Buffer.concat(captured).toString();
+              const unavailable=/model/i.test(errorText)&&/not.found|not.exist|unavailable|unsupported|not.support|no.access|not.have.access|不存在|不支持|不可用/i.test(errorText);
+              if(unavailable){moved=true;attempt();return;}
+              res.writeHead(code,cleanHeaders(response.headers));res.end(Buffer.concat(captured));return;
+            }
+            if(shouldRetry){moved=true;attempt();}
+          });
           response.on('close', () => saveResponse(!response.complete));
           response.on('error', () => { saveResponse(true); res.destroy(); });
-          if (shouldRetry) { response.resume(); return; }
+          if (shouldRetry || inspectModelError) { response.resume(); return; }
           if (!retry) health.set(account.id, { lastStatus: code, cooldownUntil: 0, lastUsedAt: Date.now() });
           lastUsed = account.id;
           if (sessionId) {
@@ -340,10 +356,27 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
           if (moved || res.destroyed) return;
           saveAttempt(502, Buffer.from(JSON.stringify({ error: '上游连接失败或超时' })));
           cool(502);
-          if (!res.headersSent && index < candidates.length && snapshot.mode !== 'manual' && !isOAuth && !pinned) { moved = true; attempt(); }
+          if (!res.headersSent && index < candidates.length && !isOAuth && !delegated) { moved = true; attempt(); }
           else fail(502, '上游连接失败或超时');
         });
         upstream.end(data);
+      }
+      // Respect cooldowns, but keep a request alive for short recovery windows.
+      // Disconnect cancels the timer; repeated requests cannot hammer a cooling account.
+      if (!candidates.length && routable.length && !isOAuth && !delegated) {
+        const readyAt = Math.min(...routable.map(a => health.get(a.id)?.cooldownUntil || 0));
+        const delay = Math.max(0, readyAt - Date.now());
+        if (delay <= recoveryWaitMs) {
+          let timer;
+          await new Promise(resolve => {
+            const done = () => { clearTimeout(timer); res.off('close', done); resolve(); };
+            timer = setTimeout(done, delay + 5);res.once('close', done);
+          });
+          if (res.destroyed) return;
+          candidates = routable.filter(a => (health.get(a.id)?.cooldownUntil || 0) <= Date.now());
+          if (preferred && candidates.includes(preferred)) candidates = [preferred, ...candidates.filter(a => a !== preferred)];
+        }
+        if (!candidates.length) res.setHeader('Retry-After', String(Math.max(1, Math.ceil((readyAt-Date.now())/1000))));
       }
       attempt();
     });
