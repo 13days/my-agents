@@ -780,7 +780,18 @@ async function renderProductPage(type) {
       const attention=rows.filter(t=>['failed','unknown','blocked'].includes(t.state));
       const pending=assistant?Object.values(assistant.proposals).filter(p=>p.state==='pending').length:null;
       const labels={running:'进行中',executing:'进行中',preparing:'准备中',queued:'排队中',completed:'已完成',failed:'需要处理',unknown:'待核对',blocked:'需要处理',cancelled:'已取消',interrupted:'已中断'};
-      const list=items=>items.map(t=>`<article class="product-task"><span class="product-status">${esc(labels[t.state]||t.state)}</span><div><strong>${esc((t.prompt||'执行任务').slice(0,180))}</strong><small>${esc(new Date(t.updatedAt||t.createdAt).toLocaleString())}</small></div>${t.sessionId||t.conversationId?`<a href="/sessions/${encodeURIComponent(t.sessionId||t.conversationId)}">查看对话 →</a>`:''}</article>`).join('');
+      const taskIdentity=t=>JSON.stringify([t.node||'local',t.sessionId||t.conversationId||t.requestedId||t.id]);
+      const conversations=new Map();
+      for(const t of rows){const key=taskIdentity(t);if(!conversations.has(key))conversations.set(key,[]);conversations.get(key).push(t);}
+      const breadcrumbs=t=>{
+        const siblings=conversations.get(taskIdentity(t))||[t];
+        const first=[...siblings].sort((a,b)=>(a.createdAt||0)-(b.createdAt||0))[0];
+        const cwd=t.jobMeta?.worktree?.repository||t.jobMeta?.cwd||t.cwd||siblings.find(x=>x.jobMeta?.cwd||x.cwd)?.jobMeta?.cwd||siblings.find(x=>x.cwd)?.cwd||'';
+        const sid=t.sessionId||t.conversationId;
+        const name=String(first.sessionTitle||first.jobMeta?.title||first.prompt||'对话').replace(/\s+/g,' ').slice(0,42);
+        return `<nav class="task-breadcrumb" aria-label="任务归属"><span title="${esc(cwd)}">${esc(cwd.split(/[\\/]/).filter(Boolean).pop()||'未记录项目')}</span><span aria-hidden="true">/</span>${sid?`<a href="/sessions/${encodeURIComponent(sid)}" title="${esc(sid)}">${esc(name)} <span class="task-conversation-id">${esc(sid.slice(0,8))}</span></a>`:'<span>未关联对话</span>'}<span aria-hidden="true">/</span><span aria-current="page">第 ${siblings.slice().sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)).findIndex(x=>x.id===t.id)+1} 次任务</span>${siblings.length>1?`<span class="task-thread-count">同一对话 · ${siblings.length} 次任务</span>`:''}</nav>`;
+      };
+      const list=items=>items.map(t=>`<article class="product-task"><span class="product-status">${esc(labels[t.state]||t.state)}</span><div>${breadcrumbs(t)}<strong>${esc((t.prompt||'执行任务').slice(0,180))}</strong><small>${esc(new Date(t.updatedAt||t.createdAt).toLocaleString())}</small></div>${t.sessionId||t.conversationId?`<a href="/sessions/${encodeURIComponent(t.sessionId||t.conversationId)}">查看对话 →</a>`:''}</article>`).join('');
       const groupedList=items=>groupTasksByProject(items,rows).map(group=>`<section class="task-project"><header class="task-project-heading"><div><h2>${esc(group.cwd.split(/[\\/]/).filter(Boolean).pop()||'未记录项目目录')} <span>${group.items.length}</span></h2><p>${esc(group.cwd||'这些历史任务没有可用的目录信息')}</p></div><span class="task-project-node">${esc(group.node==='local'?'本机':group.node)}</span></header>${list(group.items)}</section>`).join('');
       body=`${taskResult.status==='rejected'?'<p role="alert">任务记录暂时无法读取，请稍后刷新。</p>':''}<div class="product-summary">${tile('heartflow','待你确认 · '+(pending??'暂不可读'),'查看助理整理的判断与建议')}${tile('tasks','进行中 · '+active.length,'跟进已发起的任务')}${tile('connections','管理连接','消息渠道、执行设备与模型服务')}</div>`;
       if(type==='today')body+=`<h3>正在推进</h3>${list(active.slice(0,8))||'<p class="product-empty">暂无正在执行的任务，可以从助理建议或新对话开始。</p>'}<h3>需要处理</h3>${list(attention.slice(0,5))||'<p class="product-empty">暂无执行异常。</p>'}${tile('sessions','开始对话','提出问题，或继续之前的工作')}`;
@@ -2708,7 +2719,7 @@ function enhancePanelSelect(select) {
   const trigger = document.createElement('button'); trigger.type = 'button'; trigger.className = 'panel-select-trigger';
   const text = document.createElement('span'); text.className = 'panel-select-value';
   const currentCount = document.createElement('span'); currentCount.className = 'panel-select-count'; currentCount.hidden = true;
-  const chevron = document.createElement('span'); chevron.className = 'panel-select-chevron'; chevron.setAttribute('aria-hidden', 'true'); chevron.textContent = '⌄';
+  const chevron = document.createElement('span'); chevron.className = 'panel-select-chevron'; chevron.setAttribute('aria-hidden', 'true'); chevron.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" aria-hidden="true"><path d="m4 6 4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const menu = document.createElement('div'); menu.className = 'panel-select-menu'; menu.id = 'panel-select-' + ++panelSelectSequence;
   menu.setAttribute('popover', 'auto'); menu.setAttribute('role', 'listbox');
   trigger.setAttribute('aria-haspopup', 'listbox'); trigger.setAttribute('aria-controls', menu.id); trigger.setAttribute('aria-expanded', 'false');
