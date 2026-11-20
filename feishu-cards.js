@@ -213,7 +213,12 @@ function task({ binding, title, view, elapsed, nodeLabel = '', model = '默认�
     return card(view.phase, elements, { subtitle: '工具执行状态与最终回复', template, summary: `${view.phase}${view.done ? ' · ' + clip(view.text, 90) : ''}` });
   }
   const elements = [muted(`${context.location ? context.location + ' · ' : ''}${catalogOf(context).label(binding.engine || 'claude')} · ${escape(path.basename(binding.cwd) || '项目')} · ${Math.max(0, Math.floor(elapsed / 1000))} 秒${tools.length ? ` · 工具 ${done}/${tools.length}` : ''}`)];
-  elements.push(muted(`请求模型：${escape(model)}（代理可能映射为其他模型）`));
+  const route=view.modelRoute;
+  if(route?.model){
+    elements.push(muted(`${route.state==='error'?'尝试模型':route.state==='pending'?'调用模型':'实际调用模型'}：${escape(route.model)}`));
+    if(route.proxyName||route.accountName)elements.push(muted(`代理：${escape(route.proxyName||route.accountName)}`));
+  }else elements.push(muted(view.done?'实际模型：未获取到本轮路由记录':'正在选择模型…'));
+
   if (nodeLabel) elements.push(muted(`执行机器：${escape(nodeLabel)}`));
   if (view.nativeSession?.name) elements.push(muted(`原终端会话：${escape(clip(view.nativeSession.name, 80))} · ${escape(String(view.nativeSession.id || binding.id).slice(0, 8))}`));
   if (binding.handoff) elements.push(markdown(`**${binding.handoff.from === binding.handoff.to ? '已创建接续会话 · ' + escape(binding.handoff.to) : '执行位置已切换：' + escape(binding.handoff.from) + ' → ' + escape(binding.handoff.to)}**\n${binding.handoff.reason === 'offline' ? '原机器离线，接管机器已接续新一轮。' : '已按手动选择创建接续会话。'}${binding.handoff.context === 'checkpoint' ? '上下文来自有限的对话检查点，文件和工具状态需核对。' : '没有可恢复的对话检查点，请补充必要上下文。'}`));

@@ -211,3 +211,10 @@ test('native background work stays orange with synchronization controls and an i
  assert.ok(actions(output).some(a => a.action === 'stop')); assert.equal(actions(output).some(a => a.action === 'continue_task'), false);
  view.phase = '等待原会话汇总'; assert.equal(cards.task({ ...context, binding: { id: 'original-session-id', cwd: '/project' }, title: 'Task', elapsed: 61000, view }).header.template, 'orange');
 });
+test('task cards show observed upstream model, never the requested alias as actual',()=>{
+ const input={binding:{id:'s',cwd:'/work',engine:'claude'},title:'work',elapsed:100,model:'auto/claude-opus-5-5',view:{text:'',tools:new Map(),permissions:new Map(),phase:'正在处理'}};
+ assert.match(JSON.stringify(cards.task(input)),/正在选择模型/);
+ input.view.modelRoute={model:'gpt-6.1-sol',proxyName:'Codex · Mac',state:'success'};
+ const text=JSON.stringify(cards.task(input));assert.match(text,/实际调用模型：gpt-6.1-sol/);assert.match(text,/Codex · Mac/);assert.doesNotMatch(text,/auto\/claude-opus/);
+ delete input.view.modelRoute;input.view.done=true;assert.match(JSON.stringify(cards.task(input)),/未获取到本轮路由记录/);
+});

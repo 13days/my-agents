@@ -2087,6 +2087,13 @@ const feishuGateway = require('./feishu-bots').createFeishuBots({
     validModel: (engine, model, node = 'local') => !!(registry.adapter(engine, node) || registry.get(engine))?.validModel(model),
     defaultModel: engine => accountPool?.defaultModels()[engine] || '',
     setDefaultModel: async (engine, model) => { if (!accountPool) throw new Error('账号池未就绪'); return setValidatedDefaultModel(engine, model); },
+    routeObservation: ({sessionId,node='local'}) => {
+      if(node!=='local'&&node!==machineId()){
+        if(!clusterNetwork)return null;
+        return clusterNetwork.call(node,'accounts.observation',{sessionId},{timeout:3000});
+      }
+      return proxyObservation.status(sessionId);
+    },
     currentModel: id => { const run = manager.get(id); return run && !run.job.closed ? run.job.meta.model || '' : ''; },
     nodes: () => executionMachines().filter(item => item.id !== machineId()).map(item => ({ ...item, connected: item.online, home: registry.node(item.id)?.host.homeDir() })),
     routes: engine => engine === 'codex' ? { ...accountPool.codexStatus(), engine: 'codex', pins: accountPool.codexStatus().routes } : ({ ...accountRouter.status(), pins: accountRouter.sessions().routes }),
@@ -2964,6 +2971,7 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
   } });
   cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: feishuGateway, canTransfer: () => manager.running().length === 0 && executionRuntime.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });
   clusterNetwork.handle('accounts.configureProxy', (_, input) => saveClaudeProxy(input));
+  clusterNetwork.handle('accounts.observation', (_, {sessionId}) => proxyObservation.status(sessionId));
   clusterNetwork.handle('accounts.models', (_, {engine,sessionId,refresh}) => engine==='codex'?codexPoolModels({sessionId,refresh}):accountRouter.models({sessionId,refresh}));
   clusterNetwork.handle('accounts.catalog', () => accountPool.catalog());
   clusterNetwork.handle('accounts.key', () => accountPool.exchangeKey());

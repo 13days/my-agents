@@ -1358,3 +1358,11 @@ test('session model validation rejects unavailable choices without overwriting a
  available=false;await f.gateway.receive(f.msg('/model unknown'));assert.match(JSON.stringify(f.sent.at(-1).content),/无法验证/);
  const state=JSON.parse(fs.readFileSync(path.join(f.dir,'panel-feishu-state.json')));assert.deepEqual(Object.values(state.sessionModels),['supported']);
 });
+test('completed cards fetch execution-node route evidence and exclude a previous turn',async t=>{
+ const f=await fixture(t);await f.pair();await f.gateway.configure({detailed:true});
+ let stale=false;f.panel.routeObservation=async({sessionId})=>({request:{sessionId,startedAt:new Date(stale?0:Date.now()+10).toISOString(),model:'gpt-6.1-sol',proxyName:'Codex proxy',state:'success'}});
+ await f.gateway.receive(f.msg('first'));await new Promise(r=>setTimeout(r,100));
+ assert.match(JSON.stringify(f.updated.at(-1)),/gpt-6.1-sol/);
+ stale=true;await f.gateway.receive(f.msg('second'));await new Promise(r=>setTimeout(r,100));
+ assert.doesNotMatch(JSON.stringify(f.updated.at(-1)),/gpt-6.1-sol/);
+});

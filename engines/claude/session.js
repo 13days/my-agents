@@ -72,6 +72,7 @@ function openClaudeSession({ host, cli, env, cwd, sessionId, resume, model, sett
 
   const processLine = line => {
     let msg; try { msg = JSON.parse(line); } catch { return; }
+    if (msg.type === 'system' && msg.subtype === 'init' && msg.session_id) send('status', {kind:'model_session',routeSessionId:msg.session_id});
     if (msg.type === 'system' && msg.subtype === 'api_retry') {
       const status = msg.error?.status || msg.status_code || msg.error_status;
       send('warning', { warning: `上游请求失败${status ? `（${status}）` : ''}，Claude 正在重试${msg.attempt ? `（第 ${msg.attempt} 次）` : ''}。可停止任务后用 /route 切换账号。` });

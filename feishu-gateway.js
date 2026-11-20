@@ -582,7 +582,17 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (closed || busy) { dirty = true; return; }
       busy = true; dirty = false;
       try {
-        const terminal = view.done, card = progress(); saveTask(card);
+        const terminal = view.done;
+        if(panel.routeObservation){
+          try{
+            const routeSessionId=view.routeSessionId||binding.id;
+            const observation=await panel.routeObservation({sessionId:routeSessionId,node:nodeOf(binding)});
+            const request=observation?.request;
+            // A prior turn or a configured target is not execution evidence.
+            if(request&&request.sessionId===routeSessionId&&Date.parse(request.startedAt)>=startedAt&&request.model)view.modelRoute=request;
+          }catch{}
+        }
+        const card = progress(); saveTask(card);
         updating = transport.updateCard(sent.messageId, card);
         await updating; updateFailures = 0;
         if (terminal && !shuttingDown) { delete state.taskCards[sent.messageId]; persist(); }
@@ -637,6 +647,8 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (event === 'stopped') { view.phase = '已停止'; view.done = true; schedule(true); return; }
       if (event === 'end' && !view.done) { view.phase = data.state === 'unknown' || view.phase === '结果待核对' ? '结果待核对' : '连接已结束'; view.done = true; if (!view.text) view.text = '本轮未完成，可用 /history 查看已保存内容后继续发送。'; schedule(true); return; }
       if (data.messageId !== id) return;
+      if(data.kind==='model_session'&&typeof data.routeSessionId==='string')view.routeSessionId=data.routeSessionId;
+      if(event==='done'&&typeof data.sessionId==='string')view.routeSessionId=data.sessionId;
       conversationState.apply(view, event, data);
       if (view.done) saveTask(progress());
       schedule(view.done || ['native_handoff','native_attachment','native_approval','native_delivery_pending'].includes(data.kind));
