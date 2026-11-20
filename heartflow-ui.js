@@ -14,6 +14,23 @@ function hfUsage(data) {
   const modes={suggest:'话题分析',followup:'后续决定',verify:'执行核对'};
   return `${u.paused?'<p class="hf-error" role="status">今日分析预算不足，模型调用已暂停；消息仍在接收。可提高预算或等待次日恢复。</p>':''}<div class="hf-toolbar" aria-label="助理模型用量"><strong>今日 Token ${u.used.toLocaleString()} / ${u.limit.toLocaleString()}</strong><span>剩余 ${u.remaining.toLocaleString()}</span>${u.reserved?`<span>预留 ${u.reserved.toLocaleString()}</span>`:''}<span>已存 ${Object.keys(data.topicMemories||{}).length} 份话题摘要</span><span>${u.calls} 次模型调用 · 输入 ${u.inputTokens.toLocaleString()} / 输出 ${u.outputTokens.toLocaleString()}</span><a href="#" data-hf-budget-settings>预算设置</a></div><p class="hf-reason">${Object.entries(u.byMode).map(([k,v])=>`${modes[k]||k} ${v.tokens.toLocaleString()}`).join(' · ')}${u.estimatedTokens?` · 含 ${u.estimatedTokens.toLocaleString()} 估算 Token（请求未返回用量）`:''} · 按 UTC 日重置（北京时间 08:00）；从本功能启用后累计。</p>`;
 }
+function hfAnalysisControl(data){
+  const on=!!data.config.modelEnabled,u=data.runtime.usage;
+  return `<div class="hf-analysis-control"><div><strong>自动分析</strong><span>${on?'后台分析消息，会消耗 Token':'已关闭 · 消息继续接收'}</span></div><button type="button" role="switch" aria-label="自动分析" aria-checked="${on}" data-hf-analysis-toggle class="hf-switch"><span></span></button>${u?`<small>今日 ${u.used.toLocaleString()} / ${u.limit.toLocaleString()} Token <a href="#" data-hf-budget-settings>调整预算</a></small>`:''}<small>${!on&&data.runtime.analyzing?'当前请求可能仍在结束，不再发起后续自动分析。':'手动生成建议、确认前核对仍会消耗 Token；已批准任务继续执行。'}</small></div>`;
+}
+let hfAnalysisSaving=false, hfAnalysisRevision=0;
+async function hfToggleAnalysis(button){
+  if(hfAnalysisSaving)return;hfAnalysisSaving=true;hfAnalysisRevision++;button.disabled=true;
+  try{
+    const enabled=button.getAttribute('aria-checked')!=='true';
+    await api('POST','heartflow/config',{modelEnabled:enabled});
+    heartflowData.config.modelEnabled=enabled;
+    const control=$('#hf-analysis-control');if(control)control.innerHTML=hfAnalysisControl(heartflowData);
+    const checkbox=$('#hf-model-enabled');if(checkbox)checkbox.checked=enabled;
+    const status=$('#hf-live-status');if(status)status.innerHTML=hfProgress(heartflowData);
+  }catch(error){const notice=$('#hf-notice');if(notice)notice.textContent='自动分析设置未保存：'+error.message;button.disabled=false;}
+  finally{hfAnalysisSaving=false;}
+}
 function hfProgress(data) {
   const ps=Object.values(data.proposals),ds=Object.values(data.deliveries),messages=Object.values(data.messages);
   const covered=new Set(ps.flatMap(p=>p.messageIds));
@@ -21,7 +38,7 @@ function hfProgress(data) {
   const pending=ps.filter(p=>['pending','deferred'].includes(p.state)).length;
   const running=ds.filter(d=>['queued','dispatching','accepted','running'].includes(d.state)).length;
   const completed=ps.filter(p=>p.state==='completed').length;
-  const status=!data.config.enabled?'已暂停':data.source.error?'同步异常':data.runtime.polling?'正在读取消息':data.runtime.analyzing?'正在分析消息':data.runtime.usage?.paused?'等待预算恢复':'正在关注你的工作';
+  const status=!data.config.enabled?'已暂停':data.source.error?'同步异常':data.runtime.polling?'正在读取消息':data.runtime.analyzing?'正在分析消息':!data.config.modelEnabled?'自动分析已关闭':data.runtime.usage?.paused?'等待预算恢复':'正在关注你的工作';
   const metrics=[['pending','待你确认',pending,'查看建议，决定下一步'],['messages','已读取消息',messages.length.toLocaleString(),`${backlog} 条等待分析`],['activity','正在执行',running,'已确认行动的执行进展'],['home','已完成事项',completed,'含你确认及后续对话确认']];
   return `<div class="hf-status"><span class="hf-dot ${data.config.enabled&&!data.source.error?'on':''}"></span><strong>${status}</strong><span>${hfCoverage(data)}</span><span>最近同步 ${esc(hfTime(data.source.lastSync))}</span></div>
     <div class="hf-metrics">${metrics.map(([id,title,value,note])=>`<button class="hf-metric" data-hf-jump="${id}"><span>${title}</span><strong>${value}</strong><small>${note}</small></button>`).join('')}</div>
@@ -45,8 +62,9 @@ async function renderHeartflow(useCache=false) {
     const data=useCache&&heartflowData?heartflowData:await api('GET','heartflow');if(state.type!=='heartflow'||renderVersion!==heartflowRenderVersion)return;heartflowData=data;
     const pending=Object.values(data.proposals).filter(p=>['pending','deferred'].includes(p.state)).length;
     root.innerHTML=`<section class="hf"><header class="hf-header"><div><div class="hf-eyebrow">工作 / 助理</div><h1>助理工作台</h1><p>查看消息，理解进展，把需要你决定的事放在一起。</p></div><div class="hf-header-actions"><a class="btn" href="/connections">管理消息渠道</a><button class="btn" id="hf-refresh">刷新</button></div></header>
-      <nav class="hf-tabs" aria-label="助理导航">${hfViews.map(([id,title])=>`<button class="hf-nav-item ${heartflowView===id?'active':''}" data-hf-tab="${id}" ${heartflowView===id?'aria-current="page"':''}>${title}${id==='pending'?`<span class="hf-nav-count">${pending}</span>`:''}</button>`).join('')}</nav><div id="hf-live-status">${hfProgress(data)}</div><div class="hf-view-header"><div><h2 id="hf-view-heading"></h2><p id="hf-view-description"></p></div><p id="hf-live-update" role="status"></p></div><div id="hf-notice" role="status"></div><div id="hf-content"></div></section>`;
+      <div id="hf-analysis-control">${hfAnalysisControl(data)}</div><nav class="hf-tabs" aria-label="助理导航">${hfViews.map(([id,title])=>`<button class="hf-nav-item ${heartflowView===id?'active':''}" data-hf-tab="${id}" ${heartflowView===id?'aria-current="page"':''}>${title}${id==='pending'?`<span class="hf-nav-count">${pending}</span>`:''}</button>`).join('')}</nav><div id="hf-live-status">${hfProgress(data)}</div><div class="hf-view-header"><div><h2 id="hf-view-heading"></h2><p id="hf-view-description"></p></div><p id="hf-live-update" role="status"></p></div><div id="hf-notice" role="status"></div><div id="hf-content"></div></section>`;
     root.onclick=e=>{
+      const toggle=e.target.closest('[data-hf-analysis-toggle]');if(toggle){hfToggleAnalysis(toggle);return;}
       const target=e.target.closest('[data-hf-tab],[data-hf-jump],[data-hf-budget-settings]');
       if(target){e.preventDefault();heartflowView=target.dataset.hfTab||target.dataset.hfJump||'settings';hfRenderContent(heartflowData);}
     };
@@ -57,9 +75,11 @@ async function renderHeartflow(useCache=false) {
       if(state.type!=='heartflow'){clearInterval(heartflowPulseTimer);return;}
       if(checking || document.hidden)return;checking=true;
       try{
+        const analysisRevision=hfAnalysisRevision;
         const latest=await api('GET','heartflow');
+        if(hfAnalysisSaving||analysisRevision!==hfAnalysisRevision)return;
         if(state.type!=='heartflow'||renderVersion!==heartflowRenderVersion||!$('#hf-live-status'))return;
-        $('#hf-live-status').innerHTML=hfProgress(latest);
+        if(!hfAnalysisSaving){$('#hf-live-status').innerHTML=hfProgress(latest);$('#hf-analysis-control').innerHTML=hfAnalysisControl(latest);}
         const badge=document.querySelector('.hf-nav-count');if(badge)badge.textContent=Object.values(latest.proposals).filter(p=>['pending','deferred'].includes(p.state)).length;
         if(heartflowView==='home'&&!$('#hf-content').querySelector('details[open], textarea:focus')&&!Array.from($('#hf-content').querySelectorAll('textarea')).some(el=>el.value.trim()))hfHome(latest);
         heartflowData=latest;

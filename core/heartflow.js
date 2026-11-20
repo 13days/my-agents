@@ -3,6 +3,7 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
   let polling=false,analyzing=false,dispatching=false,notifying=false,checking=false,timer;
   store.recover();
   analyze=require('./heartflow-budget').trackedAnalysis({store,analyze,now});
+  const backgroundAnalyze=(...args)=>{const c=store.snapshot().config;if(!c.enabled||!c.modelEnabled)throw Object.assign(new Error('自动分析已关闭'),{code:'ANALYSIS_PAUSED'});return analyze(...args);};
   const errorText=e=>String(e.message||e).slice(0,1000);
   async function sync() {
     if(polling)return {busy:true};polling=true;
@@ -32,12 +33,12 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
       return {ok:true};
     }catch(e){store.transaction(s=>{s.source={...s.source,ok:false,error:errorText(e)};});throw e;}finally{polling=false;}
   }
-  async function followups(id,force=false) {
+  async function followups(id,force=false,automatic=false) {
     const snapshot=store.snapshot();
     let checked=0;
     for(const p of Object.values(snapshot.proposals).filter(p=>(['pending','deferred'].includes(p.state)||(p.state==='completed'&&p.completion?.source==='conversation'))&&(!id||p.id===id)).sort((a,b)=>(a.lastFollowupCheck||0)-(b.lastFollowupCheck||0)).slice(0,50)){
       if(!force&&checked>=2)break;
-      const result=await require('./heartflow-followup').inspectFollowup(p,snapshot,analyze,force,now());
+      const result=await require('./heartflow-followup').inspectFollowup(p,snapshot,automatic?backgroundAnalyze:analyze,force,now());
       if(!result)continue;checked++;
       store.transaction(s=>{const current=s.proposals[p.id];if(current.version!==p.version)return;
         if(JSON.stringify(require('./heartflow-followup').relatedMessages(current,s).map(m=>[m.id,m.revision]))!==JSON.stringify(result.messages.map(m=>[m.id,m.revision])))throw new Error('群聊消息已变化，请重新核对');
@@ -73,7 +74,7 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
       });
     }
   }
-  async function verify(id,force=false) {
+  async function verify(id,force=false,automatic=false) {
     if(!history)return;
     if(checking)throw new Error('正在核对执行记录，请稍后重试');
     checking=true;
@@ -82,7 +83,7 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
       let checked=0;
       for(const p of Object.values(snapshot.proposals).filter(p=>['pending','deferred'].includes(p.state)&&(!id||p.id===id)).sort((a,b)=>(a.lastHistoryCheck||0)-(b.lastHistoryCheck||0)).slice(0,50)){
         if(!force&&checked>=2)break;
-        const result=await require('./heartflow-history').inspectProposal(p,snapshot,history,analyze,force,now());
+        const result=await require('./heartflow-history').inspectProposal(p,snapshot,history,automatic?backgroundAnalyze:analyze,force,now());
         if(!result)continue;checked++;
         store.transaction(s=>{const current=s.proposals[p.id];if(current.version!==p.version)return;
           if(p.messageIds.some(id=>s.messages[id]?.revision!==snapshot.messages[id]?.revision))throw new Error('来源已变化，请重新核对');
@@ -97,11 +98,11 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
       }
     }finally{checking=false;}
   }
-  async function suggest() {
+  async function suggest({automatic=false}={}) {
     if(analyzing)return {busy:true};analyzing=true;
     try{
-      await followups();
-      await verify();
+      await followups(undefined,false,automatic);
+      await verify(undefined,false,automatic);
       const s=store.snapshot(),covered=new Set(Object.values(s.proposals).flatMap(p=>p.messageIds));
       const unread=Object.values(s.messages).filter(m=>require('./heartflow-discovery').inScope(m,s.config) && !m.deleted && m.createdAt>=s.config.since && (!covered.has(m.id)||Object.values(s.proposals).some(p=>p.sourceChanged&&p.messageIds.includes(m.id))) && s.cursor['analyzed:'+m.id]!==m.revision).sort((a,b)=>a.createdAt-b.createdAt);
       const messages=require('./heartflow-compact').batchMessages(unread,s);
@@ -110,7 +111,7 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
       const support=require('./heartflow-context').topicContext(messages,s).filter(m=>!messages.some(x=>x.id===m.id));
       const context=require('./heartflow-compact').suggestionContext(s,messages,support,candidates);
       const supportingMessages=context.supportingMessages,pending=context.pending;
-      const result=await analyze(context,s.config.model);let created=0;
+      const result=await (automatic?backgroundAnalyze:analyze)(context,s.config.model);let created=0;
       const latest=store.snapshot();if([...messages,...supportingMessages,...context.topicMemories.flatMap(m=>m.refs)].some(m=>latest.messages[m.id]?.revision!==m.revision))throw new Error('分析期间来源消息已更新，将在下次重新分析');
       for(const draft of result.suggestions){
         if(draft.responsibility==='delegated_others')continue;
@@ -129,8 +130,8 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
         if(draft.messageIds.every(id=>covered.has(id)))continue;
         store.draft({...draft,actions,model:result.model});created++;
       }
-      store.transaction(next=>{for(const m of messages){if(m.textComplete){next.cursor['analyzed:'+m.id]=m.revision;delete next.cursor['offset:'+m.id+':'+m.revision];}else next.cursor['offset:'+m.id+':'+m.revision]=m.textOffset+m.text.length;}next.source.analysisBatchTurn=(next.source.analysisBatchTurn||0)+1;require('./heartflow-compact').saveMemory(next,result,context,now());next.source.analysisError='';next.source.lastAnalysis=now();next.source.analysisFailures=0;next.source.analysisRetryAt=0;});await followups();await verify();return {created};
-    }catch(e){store.transaction(s=>{s.source.analysisError=errorText(e);s.source.analysisFailures=(s.source.analysisFailures||0)+1;s.source.analysisRetryAt=e.code==='BUDGET_EXHAUSTED'?0:now()+Math.min(3600000,60000*2**Math.min(s.source.analysisFailures,6));});throw e;}finally{analyzing=false;}
+      store.transaction(next=>{for(const m of messages){if(m.textComplete){next.cursor['analyzed:'+m.id]=m.revision;delete next.cursor['offset:'+m.id+':'+m.revision];}else next.cursor['offset:'+m.id+':'+m.revision]=m.textOffset+m.text.length;}next.source.analysisBatchTurn=(next.source.analysisBatchTurn||0)+1;require('./heartflow-compact').saveMemory(next,result,context,now());next.source.analysisError='';next.source.lastAnalysis=now();next.source.analysisFailures=0;next.source.analysisRetryAt=0;});await followups(undefined,false,automatic);await verify(undefined,false,automatic);return {created};
+    }catch(e){if(e.code==='ANALYSIS_PAUSED')return {paused:true};store.transaction(s=>{s.source.analysisError=errorText(e);s.source.analysisFailures=(s.source.analysisFailures||0)+1;s.source.analysisRetryAt=e.code==='BUDGET_EXHAUSTED'?0:now()+Math.min(3600000,60000*2**Math.min(s.source.analysisFailures,6));});throw e;}finally{analyzing=false;}
   }
   async function deliver() {
     if(dispatching)return;dispatching=true;
@@ -162,7 +163,7 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
     }
     }finally{notifying=false;}
   }
-  async function tick() {if(store.snapshot().config.enabled){try{await sync();if(store.snapshot().config.modelEnabled && (store.snapshot().source.analysisRetryAt||0)<=now())await suggest();}catch{}}await deliver();await notices();}
+  async function tick() {if(store.snapshot().config.enabled){try{await sync();if(store.snapshot().config.modelEnabled && (store.snapshot().source.analysisRetryAt||0)<=now())await suggest({automatic:true});}catch{}}await deliver();await notices();}
   return {sync,suggest,deliver,notices,verify,followups,status:()=>({polling,analyzing,dispatching,usage:require('./heartflow-budget').usageStatus(store.snapshot(),now())}),start(){if(timer)return;const schedule=()=>{timer=setTimeout(async()=>{await tick().catch(()=>{});schedule();},Math.max(30,store.snapshot().config.intervalSeconds)*1000);timer.unref();};schedule();},stop(){clearTimeout(timer);timer=null;},
     async review(id,input){
       if(input.decision==='approve'){
