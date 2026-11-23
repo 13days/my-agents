@@ -11,8 +11,10 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
       const config=store.snapshot().config;
       if(!config.chats.length && config.discoveryMode!=='recent')throw new Error('先选择需要监听的聊天');
       if(!config.selfId){const who=await source.identity();if(!who.user?.open_id)throw new Error('无法确认当前飞书用户身份');store.configure({selfId:who.user.open_id});}
-      if(config.discoveryMode==='recent')await require('./heartflow-discovery').discoverMessages({store,source,now});
+      const syncErrors=[];
+      if(config.discoveryMode==='recent')try{await require('./heartflow-discovery').discoverMessages({store,source,now});}catch(e){syncErrors.push(e);}
       for(const chat of config.chats){
+        try{
         let snapshot=store.snapshot(),cursor=snapshot.cursor[chat.id]||{},page=cursor.page||'',upper=cursor.upper||now(),floor=cursor.floor||Math.max(config.since,(cursor.watermark||config.since)-5*60000),finished=false;
         // Bounded pages per tick; persist continuation instead of dropping burst messages.
         for(let i=0;i<4;i++){
@@ -22,6 +24,7 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
           if(!result.has_more||older){finished=true;break;}page=result.page_token;if(!page)throw new Error('飞书分页游标缺失');
         }
         store.transaction(s=>{s.cursor[chat.id]=finished?{watermark:upper}:{page,upper,floor,watermark:cursor.watermark};});
+        }catch(e){syncErrors.push(new Error(`${chat.id}: ${errorText(e)}`));}
       }
       const snapshot=store.snapshot();
       const parents=[...new Set(Object.values(snapshot.messages).filter(m=>require('./heartflow-discovery').inScope(m,config)&&m.createdAt>=config.since).map(m=>m.parentId).filter(id=>id&&!snapshot.messages[id]))].slice(0,30);
@@ -29,6 +32,7 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
       const missing=Object.values(store.snapshot().messages).filter(m=>require('./heartflow-discovery').inScope(m,config)&&!m.identityEnriched).slice(-30);
       if(missing.length&&source.messages){const refs=await source.messages(missing.map(m=>m.id));store.ingest((refs.messages||refs.items||[]).map(normalizeMessage));}
       await require('./heartflow-completion').refresh({store,source,now});
+      if(syncErrors.length)throw new AggregateError(syncErrors,syncErrors.map(errorText).join('; '));
       store.transaction(s=>{s.source={...s.source,ok:true,lastSync:now(),error:''};});
       return {ok:true};
     }catch(e){store.transaction(s=>{s.source={...s.source,ok:false,error:errorText(e)};});throw e;}finally{polling=false;}

@@ -2192,8 +2192,10 @@ const server = http.createServer(async (req, res) => {
           if(parts[2]==='identity') return sendJSON(res,200,await heartflowSource.identity());
           if(parts[2]==='chats') return sendJSON(res,200,await heartflowSource.search(url.searchParams.get('q')||''));
           if(parts[2]==='sessions') return sendJSON(res,200,await sessionDirectory.list({query:url.searchParams.get('q')||''}));
+          const revision=heartflowStore.revision(),runtime=heartflow.status();
+          if(url.searchParams.get('revision')===revision)return sendJSON(res,200,{unchanged:true,revision,runtime});
           const data=heartflowStore.snapshot();
-          return sendJSON(res,200,{...data,coordinator:machineId(),runtime:heartflow.status()});
+          return sendJSON(res,200,{...data,revision,coordinator:machineId(),runtime});
         }
         if(req.method!=='POST')return sendJSON(res,405,{error:'method not allowed'});
         const input=JSON.parse(await readBody(req,256*1024)||'{}');

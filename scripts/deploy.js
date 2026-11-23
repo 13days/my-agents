@@ -51,7 +51,7 @@ async function machines() {
     const node = nodes.find(item => item.id === member.id);
     return { id: member.id, label: member.label || member.id, local, port: url.port || 4321,
       host: overrides[member.id]?.host || node?.host || `${user}@${url.hostname}`,
-      home: overrides[member.id]?.home || '~/.my-agents', repo: overrides[member.id]?.repo || '~/repos/my-agents' };
+      home: overrides[member.id]?.home || '~/.my-agents', repo: local ? repo : overrides[member.id]?.repo || ssh(overrides[member.id]?.host || node?.host || `${user}@${url.hostname}`, 'systemctl --user show my-agents-panel.service -p WorkingDirectory --value') };
   });
 }
 
@@ -71,15 +71,20 @@ async function waitIdle(machine) {
 }
 function update(machine, commit, bundle) {
   if (machine.local) return;
-  const head = ssh(machine.host, `cd ${machine.repo} && git rev-parse HEAD`);
+  if (!machine.repo || !machine.repo.startsWith('/')) throw new Error(`${machine.label} 未发现服务实际工作目录，请配置 panel-deploy.json`);
+  const remoteRepo = quote(machine.repo);
+  const remoteOrigin = ssh(machine.host, `cd ${remoteRepo} && git remote get-url origin`);
+  if (remoteOrigin !== run('git', ['remote', 'get-url', 'origin'])) throw new Error(`${machine.label} 仓库地址不一致，已停止`);
+  if (ssh(machine.host, `cd ${remoteRepo} && git status --porcelain`)) throw new Error(`${machine.label} 工作区有未提交改动，已停止`);
+  const head = ssh(machine.host, `cd ${remoteRepo} && git rev-parse HEAD`);
   if (head === commit) return;
-  const pulled = ssh(machine.host, `cd ${machine.repo} && timeout 40 git pull -q --ff-only && git rev-parse HEAD`, { allowFail: true, timeout: 60000 });
+  const pulled = ssh(machine.host, `cd ${remoteRepo} && timeout 40 git pull -q --ff-only && git rev-parse HEAD`, { allowFail: true, timeout: 60000 });
   if (pulled.split('\n').pop() === commit) return;
   // GitHub may be unreachable from dev machines: ship the commits directly.
   run('git', ['bundle', 'create', bundle, `${head}..main`]);
   run('scp', ['-q', '-o', 'BatchMode=yes', bundle, `${machine.host}:/tmp/my-agents-deploy.bundle`]);
-  ssh(machine.host, `cd ${machine.repo} && git fetch -q /tmp/my-agents-deploy.bundle main:refs/remotes/bundle/main && git merge -q --ff-only bundle/main; rm -f /tmp/my-agents-deploy.bundle`);
-  if (ssh(machine.host, `cd ${machine.repo} && git rev-parse HEAD`) !== commit) throw new Error(`${machine.label} 代码未能更新到 ${commit.slice(0, 7)}`);
+  ssh(machine.host, `cd ${remoteRepo} && git fetch -q /tmp/my-agents-deploy.bundle main:refs/remotes/bundle/main && git merge -q --ff-only bundle/main && rm -f /tmp/my-agents-deploy.bundle`);
+  if (ssh(machine.host, `cd ${remoteRepo} && git rev-parse HEAD`) !== commit) throw new Error(`${machine.label} 代码未能更新到 ${commit.slice(0, 7)}`);
 }
 function restart(machine) {
   if (machine.local) run('launchctl', ['kickstart', '-k', `gui/${process.getuid()}/io.my-agents.gateway`]);
@@ -116,7 +121,8 @@ async function waitGateway(avoidLeader) {
 
 (async () => {
   if (run('git', ['status', '--porcelain', '--untracked-files=no']).split('\n').some(line => line && !line.endsWith('package-lock.json'))) throw new Error('有未提交的改动，请先提交');
-  run('git', ['push', '-q', 'origin', 'main'], { allowFail: true, timeout: 60000 });
+  if (run('git', ['rev-parse', 'HEAD']) !== run('git', ['rev-parse', 'main'])) throw new Error('当前检出不是 main 最新提交，已停止部署');
+  run('git', ['push', '-q', 'origin', 'main'], { timeout: 60000 });
   const commit = run('git', ['rev-parse', 'HEAD']);
   const bundle = path.join(os.tmpdir(), `my-agents-deploy-${process.pid}.bundle`);
   const all = await machines();

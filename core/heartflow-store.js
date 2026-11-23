@@ -8,12 +8,17 @@ function createHeartflowStore({ dir, now = Date.now }) {
   const file = path.join(dir, 'panel-heartflow.json');
   let state = { schema: 1, config: { enabled: false, chats: [], intervalSeconds: 60, model: '', selfId: '', since: now(), modelEnabled: true }, messages: {}, matters: {}, proposals: {}, checks: [], deliveries: {}, cursor: {}, source: {} };
   try { state = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  let serialized = JSON.stringify(state), revision = uid();
   function transaction(fn) {
-    const next = copy(state), result = fn(next);
+    const next = copy(state), result = fn(next), encoded = JSON.stringify(next);
+    if (encoded === serialized) return copy(result ?? null);
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     const tmp = file + '.' + uid() + '.tmp', fd = fs.openSync(tmp, 'wx', 0o600);
-    try { fs.writeFileSync(fd, JSON.stringify(next)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-    fs.renameSync(tmp, file); state = next; return copy(result ?? null);
+    try {
+      try { fs.writeFileSync(fd, encoded); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+      fs.renameSync(tmp, file);
+    } catch (error) { fs.rmSync(tmp, { force: true }); throw error; }
+    state = next; serialized = encoded; revision = uid(); return copy(result ?? null);
   }
   const proposal = (s, id, version) => {
     const p = Object.hasOwn(s.proposals,id) && s.proposals[id]; if (!p) fail('建议不存在', 404);
@@ -31,7 +36,7 @@ function createHeartflowStore({ dir, now = Date.now }) {
     return { title, summary, reason: String(input.reason || '').slice(0,3000), messageIds, matterIds, actions };
   }
   return {
-    snapshot: () => copy(state), transaction,
+    snapshot: () => copy(state), revision: () => revision, transaction,
     configure(input) { return transaction(s => {
       const c = s.config;
       if ('chats' in input) {

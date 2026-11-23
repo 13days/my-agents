@@ -182,3 +182,26 @@ test('analysis alternates old and new topic batches without mixing chats',async 
  const contexts=[];const flow=createHeartflow({store,source:{},sessions:async()=>[],analyze:async c=>{contexts.push(c);return {suggestions:[],usage:{input_tokens:100,output_tokens:10}};}});
  await flow.suggest();await flow.suggest();assert.ok(contexts.every(c=>c.messages.length<=12));assert.ok(contexts[0].messages.some(m=>m.id==='bulk0'));assert.ok(contexts[1].messages.some(m=>m.id==='bulk79'));
 });
+
+test('expired discovery cursor restarts the same window and deduplicates existing messages',async t=>{
+ const {store}=setup(t),base=Date.now();store.configure({since:base-60000,selfId:'me',discoveryMode:'recent'});
+ store.transaction(s=>{s.cursor.discovery={live:{floor:base-60000,upper:base,page:'expired'},history:{done:true}};});
+ const calls=[];const flow=createHeartflow({store,now:()=>base,source:{recent:async(floor,upper,page)=>{
+ calls.push({floor,upper,page});if(page==='expired')throw Error('page_token is invalid or expired, please start a new search');
+ return {messages:[{message_id:'fresh',chat_id:'oc_a',create_time:String(base),body:{content:'{"text":"新消息"}'}}],has_more:false};}}});
+ await flow.sync();assert.deepEqual(calls.map(c=>c.page),['expired',undefined]);assert.ok(calls.every(c=>c.floor===base-60000&&c.upper===base));
+ assert.equal(store.snapshot().cursor.discovery.live.watermark,base);await flow.sync();assert.equal(store.snapshot().messages.fresh.revision,1);
+});
+test('failed live discovery does not starve history or selected chats',async t=>{
+ const {store}=setup(t),base=Date.now();store.configure({since:base-86400000,selfId:'me',discoveryMode:'recent',chats:[{id:'oc_selected'}]});let pages=0;
+ const flow=createHeartflow({store,now:()=>base,source:{recent:async(floor,upper)=>{
+ if(upper===base)throw Error('live unavailable');return {messages:[],has_more:false};
+ },page:async()=>{pages++;return {messages:[],has_more:false};}}});
+ await assert.rejects(flow.sync(),/live unavailable/);assert.equal(pages,1);assert.equal(store.snapshot().cursor.discovery.history.done,true);assert.equal(store.snapshot().source.ok,false);
+});
+test('unchanged store transactions preserve revision and do not rewrite the data file',t=>{
+ const {dir,store}=setup(t),file=path.join(dir,'panel-heartflow.json');const revision=store.revision(),before=fs.statSync(file);
+ store.transaction(()=>{});assert.equal(store.revision(),revision);assert.equal(fs.statSync(file).ino,before.ino);
+ store.configure({enabled:true});assert.notEqual(store.revision(),revision);assert.equal(createHeartflowStore({dir}).snapshot().config.enabled,true);
+ assert.notEqual(createHeartflowStore({dir}).revision(),store.revision());
+});

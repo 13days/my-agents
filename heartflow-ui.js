@@ -76,7 +76,8 @@ async function renderHeartflow(useCache=false) {
       if(checking || document.hidden)return;checking=true;
       try{
         const analysisRevision=hfAnalysisRevision;
-        const latest=await api('GET','heartflow');
+        const update=await api('GET','heartflow?revision='+encodeURIComponent(heartflowData.revision||''));
+        const latest=update.unchanged?{...heartflowData,runtime:update.runtime}:update;
         if(hfAnalysisSaving||analysisRevision!==hfAnalysisRevision)return;
         if(state.type!=='heartflow'||renderVersion!==heartflowRenderVersion||!$('#hf-live-status'))return;
         if(!hfAnalysisSaving){$('#hf-live-status').innerHTML=hfProgress(latest);$('#hf-analysis-control').innerHTML=hfAnalysisControl(latest);}
