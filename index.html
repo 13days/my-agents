@@ -2585,6 +2585,10 @@ function restoreChatPage(key) {
   $('#render').replaceChildren(...cached.nodes);
   const box=$('#chat-messages');box.scrollTop=cached.scroll;box.updateScrollControls?.();
   chatScrollObserver=new ResizeObserver(()=>box.updateScrollControls?.());chatScrollObserver.observe(box);
+  // Detached DOM may have missed paints while the old stream was closing.
+  // Revalidate once even if the transcript revision/data has not changed.
+  chatView.revision = ''; chatView.needsReconcile = true;
+  startChatHistoryFollow(chatView);
   // Catch up without hiding the cached transcript or sending another prompt.
   const refresh=()=>{if(state.type==='sessions'&&chatView===cached.view)refreshOpenChat();};
   if(chatView.run)chatView.run.finished.then(refresh);else refresh();
@@ -2639,13 +2643,14 @@ async function refreshOpenChat() {
     // v.run above is the live-connection guard; lastReplayJobId is only identity.
     if (v.readingImages || v.loadingOlder || document.querySelector('.panel-select-menu:popover-open')) return;
     v.revision = d.revision;
-    if (!d.liveReplay && JSON.stringify(v.messages) === JSON.stringify(d.messages)) return;
+    if (!v.needsReconcile && !d.liveReplay && JSON.stringify(v.messages) === JSON.stringify(d.messages)) return;
     const box = $('#chat-messages'), prompt = $('#chat-prompt');
     const view = { top: box.scrollTop, follow: box.scrollHeight - box.scrollTop - box.clientHeight < 60, draft: prompt.value, start: prompt.selectionStart, end: prompt.selectionEnd, focus: document.activeElement?.id, model: $('#chat-model').value };
     const key = article => article.querySelector('.chat-tool')?.dataset.toolId || article.querySelector('.chat-message-body')?.textContent.slice(0, 120);
     const anchor = Array.from(box.querySelectorAll('.chat-message')).find(article => article.getBoundingClientRect().bottom > box.getBoundingClientRect().top);
     if (anchor) { view.anchor = key(anchor); view.offset = anchor.getBoundingClientRect().top - box.getBoundingClientRect().top; }
     v.messages = d.messages; v.truncated = d.truncated; v.historyBefore = d.historyBefore;
+    v.needsReconcile = false;
     renderChat();
     $('#chat-prompt').value = view.draft; $('#chat-prompt').setSelectionRange(view.start, view.end); $('#chat-model').value = view.model;
     if (view.focus) document.getElementById(view.focus)?.focus({ preventScroll: true });
