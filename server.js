@@ -23,6 +23,7 @@ const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
 const { messageTimestamp, annotateMessageTimings } = require('./message-timing');
+const { claudeRelayMessage } = require('./core/claude-relay-message');
 const crypto = require('crypto');
 const { chooseFolder } = require('./folder-picker');
 const { createSessionStore, normalizeTitle, isManualTitle, autoTitlePatch } = require('./session-store');
@@ -665,8 +666,9 @@ function latestTranscriptPrompt(fp) {
         const lines = buffer.toString('utf8').split('\n');
         for (let i = lines.length - 1; i >= (start ? 1 : 0); i--) {
           let d; try { d = JSON.parse(lines[i]); } catch { continue; }
-          if (d.type !== 'user' || d.isMeta || d.isSidechain || !d.message) continue;
-          const text = transcriptUserText(d.message.content);
+          const relay = claudeRelayMessage(d);
+          if (d.type !== 'user' || (d.isMeta && !relay) || d.isSidechain || !d.message) continue;
+          const text = relay?.text || transcriptUserText(d.message.content);
           const hasImage = Array.isArray(d.message.content) && d.message.content.some(b => b.type === 'image');
           if (text || hasImage) { value = { title: normalizeTitle(text) || '图片对话', at: Date.parse(d.timestamp) || st.mtimeMs }; break; }
         }
@@ -708,7 +710,8 @@ function sessionMessages(id, options = {}) {
   const toolsById = new Map();
   for (const line of lines) {
     let d; try { d = JSON.parse(line); } catch { continue; }
-    if (d.isSidechain || d.isMeta) continue;
+    const relay = claudeRelayMessage(d);
+    if (d.isSidechain || (d.isMeta && !relay)) continue;
     if (d.type === 'system' && d.subtype === 'turn_duration') {
       const last = messages.at(-1); const duration = d.durationMs ?? d.duration_ms;
       if (last?.role === 'assistant' && typeof duration === 'number' && duration >= 0) last.durationMs = duration;
@@ -720,9 +723,9 @@ function sessionMessages(id, options = {}) {
         const tool = block.type === 'tool_result' && toolsById.get(block.tool_use_id);
         if (tool) { tool.output = block.content; tool.state = block.is_error ? 'error' : 'done'; }
       }
-      const t = transcriptUserText(d.message.content);
+      const t = relay?.text || transcriptUserText(d.message.content);
       const images = (Array.isArray(d.message.content) ? d.message.content : []).filter(b => b?.type === 'image' && b.source?.type === 'base64' && ['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(b.source.media_type)).map(b => ({ mimeType: b.source.media_type, data: b.source.data }));
-      if (t || images.length) messages.push({ role: 'user', text: t, images, ...(timestamp ? { timestamp } : {}) });
+      if (t || images.length) messages.push({ role: 'user', text: t, images, ...(relay ? { source: relay.source, relayMessageId: relay.relayMessageId } : {}), ...(timestamp ? { timestamp } : {}) });
     } else if (d.type === 'assistant' && Array.isArray(d.message.content)) {
       let add = ''; const tools = [];
       for (const b of d.message.content) {

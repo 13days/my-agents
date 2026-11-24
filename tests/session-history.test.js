@@ -15,7 +15,7 @@ test('history pages preserve all long text, cover every message, and reuse uncha
   const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   const context = vm.createContext({ ...require('../message-timing'), codexSessions: { list: () => [], pathFor: () => '', messages: () => null }, isCodexPath: () => false, isCodexSession: () => false, fs: { ...fs, readFileSync(...args) { reads++; return fs.readFileSync(...args); } }, path,
     readHistory: () => [], transcriptPathFor: () => file, transcriptHead: () => ({ cwd: dir }),
-    transcriptUserText: text => text, CLAUDE_DIR: dir,
+    transcriptUserText: text => text, claudeRelayMessage: require('../core/claude-relay-message').claudeRelayMessage, CLAUDE_DIR: dir,
   });
   vm.runInContext(source.slice(source.indexOf('const sessionMessageCache ='), source.indexOf('function listSessions()')), context);
   const latest = context.sessionMessages('session-id');
