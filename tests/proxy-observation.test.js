@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { createCaptureStore } = require('../capture-store');
-const { createProxyObservation, routeRecord, updateRoutes, sessionIdOf, streamOutcome } = require('../core/proxy-observation');
+const { createProxyObservation, findTurnObservation, routeRecord, updateRoutes, sessionIdOf, streamOutcome } = require('../core/proxy-observation');
 const SID = '11111111-1111-4111-8111-111111111111';
 const OTHER = '22222222-2222-4222-8222-222222222222';
 function rec(overrides = {}) {
@@ -88,4 +88,32 @@ test('session IDs must be real UUIDs; client tags cannot select another record',
   assert.equal(sessionIdOf('not-a-session'), '');
   const map = new Map(); updateRoutes(map, routeRecord(rec({ purpose: 'models' })));
   assert.equal(map.size, 0);
+});
+
+test('task cards find a matching request on the proxy owner when the execution node has no current evidence', async () => {
+  const since = Date.now(), until = since + 600;
+  const observation = (sessionId, offset) => ({ request: { sessionId, model: 'upstream-model', startedAt: new Date(since + offset).toISOString() } });
+  const records = { executor: observation(SID, -1), coordinator: observation(OTHER, 450), proxy: observation(SID, 225) };
+  const options = { sessionId: SID, node: 'executor', peers: ['executor', 'coordinator', 'offline', 'proxy'], window: { since, until },
+    lookup: async machine => { if (machine === 'offline') throw Error('disconnected'); return records[machine]; } };
+  assert.deepEqual(await findTurnObservation(options), records.proxy);
+  records.proxy = observation(SID, 601);
+  assert.equal((await findTurnObservation(options)).request, null);
+});
+
+test('background index restores route evidence and final cards can read a completed turn after another has started', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'card-route-history-'));
+  t.after(() => fs.rmSync(dir, {recursive:true,force:true}));
+  const file = path.join(dir,'capture.jsonl'), writer = createCaptureStore(file);
+  const since = Date.now();
+  writer.append(rec({startedAt:new Date(since).toISOString()}));
+  writer.append(rec({id:2,requestOrder:2,startedAt:new Date(since+1000).toISOString()}));
+  const reader = createCaptureStore(file);
+  await reader.loadAsync();
+  const observer = createProxyObservation({lastCapture:(id,window)=>reader.latestProxyRoute(id,window)});
+  assert.equal(observer.status(SID).request.requestOrder,2);
+  const window = {since,until:since+500};
+  observer.begin(rec({id:3,requestOrder:3,startedAt:new Date(since+2000).toISOString()}));
+  assert.equal(observer.status(SID,null,window).request.requestOrder,1);
+  assert.equal(observer.status(SID,null,{since:since+1,until:since+500}).request,null);
 });

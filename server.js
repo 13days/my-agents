@@ -28,7 +28,7 @@ const crypto = require('crypto');
 const { chooseFolder } = require('./folder-picker');
 const { createSessionStore, normalizeTitle, isManualTitle, autoTitlePatch } = require('./session-store');
 const { createCaptureStore } = require('./capture-store');
-const { TRACE_HEADER, createProxyObservation, streamOutcome } = require('./core/proxy-observation');
+const { TRACE_HEADER, createProxyObservation, findTurnObservation, streamOutcome } = require('./core/proxy-observation');
 const { resolveCodex } = require('./engines/codex/cli');
 const { resolveClaude } = require('./engines/claude/cli');
 const { createCodexSessions } = require('./engines/codex/sessions');
@@ -1599,7 +1599,7 @@ function readBody(req, limit = 5 * 1024 * 1024) {
 // 面板即可看到每个请求的完整 payload（系统提示词、工具定义、消息、流式响应含 thinking）
 const CAPTURES_FILE = path.join(DATA_DIR, 'panel-captures.jsonl');
 const captureStore = createCaptureStore(CAPTURES_FILE);
-const proxyObservation = createProxyObservation({ lastCapture: id => captureStore.latestProxyRoute(id) });
+const proxyObservation = createProxyObservation({ lastCapture: (id, window) => captureStore.latestProxyRoute(id, window) });
 function loadCaptures() { captureStore.load(); }
 // Recover legacy captures only through exact response IDs; copied history stays ambiguous.
 let captureLinkPromise, captureLinkRevision = -1, captureLinkAt = 0;
@@ -2090,12 +2090,15 @@ const feishuGateway = require('./feishu-bots').createFeishuBots({
     validModel: (engine, model, node = 'local') => !!(registry.adapter(engine, node) || registry.get(engine))?.validModel(model),
     defaultModel: engine => accountPool?.defaultModels()[engine] || '',
     setDefaultModel: async (engine, model) => { if (!accountPool) throw new Error('账号池未就绪'); return setValidatedDefaultModel(engine, model); },
-    routeObservation: ({sessionId,node='local'}) => {
-      if(node!=='local'&&node!==machineId()){
-        if(!clusterNetwork)return null;
-        return clusterNetwork.call(node,'accounts.observation',{sessionId},{timeout:3000});
-      }
-      return proxyObservation.status(sessionId);
+    routeObservation: ({ sessionId, node, since, until }) => {
+      const self = machineId();
+      return findTurnObservation({
+        sessionId, node: !node || node === 'local' ? self : node, window: { since, until },
+        peers: [self, ...(clusterNetwork?.connected() || [])],
+        lookup: (machine, id, window) => machine === self
+          ? proxyObservation.status(id, null, window)
+          : clusterNetwork?.call(machine, 'accounts.observation', { sessionId: id, window }, { timeout: 3000 }),
+      });
     },
     currentModel: id => { const run = manager.get(id); return run && !run.job.closed ? run.job.meta.model || '' : ''; },
     nodes: () => executionMachines().filter(item => item.id !== machineId()).map(item => ({ ...item, connected: item.online, home: registry.node(item.id)?.host.homeDir() })),
@@ -2976,7 +2979,7 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
   } });
   cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: feishuGateway, canTransfer: () => manager.running().length === 0 && executionRuntime.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });
   clusterNetwork.handle('accounts.configureProxy', (_, input) => saveClaudeProxy(input));
-  clusterNetwork.handle('accounts.observation', (_, {sessionId}) => proxyObservation.status(sessionId));
+  clusterNetwork.handle('accounts.observation', (_, { sessionId, window }) => proxyObservation.status(sessionId, null, window));
   clusterNetwork.handle('accounts.models', (_, {engine,sessionId,refresh}) => engine==='codex'?codexPoolModels({sessionId,refresh}):accountRouter.models({sessionId,refresh}));
   clusterNetwork.handle('accounts.catalog', () => accountPool.catalog());
   clusterNetwork.handle('accounts.key', () => accountPool.exchangeKey());

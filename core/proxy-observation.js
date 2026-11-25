@@ -52,6 +52,27 @@ function streamOutcome(raw) {
   }
   return result;
 }
+function withinTurn(row, window) {
+  if (!row || !window) return row;
+  const started = Date.parse(row.startedAt);
+  return started >= window.since && started <= (window.until ?? Infinity) ? row : null;
+}
+
+// Work may execute on one machine while another machine owns the model proxy.
+async function findTurnObservation({ sessionId, node, window, peers, lookup }) {
+  async function requestFrom(machine) {
+    const observation = await lookup(machine, sessionId, window);
+    const row = observation?.request;
+    return row?.sessionId === sessionId && row.model ? withinTurn(row, window) : null;
+  }
+  const primary = await requestFrom(node).catch(() => null);
+  if (primary) return { request: primary };
+  const others = [...new Set(peers)].filter(peer => peer !== node);
+  const rows = await Promise.all(others.map(peer => requestFrom(peer).catch(() => null)));
+  // Arrival sequences are node-local. Compare timestamps across peers.
+  const matches = rows.filter(Boolean).sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
+  return { request: matches[0] || null };
+}
 function createProxyObservation({ lastCapture = () => null, now = Date.now } = {}) {
   const live = new Map(), links = new Map();
   const trim = map => { while (map.size > 500) map.delete(map.keys().next().value); };
@@ -75,10 +96,10 @@ function createProxyObservation({ lastCapture = () => null, now = Date.now } = {
     return { ...row.trace };
   }
   const newest = (pending, recorded) => !pending ? recorded : !recorded || compareRoutes(pending, recorded) > 0 ? pending : recorded;
-  function status(sessionId, target = null) {
-    const id = sessionIdOf(sessionId), pending = id && live.get(id), recorded = id && lastCapture(id);
-    const outer = newest(pending?.outer, recorded?.outer);
-    let inner = newest(pending?.inner, recorded?.inner);
+  function status(sessionId, target = null, window = null) {
+    const id = sessionIdOf(sessionId), pending = id && live.get(id), recorded = id && lastCapture(id, window);
+    const outer = newest(withinTurn(pending?.outer, window), withinTurn(recorded?.outer, window));
+    let inner = newest(withinTurn(pending?.inner, window), withinTurn(recorded?.inner, window));
     // A child's account is evidence only for this exact parent attempt, never
     // the last subscription request from another turn/window or another retry.
     if (!outer || !inner || inner.requestOrder !== outer.requestOrder || inner.parentAttempt !== outer.parentAttempt) inner = null;
@@ -88,4 +109,4 @@ function createProxyObservation({ lastCapture = () => null, now = Date.now } = {
   }
   return { begin, complete, associate, resolve, status };
 }
-module.exports = { TRACE_HEADER, sessionIdOf, compareRoutes, routeRecord, updateRoutes, streamOutcome, createProxyObservation };
+module.exports = { TRACE_HEADER, sessionIdOf, findTurnObservation, withinTurn, compareRoutes, routeRecord, updateRoutes, streamOutcome, createProxyObservation };

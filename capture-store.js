@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { routeRecord, updateRoutes } = require('./core/proxy-observation');
+const { routeRecord, updateRoutes, withinTurn } = require('./core/proxy-observation');
 
 function captureMetadata(rec) {
   let payload = {};
@@ -86,7 +86,10 @@ function createCaptureStore(file) {
       let complete = false;
       worker.on('message', message => {
         if (epoch === generation && message.entries) for (const [id, entry] of message.entries) {
-          if (!records.has(id)) records.set(id, entry);
+          if (!records.has(id)) {
+            records.set(id, entry);
+            updateRoutes(proxyRoutes, routeRecord(entry.meta));
+          }
           if (entry.meta.respMsgId && Number(messages.get(entry.meta.respMsgId) || 0) < Number(id)) messages.set(entry.meta.respMsgId, id);
           sequence = Math.max(sequence, Number(id) || 0);
         }
@@ -127,7 +130,19 @@ function createCaptureStore(file) {
     indexEntries: () => [...records],
     status: () => ({ loading: !!loading, error: loadError, records: records.size }),
     metadata: id => records.get(String(id))?.meta || null,
-    latestProxyRoute: sessionId => proxyRoutes.get(sessionId) || null,
+    latestProxyRoute(sessionId, window) {
+      const latest = proxyRoutes.get(sessionId);
+      if (!latest || !Number.isFinite(window?.until) ||
+          ![latest.outer, latest.inner].some(row => Date.parse(row?.startedAt) > window.until)) return latest || null;
+      // A queued turn can start before the previous card has finished updating.
+      const matches = new Map();
+      for (const { meta } of records.values()) {
+        if ((meta.observation?.sessionId || meta.sessionId) === sessionId) {
+          updateRoutes(matches, withinTurn(routeRecord(meta), window));
+        }
+      }
+      return matches.get(sessionId) || null;
+    },
     linkSessions(byMessage) {
       let changed = false;
       for (const { meta } of records.values()) {
