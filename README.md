@@ -1,14 +1,10 @@
 # <img src="https://raw.githubusercontent.com/13days/my-agents/main/assets/my-agents.png" width="42" height="42" alt=""> my-agents
 
-在 Codex 或 Claude Code 终端开始的对话，出门后可以在飞书接着聊，回到电脑也能在网页或原终端继续。前面问过什么、改过什么，都留在同一个会话里。一个面板就能调度多台机器，也能让同一个引擎通过代理使用不同模型。
+[快速接入](#启动第一台) · [使用手册](docs/user-guide.md) · [English](README.en.md)
 
-[English](README.en.md) · [使用手册](docs/user-guide.md)
+[![播放 58 秒产品介绍：在飞书追问终端里那条产品更新](https://raw.githubusercontent.com/13days/my-agents/main/docs/product-tour-zh.png)](https://cdn.jsdelivr.net/gh/13days/my-agents@bdadbb6c08c8ef17e2872f091494e7f7a53bc1bf/docs/my-agents-intro.mp4)
 
-[![点击播放 my-agents 产品介绍，从飞书接续会话到网页协作](https://raw.githubusercontent.com/13days/my-agents/main/docs/feishu-share.gif)](https://cdn.jsdelivr.net/gh/13days/my-agents@bdadbb6c08c8ef17e2872f091494e7f7a53bc1bf/docs/my-agents-intro.mp4)
-
-**[▶ 播放产品介绍](https://cdn.jsdelivr.net/gh/13days/my-agents@bdadbb6c08c8ef17e2872f091494e7f7a53bc1bf/docs/my-agents-intro.mp4)** · 58 秒 · 中文旁白 · 中英字幕 · [下载 MP4](https://raw.githubusercontent.com/13days/my-agents/main/docs/my-agents-intro.mp4)
-
-*动图录自网关生成的飞书卡片的本地预览。下面的截图来自真实面板，使用示例账号、项目和对话。*
+在终端用 Codex 或 Claude Code 开始的对话，出门后可以在飞书接手，回到电脑也能在网页或原终端继续。手上有带 Codex 使用权的 ChatGPT 订阅，还可以用它在 Claude Code 里调用 GPT，照常改文件、跑命令。 [下载介绍视频（MP4）](https://raw.githubusercontent.com/13days/my-agents/main/docs/my-agents-intro.mp4)
 
 ## 在终端、飞书和网页接着聊
 
@@ -27,6 +23,10 @@
 > /new 帮我看一下这个项目本周合入的改动，整理三条给团队看的更新。
 
 选好项目和引擎，提交任务。完成后，卡片直接展示写好的三条更新。点卡片最底部署名行末尾的「详情与操作」，可以看工具记录和执行机器。想改口吻，直接在话题里说「改成发给设计同学的版本」。想发到周会群，任务发起人可以在已完成的任务卡上点 **详情与操作 → 生成分享卡**，确认正文后用飞书转发。转发后，收件人能在卡片底部看到本轮使用的引擎和已确认的模型，点「my-agents」就能打开这个项目。
+
+![飞书中交代任务、查看答复，再生成分享卡转发](https://raw.githubusercontent.com/13days/my-agents/main/docs/feishu-share.gif)
+
+*飞书动图录自网关生成的卡片预览，面板截图使用示例账号、项目和对话。*
 
 ## 启动第一台
 
@@ -77,6 +77,8 @@ SSH 连不进去，但开发机能访问面板时，展开「其他接入方式�
 比如，你想让笔记本上的 Claude Code 检查前端，同时让 Linux 开发机上的 Codex 跑测试。打开两个对话，各选自己的机器和项目目录，就可以在同一个面板看两边的进度。
 
 在飞书里，发 `/node` 查看在线机器。假设开发机名为 `devbox`、项目已在 `~/repos/web`，发 `/node devbox ~/repos/web`，然后在同一话题发「跑一下项目的测试」。命令和文件操作都会在开发机的这份代码上执行。
+
+如果希望 Mac 待机时继续接单，可以在飞书连接的「运行与启动设置」开启保活，避免空闲休眠。
 
 只需要远程执行时，加执行节点就够了。如果希望笔记本关机后飞书机器人仍在线，可以部署三台常驻完整面板。主面板离线时，其余两台形成多数派，其中一台接管后续消息。 [集群搭建与接管](docs/cluster-setup.md)
 
