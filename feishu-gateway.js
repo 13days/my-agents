@@ -128,10 +128,20 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (!state.bindings[key] && state.bindings[legacy]) { state.bindings[key] = { ...state.bindings[legacy] }; persist(); }
     return key;
   };
+  const defaultMachine = () => config.defaultMachine || panel.defaultExecutionMachine?.() || panel.machineId?.();
+  const defaultNode = () => {
+    const machine = defaultMachine();
+    return machine && machine !== panel.machineId?.() ? machine : 'local';
+  };
+  function projectOn(machine) {
+    const origin = config.defaultProjectMachine || config.defaultMachine || panel.machineId?.();
+    if (origin === machine) return config.defaultProject;
+    return config.defaultProject && panel.workspaces?.().config.projects.find(project => project.paths[origin] === config.defaultProject)?.paths[machine] || '';
+  }
   function defaultBinding(msg) {
     const key = scope(msg);
-    const machine = config.defaultMachine || panel.machineId?.();
-    const project = config.defaultProject || Object.values(state.bindings).filter(item => (item.machineId || panel.machineId?.()) === machine).map(item => item.worktree?.repository || item.cwd).filter(Boolean).at(-1) || panel.defaultDirectory?.(machine) || '';
+    const machine = defaultMachine();
+    const project = projectOn(machine) || panel.workspaces?.().config.defaults[machine] || Object.values(state.bindings).filter(item => (item.machineId || panel.machineId?.()) === machine).map(item => item.worktree?.repository || item.cwd).filter(Boolean).at(-1) || panel.defaultDirectory?.(machine) || '';
     if (!state.bindings[key] && project) { bind(key, { id: crypto.randomUUID(), cwd: project, machineId: machine, engine: defaultEngine() }); }
     return state.bindings[key];
   }
@@ -247,10 +257,10 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     const key = scope(msg), current = state.bindings[key];
     if (!current || engineOf(current) !== engine) {
       rememberEngine(key, current);
-      const node = current ? nodeOf(current) : config.defaultMachine && config.defaultMachine !== panel.machineId?.() ? config.defaultMachine : 'local';
+      const node = current ? nodeOf(current) : defaultNode();
       const cached = state.engineBindings[key]?.[cacheKey(engine, node)];
       const saved = cached && (session(cached.id) || await panel.sessionExists?.(cached)) ? cached : null;
-      const cwd = saved?.cwd || current?.cwd || config.defaultProject;
+      const cwd = saved?.cwd || current?.cwd || projectOn(defaultMachine()) || panel.defaultDirectory?.(defaultMachine());
       const at = { node };
       if (!cwd || !usable({ ...at, cwd })) return projectsCard(msg, 0, engine, node);
       bind(key, saved && usable(saved) ? { ...saved } : { id: crypto.randomUUID(), cwd, engine, ...(panel.workspaces && current ? { sourceSessionId: current.id } : {}), ...(node !== 'local' ? at : {}) });
@@ -270,7 +280,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (node === 'local') {
       if (cwd && !path.isAbsolute(cwd) && cwd !== '~' && !cwd.startsWith('~/')) throw new Error('请使用绝对路径或 ~/ 开头的路径');
       if (cwd) cwd = path.resolve(cwd.startsWith('~') ? os.homedir() + cwd.slice(1) : cwd);
-      cwd ||= panel.defaultDirectory?.(panel.machineId?.()) || config.defaultProject;
+      cwd ||= panel.defaultDirectory?.(panel.machineId?.()) || projectOn(panel.machineId?.());
       if (!cwd) return projectsCard(msg, 0, engine, node);
       let directory = false; try { directory = fs.statSync(cwd).isDirectory(); } catch {}
       if (!directory) throw new Error('项目目录不存在或不是文件夹');
@@ -311,14 +321,14 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (result?.messageId) { state.cards[result.messageId].listing = { page, query }; persist(); }
   }
   function projects() {
-    return [...new Set([config.defaultProject, ...panel.projects(), ...state.projects].filter(Boolean))].filter(folder => { try { return fs.statSync(folder).isDirectory(); } catch { return false; } });
+    return [...new Set([projectOn(panel.machineId?.()), ...panel.projects(), ...state.projects].filter(Boolean))].filter(folder => { try { return fs.statSync(folder).isDirectory(); } catch { return false; } });
   }
   async function projectsCard(msg, requestedPage = 0, engine = defaultEngine(), node = null) {
     if (!detailed(msg)) return managementNotice(msg);
     const current = state.bindings[contextKey(msg)];
-    node = node && (node === 'local' || remoteNodes().some(item => item.id === node)) ? node : current ? nodeOf(current) : config.defaultMachine && config.defaultMachine !== panel.machineId?.() ? config.defaultMachine : 'local';
+    node = node && (node === 'local' || remoteNodes().some(item => item.id === node)) ? node : current ? nodeOf(current) : defaultNode();
     const all = nodeProjects(node), page = pageOf(requestedPage, all.length);
-    const result = await send(msg, { card: cards.projectList({ forms: !!panel.workspaces, owner: msg.senderId, key: contextKey(msg), location: contextLabel(msg), rows: all.slice(page * cards.PAGE_SIZE, (page + 1) * cards.PAGE_SIZE), total: all.length, page, defaultProject: node === 'local' ? config.defaultProject : '', engine: catalog().fallback(engine, defaultEngine()), engines: catalog(), node: node === 'local' ? panel.machineId?.() || 'local' : node, nodeLabel: nodeLabel(node) }) });
+    const result = await send(msg, { card: cards.projectList({ forms: !!panel.workspaces, owner: msg.senderId, key: contextKey(msg), location: contextLabel(msg), rows: all.slice(page * cards.PAGE_SIZE, (page + 1) * cards.PAGE_SIZE), total: all.length, page, defaultProject: projectOn(node === 'local' ? panel.machineId?.() : node), engine: catalog().fallback(engine, defaultEngine()), engines: catalog(), node: node === 'local' ? panel.machineId?.() || 'local' : node, nodeLabel: nodeLabel(node) }) });
     rememberCard(result, msg);
   }
   async function currentCard(msg, binding, switched = false, resolvedItem = null) {
@@ -356,7 +366,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   async function engineCard(msg) {
     const binding = state.bindings[contextKey(msg)], engine = binding ? engineOf(binding) : defaultEngine();
     if (!detailed(msg)) return send(msg, { text: `${contextLabel(msg)} · ${binding ? '当前' : '默认'}引擎：${catalog().label(engine)}\n${catalog().switchHint(engine)} 切换，可直接带问题。各引擎分别接续上下文；${catalog().ids().map(id => '/new ' + id).join(' 或 ')} 强制新建。其他话题不受影响。` });
-    const cwd = binding?.cwd || config.defaultProject;
+    const cwd = binding?.cwd || projectOn(defaultMachine());
     const result = await send(msg, { card: cards.enginePicker({ sessionId: binding?.id, forms: !!panel.workspaces, owner: msg.senderId, key: contextKey(msg), location: contextLabel(msg), engine, defaultEngine: defaultEngine(), cwd, engines: catalog() }) });
     rememberCard(result, msg, binding);
   }
@@ -528,8 +538,8 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   async function newForm(msg, prompt = '', engine = defaultEngine(), prefill = {}) {
     if (prompt.length > 1000) throw new Error('表单首条问题最多 1000 字，请缩短后重试');
     const spaces = formSpaces(), current = state.bindings[scope(msg)];
-    const machineId = prefill.machineId || (prefill.node && prefill.node !== 'local' ? prefill.node : prefill.node === 'local' ? spaces.selfId : '') || current?.machineId || config.defaultMachine || spaces.selfId;
-    const cwd = prefill.cwd || (current?.machineId === machineId ? current?.worktree?.repository || current?.cwd : '') || (machineId === config.defaultMachine ? config.defaultProject : '') || spaces.config.defaults[machineId] || '';
+    const machineId = prefill.machineId || (prefill.node && prefill.node !== 'local' ? prefill.node : prefill.node === 'local' ? spaces.selfId : '') || current?.machineId || defaultMachine() || spaces.selfId;
+    const cwd = prefill.cwd || (current?.machineId === machineId ? current?.worktree?.repository || current?.cwd : '') || projectOn(machineId) || spaces.config.defaults[machineId] || '';
     const project = spaces.config.projects.find(item => item.paths[machineId] === cwd);
     const draft = { id: crypto.randomUUID(), sessionId: crypto.randomUUID(), owner: msg.senderId, key: scope(msg), revision: 0, status: 'editing', machineId, workspaceId: project?.id || (cwd ? '__directory__' : '__default__'), cwd, engine, model: '', modelId: '', worktree: config.worktree, prompt };
     state.drafts[draft.id] = draft; persist(); return showNewForm(msg, draft);
@@ -614,7 +624,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       listener(event, data);
     });
     if (!detailed(msg) || replyFormat(msg) === 'markdown') {
-      const reply = createSimpleReply({ channel, msg: { ...msg, threadId: threadOf(msg) }, messageId: id, footer: () => `${nodeLabel(nodeOf(binding))} · ${catalog().label(engineOf(binding))} · ${catalog().switchHint(engineOf(binding))} 切换引擎 · 模型：${modelLabel(binding)} · /model 切换模型${detailed(msg) ? ' · /reply wide 改用宽屏卡片（可看思考过程）' : ''}`, onError: rememberError, onClose: () => { turn.until ??= now(); monitors.delete(reply.close); } });
+      const reply = createSimpleReply({ channel, msg: { ...msg, threadId: threadOf(msg) }, messageId: id, footer: () => `执行机器：${nodeLabel(nodeOf(binding))} · ${catalog().label(engineOf(binding))} · ${catalog().switchHint(engineOf(binding))} 切换引擎 · 模型：${modelLabel(binding)} · /model 切换模型${detailed(msg) ? ' · /reply wide 改用宽屏卡片（可看思考过程）' : ''}`, onError: rememberError, onClose: () => { turn.until ??= now(); monitors.delete(reply.close); } });
       monitors.add(reply.close);
       try {
         await reply.start();
@@ -626,10 +636,10 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     }
     const progress = () => {
       const node = nodeOf(binding);
-      const defaultNode = config.defaultMachine === panel.machineId?.() ? 'local' : config.defaultMachine;
+      const preferredNode = defaultNode();
       const card = cards.task({
         signature: signatureFor(msg, turn), replyFormat: replyFormat(msg), nodeLabel: nodeLabel(node),
-        defaultNodeLabel: defaultNode && defaultNode !== node ? nodeLabel(defaultNode) : '',
+        defaultNodeLabel: preferredNode !== node ? nodeLabel(preferredNode) : '',
         engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), detailed: detailed(msg), binding,
         title: prompt || '图片对话', view: { ...view, modelRoute: turn.route, reportedModel: turn.reportedModel },
         taskMessageId: id, elapsed: now() - startedAt,
@@ -776,11 +786,11 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (command === 'sessions') return sessionsCard(msg, arg);
     if (command === 'route') return routesCard(msg, await applyRoute(msg, parseRoute(arg)));
     if (command === 'projects' || command === 'new' && !newTarget && !config.defaultProject) return projectsCard(msg, 0, newEngine);
-    const newNode = binding ? nodeOf(binding) : config.defaultMachine && config.defaultMachine !== panel.machineId?.() ? config.defaultMachine : 'local';
+    const newNode = binding ? nodeOf(binding) : defaultNode();
     if (command === 'new' && newNode !== 'local') {
       const node = newNode;
       // Without a target, start fresh in the same directory on that node.
-      if (!newTarget) { bind(key, { id: crypto.randomUUID(), cwd: binding?.cwd || config.defaultProject || panel.defaultDirectory?.(node), engine: newEngine, node }); return currentCard(msg, state.bindings[key]); }
+      if (!newTarget) { bind(key, { id: crypto.randomUUID(), cwd: binding?.cwd || projectOn(node) || panel.defaultDirectory?.(node), engine: newEngine, node }); return currentCard(msg, state.bindings[key]); }
       const target = newTarget.replace(/^(["'])(.*)\1$/s, '$2'), rows = nodeProjects(node);
       const cwd = /^\d+$/.test(target) ? rows[Number(target) - 1] : target.startsWith('/') || target === '~' || target.startsWith('~/') ? target : rows.find(folder => path.posix.basename(folder) === target);
       if (!cwd) throw new Error(`未找到该项目。请用 /projects 列出${nodeLabel(node)}上的项目，或用 /new 绝对路径`);
@@ -797,7 +807,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
         if (!directory) throw new Error('项目目录不存在或不是文件夹，请先在本机创建目录，再用 /new 绝对路径');
         if (!state.projects.includes(cwd)) state.projects.push(cwd);
       } else {
-        cwd = !newTarget ? binding?.cwd || panel.defaultDirectory?.(panel.machineId?.()) || config.defaultProject : /^\d+$/.test(newTarget) ? rows[Number(newTarget) - 1] : rows.find(folder => folder === newTarget || path.basename(folder) === newTarget);
+        cwd = !newTarget ? binding?.cwd || panel.defaultDirectory?.(panel.machineId?.()) || projectOn(panel.machineId?.()) : /^\d+$/.test(newTarget) ? rows[Number(newTarget) - 1] : rows.find(folder => folder === newTarget || path.basename(folder) === newTarget);
       }
       if (!cwd) throw new Error('未找到该项目。请用 /projects 列出可选项目，或用 /new 绝对路径 指定本机已有目录');
       bind(key, { id: crypto.randomUUID(), cwd, engine: newEngine }); return currentCard(msg, state.bindings[key]);
@@ -808,7 +818,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (matches.length !== 1) { await sessionsCard(msg, /^\d+$/.test(arg) ? '' : arg); return; }
       bind(key, bindingFor(matches[0])); return currentCard(msg, state.bindings[key]);
     }
-    if (command === 'status') return send(msg, { text: `my-agents 在线\n${runtime.status().keepAwake ? (runtime.status().lidSleepDisabled ? 'Mac 保活已开启（含合盖）' : 'Mac 保活已开启（合盖仍会睡眠）') : 'Mac 保活未开启'}\n绑定范围：${contextLabel(msg)}\n当前会话：${binding ? session(binding.id)?.title || binding.id : '尚未选择'}\n运行位置：${nodeLabel(binding ? nodeOf(binding) : 'local')}\n当前引擎：${catalog().label(binding ? engineOf(binding) : defaultEngine())}\n默认引擎：${catalog().label(defaultEngine())}\n默认项目：${config.defaultProject || '未配置'}` });
+    if (command === 'status') return send(msg, { text: `my-agents 在线\n${runtime.status().keepAwake ? (runtime.status().lidSleepDisabled ? 'Mac 保活已开启（含合盖）' : 'Mac 保活已开启（合盖仍会睡眠）') : 'Mac 保活未开启'}\n绑定范围：${contextLabel(msg)}\n当前会话：${binding ? session(binding.id)?.title || binding.id : '尚未选择'}\n运行位置：${nodeLabel(binding ? nodeOf(binding) : defaultNode())}\n当前引擎：${catalog().label(binding ? engineOf(binding) : defaultEngine())}\n默认引擎：${catalog().label(defaultEngine())}\n默认项目：${config.defaultProject || '未配置'}` });
     if (['current', 'history', 'rename', 'stop'].includes(command)) {
       if (command === 'current') { const current = binding || defaultBinding(msg); return current ? currentCard(msg, current) : projectsCard(msg); }
       if (!binding) return sessionsCard(msg);
@@ -1068,9 +1078,10 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (!catalog().has(next.defaultEngine)) throw new Error(`请选择 ${catalog().list.map(engine => engine.label).join(' 或 ')} 作为默认引擎`);
     if (!['feishu', 'lark'].includes(next.domain)) throw new Error('请选择飞书或 Lark');
     if (next.enabled && (!/^[a-zA-Z0-9_-]{8,100}$/.test(next.appId) || !next.appSecret || next.appSecret.length > 1000)) throw new Error('请填写有效的 App ID 和 App Secret');
-    if ('defaultProject' in input || 'defaultMachine' in input) {
-      next.defaultMachine ||= panel.machineId?.() || '';
-      if (next.defaultProject) { if (panel.resolveDirectory) next.defaultProject = await panel.resolveDirectory(next.defaultMachine, next.defaultProject); else { next.defaultProject = fs.realpathSync(next.defaultProject); if (!fs.statSync(next.defaultProject).isDirectory()) throw new Error('默认项目必须是文件夹'); } }
+    if (('defaultProject' in input || 'defaultMachine' in input) && (next.defaultProject !== config.defaultProject || next.defaultMachine !== config.defaultMachine || !config.defaultProjectMachine)) {
+      const machine = next.defaultMachine || panel.defaultExecutionMachine?.() || panel.machineId?.() || '';
+      next.defaultProjectMachine = next.defaultProject ? machine : '';
+      if (next.defaultProject) { if (panel.resolveDirectory) next.defaultProject = await panel.resolveDirectory(machine, next.defaultProject); else { next.defaultProject = fs.realpathSync(next.defaultProject); if (!fs.statSync(next.defaultProject).isDirectory()) throw new Error('默认项目必须是文件夹'); } }
     }
     if (next.model && !/^[\w.\/:\[\]-]{1,100}$/.test(next.model)) throw new Error('模型名称无效');
     if (next.appId !== config.appId || next.domain !== config.domain) { next.cardCallbacksReady = input.cardCallbacksReady || false; next.allowAllUsers = input.allowAllUsers || false; next.allowAllGroups = input.allowAllGroups || false; next.pairedInGroups = input.pairedInGroups ?? true; next.allowedChatIds = input.allowedChatIds || []; next.allowedUserIds = input.allowedUserIds || []; next.disabledUserIds = input.disabledUserIds || []; pairing = null; state = { ...emptyState(), drafts: {} }; persist(); }
@@ -1098,7 +1109,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     const { appSecret, ...safe } = config;
     const connection = channel?.getConnectionStatus?.();
     const actualPhase = connection?.state === 'failed' ? 'error' : ['idle', 'connecting', 'reconnecting'].includes(connection?.state) && config.enabled ? 'reconnecting' : phase;
-    return { execution: { selfId: panel.machineId?.() || 'local', machines: panel.machines?.() || [] }, capabilities: { contactNames: true }, config: { ...safe, hasSecret: !!appSecret }, phase: actualPhase, lastError, sdkAvailable, bot: channel?.botIdentity?.name || '', connection, runtime: runtime.status(), bindings: Object.values(state.bindings).length, inbox: inbox.contacts(config.appId) };
+    return { execution: { selfId: panel.machineId?.() || 'local', defaultMachine: panel.defaultExecutionMachine?.() || panel.machineId?.() || 'local', machines: panel.machines?.() || [] }, capabilities: { contactNames: true }, config: { ...safe, hasSecret: !!appSecret }, phase: actualPhase, lastError, sdkAvailable, bot: channel?.botIdentity?.name || '', connection, runtime: runtime.status(), bindings: Object.values(state.bindings).length, inbox: inbox.contacts(config.appId) };
   }
   return {
     start, stop, configure, status, receive, action, repairCard, sendReply, labelContact, refreshContacts,

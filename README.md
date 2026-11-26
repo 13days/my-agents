@@ -46,13 +46,17 @@ curl -fsSL https://raw.githubusercontent.com/13days/my-agents/main/install.sh | 
 
 打开 **[localhost:4321](http://localhost:4321)**。使用源码安装命令时，代码放在 `~/.local/share/my-agents/source`，面板在当前终端运行。下次可以重用同一条命令。
 
-1. **先跑通本机。** 在执行任务的机器上安装 Codex 或 Claude Code。有对应账号可以直接登录，使用 Claude Code 的人也可以接入下面的两种代理。在「对话 → ＋ 新对话」选项目，试试「这个项目怎么启动？」。 [Codex 安装](https://developers.openai.com/codex/cli/) · [Claude Code 安装](https://code.claude.com/docs/en/quickstart)
+1. **先跑通本机。** 在执行任务的机器上安装 Codex 或 Claude Code。有对应账号可以直接登录，使用 Claude Code 的人也可以接入下面的两种代理。在「对话」里直接问「这个项目怎么启动？」。输入框上方可以更换目录和执行机器。 [Codex 安装](https://developers.openai.com/codex/cli/) · [Claude Code 安装](https://code.claude.com/docs/en/quickstart)
 2. **接上飞书。** 打开「聊天软件」，点「扫码创建机器人」。如果已有机器人，也可以填入应用凭证。跟随页面完成配对和卡片按钮授权。
 3. **发第一条任务。** 私聊机器人，发送上面的 `/new` 示例。执行进度和结果都会回到飞书。 [飞书卡片与命令](docs/feishu-interaction.md)
 
 在「聊天软件 → 飞书 → 访问权限」，可以直接看到谁能私聊、哪些群需要单独授权。图中林舟已配对，可以在机器人加入的任意多人群直接 @ 它。设计协作群单独勾选后，小榆也能在该群使用。
 
 ![飞书访问权限，群聊规则和单独授权的账号并排显示](https://raw.githubusercontent.com/13days/my-agents/main/docs/feishu-access-preview.png)
+
+### 在 DeepSeek Harness 复用已有代理
+
+新建对话时选择 **DeepSeek Harness**，在执行机器上使用已安装的 `dsh`。可以选择 Claude Code 账号池里的代理和模型，后续消息继续同一个 Harness 会话。独立运行的 Harness 网页也能接入。在 my-agents 的 **电脑与 AI 账号 → AI 账号 → DeepSeek Harness** 展开连接设置，复制本机代理地址和专用代理密钥。在 Harness 的 **设置 → 模型 → 自定义模型 API** 里选择 **Anthropic Messages**，添加面板显示的模型 ID。 [接入与运行要求](docs/deepseek-harness.md)
 
 ### 用企业微信发任务
 
@@ -80,7 +84,7 @@ MY_AGENTS_NO_PROXY_SETUP=1 npm start
 
 ## 一个终端启动，多台机器分头工作
 
-在「电脑与 AI 账号 → 连接电脑 → 添加电脑」填入平时使用的免密 SSH 地址，例如 `devbox`。面板会检查环境、准备运行时、安装执行程序并建立连接。设备显示「已连接」后，在「项目文件夹」填写项目在那台机器上的真实路径。下一次新建对话就能选它。
+在「电脑与 AI 账号 → 连接电脑 → 添加电脑」填入平时使用的免密 SSH 地址，例如 `devbox`。面板会检查环境、准备运行时、安装执行程序并建立连接。在同页选择「新任务默认执行机器」。点电脑卡片上的「选择目录」浏览本机或远程文件夹；也可以在下方为同一项目分别选择各机器上的目录。已有会话沿用其执行机器。
 
 ![同一个 design-kit 项目在设计工作站和 Linux 开发机上分别指定目录](https://raw.githubusercontent.com/13days/my-agents/main/docs/workspace-paths-preview.png)
 

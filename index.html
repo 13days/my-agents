@@ -101,7 +101,7 @@ function userGuideSections() {
   return [
     { id: 'start', title: copy('第一次使用', 'Get started'), lead: copy('my-agents 管理外部 Agent 的使用入口。实际任务由执行机器上已安装的 Claude Code / Codex 完成。', 'my-agents manages access to external agents. Installed Claude Code / Codex CLIs run tasks on the execution machine.'), steps: [
       copy('先在执行机器安装需要的 CLI，再配置共享账号池或完成正常登录。面板不会替你创建模型服务账号。', 'Install and sign in to the CLIs on the execution machine. Confirm they work in a terminal; the panel does not create model-service accounts.'),
-      copy('打开「电脑与 AI 账号 → 连接电脑」查看哪些电脑在线，再到「项目文件夹」填写项目在各台电脑上的路径。', 'Open Computers & AI accounts → Computers to see which computers are online. Set their project paths under Project folders.'),
+      copy('打开「电脑与 AI 账号 → 连接电脑」查看哪些电脑在线，在同页选择默认执行机器和项目文件夹。', 'Open Computers & AI accounts → Computers to see which computers are online. Choose the default execution machine and project folders on the same page.'),
       copy('进入「会话 → 新对话」，确认执行机器、项目和引擎，再发送任务。并发修改同一仓库时，使用独立工作区。', 'Open Sessions → New chat. Check the execution machine, project and engine before sending. Use isolated workspaces for concurrent changes to one repository.'),
       copy('需要从聊天工具使用时，再去「IM 接入」连接机器人、配置权限和默认执行机器。', 'To work from messaging tools, connect a bot under IM connections and configure access and the default execution machine.'),
     ], target: 'sessions', action: copy('打开会话', 'Open sessions') },
@@ -123,15 +123,16 @@ function userGuideSections() {
       copy('配置共享账号池与逐机项目映射；验证旧会话绑定。更新时同时检查任务和代理请求空闲，再逐台重载。', 'Configure shared accounts and per-machine project paths. Verify old session bindings. Reload members one by one when tasks and proxy requests are idle.'),
     ], manuals: true, note: copy('Agent 可以准备环境和集群，但首次浏览器登录、机器人授权和缺失的 SSH 访问仍需本人提供。执行中的进程及未同步文件不会自动迁移。', 'An Agent can prepare deployment; browser sign-in, bot authorization and missing SSH access may require your input. Running processes and unsynchronized files do not migrate automatically.') },
     { id: 'directories', title: copy('项目目录和独立工作区', 'Project directories and isolated workspaces'), lead: copy('一个项目在 Mac 和 Linux 上可以有完全不同的路径。请为每台机器分别设置。', 'The same project may live at completely different paths on Mac and Linux. Configure each machine separately.'), steps: [
-      copy('在「项目文件夹」设置每台机器的默认目录；添加一个项目名称，并填写它在各机器上的实际路径。保存时会到对应机器校验目录。', 'Set each machine’s default directory under Project folders. Add a project and its actual path on each machine. Saving validates paths on their respective machines.'),
+      copy('在「连接电脑」的机器卡片上选择默认目录。在同页的「项目文件夹」添加项目，点「浏览」选择它在各台机器上的目录。保存时会到对应机器校验目录。', 'Choose the default folder on each computer card. Under Project folders on the same page, add a project and browse for its directory on each machine. Saving validates paths on their respective machines.'),
       copy('新对话中选择执行机器和项目。某机器未配置这个项目的路径时，先补配置，不要直接沿用另一台机器的路径。', 'Choose a machine and project for new chats. Configure missing project paths before use; do not reuse another machine’s path.'),
       copy('独立工作区使用 Git worktree，从当前提交创建任务分支。未提交改动、未跟踪文件和依赖不会自动复制；普通文件夹继续使用原目录。', 'Isolated workspaces use Git worktrees and task branches from the current commit. Uncommitted changes, untracked files and dependencies are not copied. Plain folders use their original directory.'),
       copy('任务完成后审阅改动，再提交、合并和清理 worktree。面板不会自动合并，也不会在任务结束时删除工作成果。', 'Review changes, then commit, merge and clean up the worktree. The panel does not automatically merge or delete task work.'),
-    ], target: 'proxy', infra: 'workspaces', action: copy('设置项目文件夹', 'Configure project directories') },
+    ], target: 'proxy', infra: 'machines', action: copy('设置项目文件夹', 'Configure project directories') },
     { id: 'sessions', title: copy('会话、引擎、模型和代理账号', 'Sessions, engines, models and proxy accounts'), lead: copy('先选执行位置，再选运行工具和模型。它们是不同的设置。', 'Choose where the task runs, then the agent and model. These are different settings.'), rows: [
       [copy('会话', 'Session'), copy('接续已有上下文时，从会话列表打开。已有会话正常时保留原执行位置；可在设置中手动选择机器、项目和引擎，下一次发送时创建接续会话并带上可获取的对话检查点。', 'Open an existing session to continue its context. It retains its machine and engine. To change machines, explicitly start a new session or select one on the destination.')],
       [copy('引擎', 'Engine'), copy('Claude Code / Codex 是执行任务的外部 CLI。切换引擎时不会把两者的原生上下文合成一份。', 'Claude Code / Codex are external CLIs. Switching engines does not merge their native contexts.')],
       [copy('模型', 'Model'), copy('在对话设置中选择可用模型。可用选项取决于引擎、当前代理账号及服务支持；Codex 默认项从账号实时可见模型中推荐；其他引擎依接入配置。', 'Choose available models in chat settings. Options depend on the engine, proxy account and provider. Codex defaults use the live account model catalog; other engines follow their integration settings.')],
+      ['DeepSeek Harness', copy('执行机器安装 dsh 后，可在新对话里选择 Harness，并复用 Claude Code 的代理和模型。独立 Harness 网页的连接参数在「AI 账号 → DeepSeek Harness」。', 'Install dsh on the execution machine and select Harness in a new conversation to reuse Claude Code proxies and models. Find standalone connection details under AI accounts → DeepSeek Harness.')],
       [copy('代理账号', 'Proxy account'), copy('Claude Code 和 Codex 各自一个账号池，都支持订阅与代理；订阅在任一已接入机器正常登录后自动收录，无需点击导入。账号池不能代替目标机器上的 CLI 环境。', 'Manage provider accounts and request routing under AI accounts. This is distinct from execution machines and does not replace their CLI environment.')],
     ], target: 'sessions', action: copy('查看会话', 'View sessions') },
     { id: 'im', title: copy('飞书与 Lark', 'Feishu and Lark'), lead: copy('发送 /help 可打开「找会话」和「新建任务」。简洁群仅显示该群可用的文字命令。', 'Send /help for Find session and New task. Basic groups receive commands for their access level.'), groups: feishuHelp(ENGINES.map(engine => engine.id), { copy }), note: copy('首次连接时在面板生成配对码，再私聊机器人发送 /pair 配对码。权限和回复格式按聊天生效。', 'For first-time pairing, generate a code in the panel and DM /pair CODE to the bot. Chat access and reply format apply per chat.'), target: 'im', channel: 'feishu', action: copy('打开聊天软件', 'Open chat apps') },
@@ -180,6 +181,7 @@ function renderUserGuide() {
 <script src="/feishu-help.js"></script>
 <script src="/wecom-ui.js"></script>
 <script src="/conversation-state.js"></script>
+<script src="/directory-browser.js"></script>
 <script src="/feishu-ui.js"></script>
 
 <script src="/mermaid-ui.js"></script>
@@ -379,7 +381,7 @@ function viewDescription(type) {
     stats: ['两个引擎，一个工作空间。随时掌握你的使用情况。', 'Two engines, one workspace. Keep your work and usage in view.'],
     im: ['连接飞书等聊天软件，接收通知、确认建议，并通过聊天发起和跟进任务。个人消息读取需单独授权。', 'Connect chat apps for notifications, approvals and task control. Reading personal messages requires separate authorization.'],
     guide: ['从第一次对话到多机器协作，按任务找到使用方法。', 'Find your way from a first chat to work across machines.'],
-    proxy: ['连接运行任务的电脑，指定项目文件夹，并为 Claude Code 或 Codex 设置账号和默认模型。', 'Connect a computer to run tasks, choose your project folders, and set the accounts and default models for Claude Code or Codex.', 'タスクを実行するコンピューターを接続し、プロジェクトフォルダーと AI ツールのアカウント、既定のモデルを設定します。'],
+    proxy: ['连接运行任务的电脑，选择任务的默认执行机器、项目文件夹和 AI 账号。', 'Connect a computer to run tasks, choose the default execution machine, project folders and AI accounts.', 'タスクを実行するコンピューターを接続し、プロジェクトフォルダーと AI ツールのアカウント、既定のモデルを設定します。'],
     inspector: ['还原每次模型调用，看清请求、上下文与响应。', 'Inspect every model request, context, and response.'],
     sessions: ['找回工作上下文，继续之前的对话。', 'Find your context and pick up where you left off.'],
     voyage: ['沿着时间，回看你与 Claude 一起完成的工作。', 'Follow the timeline of your work with Claude.'],
@@ -429,6 +431,7 @@ function updateWorkspaceChrome() {
 }
 function emptyState() {
   const type = state.type;
+  if (type === 'sessions') { $('#empty').replaceChildren(); return; }
   const hint = ui('从左侧选择一项，查看内容与可用操作。', 'Select an item from the library to view its content and actions.');
   $('#empty').innerHTML = `<div class="empty-state"><span class="empty-icon">${icon(type)}</span><h2>${esc(t('tabs')[type])}</h2><p>${esc(viewDescription(type))}</p><p class="empty-library-hint">${esc(hint)}</p><div class="empty-actions"><button type="button" class="btn" id="emptyBrowse">${esc(rt('浏览列表', 'Browse list'))}</button>${CAPS[type].new ? `<button class="btn" id="emptyCreate">${esc(newBtnLabel(type))}</button>` : ''}</div></div>`;
   $('#emptyBrowse').onclick = () => $('#libraryToggle').click();
@@ -700,7 +703,7 @@ async function restoreRoute() {
     if (target.type === 'im' && target.channel) imSelectedChannel = target.channel;
     state.scope = SCOPED.includes(target.type) ? target.scope : '';
     renderProjOptions();
-    await switchType(target.type, false);
+    await switchType(target.type, false, target.key);
     if (revision !== routeRevision) return;
     if (target.key && !CAPS[target.type].dashboard) {
       if (target.type === 'sessions' && target.view === 'replay') await loadReplay(target.key);
@@ -833,7 +836,7 @@ async function renderProductPage(type) {
   }catch(e){if(state.type===type)root.innerHTML=`<p role="alert">${esc(e.message)}</p>`;}
 }
 
-async function switchType(type, updateRoute = true) {
+async function switchType(type, updateRoute = true, initialKey = '') {
   if(updateRoute&&type==='sessions'&&state.type==='sessions'&&$('#chat-messages'))return;
   if (isResourceType(type) && !can(state.resourceEngine, 'resources', type)) {
     const compatible=resourceEngines().find(engine=>can(engine.id,'resources',type));
@@ -873,7 +876,7 @@ async function switchType(type, updateRoute = true) {
   $('#filterbar').style.display = CAPS[type].filter ? 'flex' : 'none';
   $('#delBtn').textContent = type === 'plugins' ? t('uninstall') : t('del');
   localStorage.setItem('panel-section', type);
-  showEmpty();
+  showEmpty(!initialKey && !(updateRoute && sessionNavigation?.current));
   if (['today','tasks','connections','capabilities','settings'].includes(type)) { await renderProductPage(type); return; }
   if (type === 'guide') { renderUserGuide(); return; }
   if (type === 'proxy') { await renderProxyTab(); return; }
@@ -886,7 +889,7 @@ async function switchType(type, updateRoute = true) {
     if(sessionNavigation){state.items=sessionNavigation.items;state.keyword=sessionNavigation.keyword;$('#search').value=state.keyword;listPage={...sessionNavigation.page};renderList();$('#list').scrollTop=sessionNavigation.scroll;
       const search = currentTranscriptSearch();
       if (state.keyword && (!search || (search.pending && !search.loading))) scheduleTranscriptSearch();
-      if(updateRoute&&sessionNavigation.current){if(sessionNavigation.current==='__draft__'){state.current=null;restoreChatPage('__draft__');}else openSessionChat(sessionNavigation.current);}
+      if(updateRoute&&sessionNavigation.current){if(sessionNavigation.current==='__draft__'){state.current=null;if (!restoreChatPage('__draft__')) startChatDraft();}else openSessionChat(sessionNavigation.current);}
       startRoutePoll();return;
     }
     startRoutePoll();
@@ -1062,7 +1065,8 @@ function editSession(item, action) {
   };
   marker.before(dialog); dialog.showModal(); if (!removing) input.select();
 }
-function showEmpty() {
+function showEmpty(openDraft = true) {
+  if (state.type === 'sessions' && openDraft) { startChatDraft(); return; }
   $('#empty').style.display = 'block';
   emptyState();
   $('#render').innerHTML = '';
@@ -2778,8 +2782,9 @@ async function loadChatModels(force = false) {
   hint.textContent = rt('正在读取可用模型…', 'Loading available models…');
   try {
     const data = await api('GET', `proxy/models?engine=${encodeURIComponent(chatView.engine)}&accountId=${encodeURIComponent(accountId)}&sessionId=${encodeURIComponent(chatView.sessionId || '')}${force ? '&refresh=1' : ''}`);
-    if (!select.isConnected || select.modelsRequest !== request) return;
-    select.innerHTML = chatModelOptions(data.models || [], select.value);
+    if (select.modelsRequest !== request) return;
+    if (!select.isConnected) { delete select.dataset.modelsKey; return; }
+    select.innerHTML = chatModelOptions(data.models || [], select.value, data.defaultModel ? rt('默认 · ', 'Default · ') + data.defaultModel : undefined);
     syncChatPicker(select);
     hint.textContent = data.forcedModel
       ? rt(`账号固定映射到 ${data.forcedModel}，会覆盖模型选择`, `Account mapping overrides selection: ${data.forcedModel}`)
@@ -2805,6 +2810,7 @@ function restoreChatPage(key) {
   chatScrollObserver?.disconnect();chatView=cached.view;
   chatChrome(state.items.find(item=>item.key===key)?.name||cached.title,cached.path);
   $('#render').replaceChildren(...cached.nodes);
+  if (!chatView.sessionId && !$('#chat-machine')?.onchange) loadChatExecution(chatView);
   const box=$('#chat-messages');box.scrollTop=cached.scroll;box.updateScrollControls?.();
   chatScrollObserver=new ResizeObserver(()=>box.updateScrollControls?.());chatScrollObserver.observe(box);
   // Detached DOM may have missed paints while the old stream was closing.
@@ -2908,7 +2914,7 @@ function routeOf(id) {
 }
 function routeOptions(current) {
   const r = routeInfo, opts = [`<option value="">${esc(routeGlobalLabel())}</option>`];
-  for (const a of (r ? r.accounts : []).filter(a => (!a.engine || a.engine === (chatView?.engine || 'claude')) && (a.enabled || a.id === current))) opts.push(`<option value="${esc(a.id)}"${a.id === current ? ' selected' : ''}${a.enabled ? '' : ' disabled'}>📌 ${esc(a.email || a.name)}</option>`);
+  for (const a of (r ? r.accounts : []).filter(a => (!a.engine || a.engine === (chatView?.engine === 'deepseek' ? 'claude' : chatView?.engine || 'claude')) && (a.enabled || a.id === current))) opts.push(`<option value="${esc(a.id)}"${a.id === current ? ' selected' : ''}${a.enabled ? '' : ' disabled'}>📌 ${esc(a.email || a.name)}</option>`);
   return opts.join('');
 }
 function paintRoutes() {
@@ -3070,26 +3076,19 @@ function chatChrome(title, path) {
   $('#editBtn').disabled = $('#delBtn').disabled = true;
   document.body.dataset.libraryOpen = 'false'; syncPanelToggles();
 }
-let choosingChatProject = false;
-async function openNewChat() {
-  if (choosingChatProject) return;
-  choosingChatProject = true;
-  const button = $('#newbtn'); button.disabled = true;
-  let cwd;
-  try {
-    const result = await api('POST', 'choose-folder', {});
-    if (!result.path || state.type !== 'sessions') return;
-    cwd = result.path;
-  } catch (e) { toast(e.message, false); return; }
-  finally { choosingChatProject = false; button.disabled = false; }
-  rememberChatPage();
-  chatAbort?.abort();
+function startChatDraft() {
+  chatView = { sessionId: '', cwd: '', messages: [], worktreeEnabled: true, engine: knownEngine(localStorage.getItem('panel-chat-engine')) };
+  chatChrome(ui('新对话', 'New chat', '新しいチャット'), '');
+  renderChat();
+}
+function openNewChat() {
+  if ($('.chat-launch')) { $('#chat-prompt').focus(); return; }
+  ++detailRevision;
+  rememberChatPage(); chatAbort?.abort();
   state.current = null; routeView = ''; writeRoute(); renderList();
   sessionEngine = 'all'; localStorage.setItem('panel-session-engine', 'all'); renderSessionEngines();
   if (state.keyword) scheduleTranscriptSearch(true);
-  chatView = { sessionId: '', cwd, messages: [], worktreeEnabled: true, engine: knownEngine(localStorage.getItem('panel-chat-engine')) };
-  chatChrome(ui('新对话', 'New chat', '新しいチャット'), '');
-  renderChat();
+  startChatDraft();
 }
 async function openSessionChat(id, { fresh=false } = {}) {
   rememberChatPage();
@@ -3121,22 +3120,36 @@ async function loadChatExecution(v) {
   const machine = $('#chat-machine'), project = $('#chat-project-map'); if (!machine || !project) return;
   try {
     const data = await api('GET', 'workspaces'); if (chatView !== v || !machine.isConnected) return;
-    const id = v.machineId || data.selfId; v.machineId = id;
+    const id = v.machineId || (!v.sessionId && data.config.defaultMachine) || data.selfId; v.machineId = id;
+    if (!v.sessionId && !v.cwd) v.cwd = data.machines.find(item => item.id === id)?.defaultDirectory || '';
     v.workspaceId ||= data.config.projects.find(item => item.paths[id] === (v.worktree?.repository || v.cwd))?.id || '';
-    machine.innerHTML = data.machines.map(item => `<option value="${esc(item.id)}"${item.id === id ? ' selected' : ''}${!item.online && item.id !== id ? ' disabled' : ''}>${esc(item.label)} (${esc(item.id)})${item.online ? '' : ' · ' + esc(rt('未连接', 'Disconnected'))}</option>`).join('');
+    machine.innerHTML = data.machines.map(item => `<option value="${esc(item.id)}"${item.id === id ? ' selected' : ''}${!item.online && item.id !== id ? ' disabled' : ''}>${esc(item.label || item.id)}${v.sessionId && item.label !== item.id ? ' (' + esc(item.id) + ')' : ''}${item.online ? '' : ' · ' + esc(rt('未连接', 'Disconnected'))}</option>`).join('');
     if (!Array.from(machine.options).some(option => option.value === id)) machine.add(new Option(id, id));
     machine.value = id; machine.disabled = !!v.busy;
+    const folder = $('#chat-launch-folder');
     const syncProjects = () => {
+      if (folder) {
+        const mapped = data.config.projects.find(item => item.id === v.workspaceId);
+        folder.querySelector('span').textContent = mapped?.name || v.cwd.split(/[\\/]/).filter(Boolean).pop() || rt('默认文件夹', 'Default folder');
+        folder.title = v.cwd; folder.disabled = !data.machines.find(item => item.id === machine.value)?.online;
+      }
       project.innerHTML = `<option value="">${esc(rt('使用当前目录', 'Use current directory'))}</option>` + data.config.projects.map(item => `<option value="${esc(item.id)}"${item.id === v.workspaceId ? ' selected' : ''}${item.paths[machine.value] ? '' : ' disabled'}>${esc(item.name)}${item.paths[machine.value] ? '' : ' · ' + esc(rt('此机器未配置目录', 'No path on this machine'))}</option>`).join('');
       project.disabled = !!v.busy; syncChatPicker(machine); syncChatPicker(project);
     };
     const change = () => {
       if (v.sessionId) v.switchMachine = true;
       v.machineId = machine.value; v.workspaceId = project.value;
-      const mapped = data.config.projects.find(item => item.id === v.workspaceId);
+      const mapped = data.config.projects.find(item => item.id === v.workspaceId && item.paths[v.machineId]);
+      if (!mapped) v.workspaceId = '';
       v.cwd = mapped ? mapped.paths[v.machineId] || '' : data.machines.find(item => item.id === v.machineId)?.defaultDirectory || '';
-      if (mapped && !v.cwd) $('#chat-execution-hint').textContent = rt('请先在「项目文件夹」填写这个项目在该电脑上的路径。', 'Configure a project path on this machine before sending.');
       const current = $('.chat-project-current'); if (current) { current.title = v.cwd; current.querySelector('span').textContent = mapped?.name || v.cwd.split('/').filter(Boolean).pop() || rt('默认目录', 'Default directory'); current.querySelector('small').textContent = v.cwd; }
+      syncProjects();
+    };
+    if (folder) folder.onclick = async () => {
+      const target = data.machines.find(item => item.id === machine.value);
+      const cwd = await chooseMachineDirectory(target, { initial: v.cwd });
+      if (!cwd || chatView !== v || v.machineId !== target.id) return;
+      v.cwd = cwd; v.workspaceId = data.config.projects.find(item => item.paths[target.id] === cwd)?.id || '';
       syncProjects();
     };
     machine.onchange = change; project.onchange = change; syncProjects();
@@ -3151,24 +3164,39 @@ function renderChat() {
     ? `<span class="chat-engine-badge ${engineClass(v.engine)}" style="${esc(engineStyle(v.engine))}">${esc(engineName)}</span>`
     : `<div class="chat-engine" role="group" aria-label="${esc(rt('引擎', 'Engine', 'エンジン'))}">${ENGINES.map(item => `<button type="button" data-engine="${esc(item.id)}" aria-pressed="${v.engine === item.id}">${esc(item.label)}</button>`).join('')}</div>`;
   const project =`<div class="chat-field chat-project"><span>${esc(rt('项目', 'Project'))}</span><div class="chat-project-current" title="${esc(v.cwd)}">${icon('folder')}<span>${esc((v.worktree?.repository || v.cwd).split('/').filter(Boolean).pop() || v.cwd || rt('未知', 'Unknown'))}</span><small>${esc(v.cwd.replace(/^\/Users\/[^/]+/, '~'))}</small></div></div>`;
+  const launch = !existing && !v.messages.length;
+  const enginePicker = launch ? `<select id="chat-launch-engine" aria-label="${esc(rt('引擎', 'Engine'))}">${ENGINES.map(item => `<option value="${esc(item.id)}"${item.id === v.engine ? ' selected' : ''}>${esc(item.label)}</option>`).join('')}</select>` : '';
   const actions = existing
     ? `<button class="btn" id="chat-detail">${esc(rt('详情', 'Details'))}</button><button class="btn" id="chat-replay">${esc(replayLabel(v.engine))}</button>`
     : '';
-  $('#render').innerHTML = `<section class="chat-shell">
-    <header class="chat-settings"><div class="chat-settings-bar"><div class="chat-project-group">${project}<div id="chat-workspace">${chatWorkspaceControl(v, existing)}</div></div>${engine}<span class="chat-live" id="chat-live" hidden></span><div class="chat-top-actions">${actions}<button type="button" class="btn" id="chat-settings-toggle" aria-controls="chat-settings-panel">${esc(rt('设置', 'Settings'))} ⌄</button></div></div>
+  $('#render').innerHTML = `<section class="chat-shell${launch ? ' chat-launch' : ''}">
+    ${launch ? `<div class="chat-launch-heading"><img src="/assets/my-agents.png" alt="" width="40" height="40"><h2>${esc(rt('今天想做点什么？', 'What would you like to work on?', '今日は何をしましょうか？'))}</h2></div>` : ''}
+    <header class="chat-settings">${launch ? `<div class="chat-launch-context"><button class="launch-folder" type="button" id="chat-launch-folder" disabled aria-label="${esc(rt('选择项目文件夹','Choose project folder'))}">${icon('folder')}<span>${esc(rt('默认文件夹', 'Default folder'))}</span><i aria-hidden="true">⌄</i></button><div class="launch-machine">${icon('proxy')}</div><div class="launch-more"></div></div>` : ''}<div class="chat-settings-bar"><div class="chat-project-group">${project}<div id="chat-workspace">${chatWorkspaceControl(v, existing)}</div></div>${engine}<span class="chat-live" id="chat-live" hidden></span><div class="chat-top-actions">${actions}<button type="button" class="btn" id="chat-settings-toggle" aria-controls="chat-settings-panel">${esc(rt('设置', 'Settings'))} ⌄</button></div></div>
     <div class="chat-top" id="chat-settings-panel" hidden><div class="chat-field"><label for="chat-machine">${esc(rt('运行任务的电脑', 'Computer to run tasks', 'タスクを実行するコンピューター'))}</label><select id="chat-machine" aria-label="${esc(rt('运行任务的电脑', 'Computer to run tasks', 'タスクを実行するコンピューター'))}"><option value="">${esc(rt('读取中…', 'Loading…'))}</option></select><small id="chat-execution-hint"></small></div><div class="chat-field"><label for="chat-project-map">${esc(rt('项目文件夹', 'Project folder', 'プロジェクトフォルダー'))}</label><select id="chat-project-map"><option value="">${esc(rt('使用当前目录', 'Use current directory'))}</option></select></div>
       <div class="chat-field chat-model"><div class="chat-model-heading"><label for="chat-model">${esc(rt('模型', 'Model'))}</label>${can(v.engine, 'accounts') ? `<button type="button" class="chat-model-refresh" id="chat-model-refresh">${esc(rt('刷新', 'Refresh'))}</button>` : ''}</div>${can(v.engine, 'accounts') ? `<select id="chat-model" aria-label="${esc(rt('模型', 'Model'))}">${chatModelOptions([], chatModel)}</select><small id="chat-model-hint" role="status"></small><details class="chat-custom-model"><summary>${esc(rt('手动输入模型 ID', 'Enter a model ID'))}</summary><input id="chat-custom-model" type="text" aria-label="${esc(rt('自定义模型 ID', 'Custom model ID'))}" placeholder="model-id" value="${esc(chatModel)}"></details>` : `<input id="chat-model" type="text" placeholder="${esc(rt('默认', 'Default'))}" value="${esc(chatModel)}">`}</div>
       <div class="chat-field chat-route"${can(v.engine, 'accounts') ? '' : ' hidden'}><span>${esc(rt('代理账号', 'Proxy account'))}</span><select id="chat-route" aria-label="${esc(rt('代理账号', 'Proxy account'))}" title="${esc(rt('只影响这个会话；其他会话可以走不同账号', 'Only affects this session; other sessions can use other accounts'))}">${routeOptions(existing ? ((routeInfo && routeInfo.routes[v.sessionId.toLowerCase()]) || '') : (v.accountId || ''))}</select></div>
     </div></header>
     <div class="chat-conversation"><div class="chat-messages" id="chat-messages"></div><div class="chat-scroll-controls" hidden><button type="button" id="chat-scroll-top" title="${esc(rt('会话顶部', 'Top of conversation'))}" aria-label="${esc(rt('会话顶部', 'Top of conversation'))}">↑</button><button type="button" id="chat-scroll-bottom" title="${esc(rt('会话底部', 'Bottom of conversation'))}" aria-label="${esc(rt('会话底部', 'Bottom of conversation'))}">↓</button></div></div>
-    <form class="chat-compose" id="chat-form">${v.lastLoginFailure ? `<p class="chat-warning" id="chat-login-failure" role="status">${esc(v.lastLoginFailure.hint)}</p>` : ''}<div id="chat-attachments" class="chat-attachments" hidden></div><textarea autocomplete="off" autocorrect="off" spellcheck="false" id="chat-prompt" rows="3" placeholder="${esc(existing ? rt('在这个会话里继续… 可粘贴图片', 'Continue this session… Paste images here') : rt(`问 ${engineName} 关于这个项目的问题… 可粘贴图片`, `Ask ${engineName} about this project… Paste images here`))}"></textarea>
-      <div class="chat-compose-footer"><button type="button" class="btn chat-attach" id="chat-attach"${can(v.engine, 'images') ? '' : ' hidden'}>${esc(rt('＋ 图片', '+ Image'))}</button><input type="file" id="chat-image-file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden><span id="chat-status">${esc(rt('回车发送 · Shift + 回车换行', 'Enter to send · Shift + Enter for a new line'))}</span><button class="btn" type="submit" data-mode="queue" id="chat-queue" title="${esc(rt('等当前轮完成后处理', 'Process after the current turn'))}" hidden>${esc(rt('排队', 'Queue'))}</button><button class="btn primary" type="submit" id="chat-send">${esc(rt('发送', 'Send'))}</button><button class="btn" type="button" id="chat-stop" hidden>${esc(rt('停止', 'Stop'))}</button></div>
+    <form class="chat-compose" id="chat-form">${v.lastLoginFailure ? `<p class="chat-warning" id="chat-login-failure" role="status">${esc(v.lastLoginFailure.hint)}</p>` : ''}<div id="chat-attachments" class="chat-attachments" hidden></div><textarea autocomplete="off" autocorrect="off" spellcheck="false" id="chat-prompt" rows="3" placeholder="${esc(existing ? rt('在这个会话里继续… 可粘贴图片', 'Continue this session… Paste images here') : rt('描述你想完成的任务…', 'Describe what you’d like to get done…', '取り組みたいタスクを入力…'))}"></textarea>
+      <div class="chat-compose-footer"><button type="button" class="btn chat-attach" id="chat-attach"${can(v.engine, 'images') ? '' : ' hidden'}>${esc(rt('＋ 图片', '+ Image'))}</button><input type="file" id="chat-image-file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>${enginePicker}<span id="chat-status">${esc(rt('回车发送 · Shift + 回车换行', 'Enter to send · Shift + Enter for a new line'))}</span>${launch ? '<div class="launch-model"></div>' : ''}<button class="btn" type="submit" data-mode="queue" id="chat-queue" title="${esc(rt('等当前轮完成后处理', 'Process after the current turn'))}" hidden>${esc(rt('排队', 'Queue'))}</button><button class="btn primary" type="submit" id="chat-send" aria-label="${esc(rt('发送', 'Send'))}">${launch ? '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m-7 7 7-7 7 7"/></svg>' : esc(rt('发送', 'Send'))}</button><button class="btn" type="button" id="chat-stop" hidden>${esc(rt('停止', 'Stop'))}</button></div>
     </form>
   </section>`;
   const settingsPanel = $('#chat-settings-panel'), settingsToggle = $('#chat-settings-toggle');
+  if (launch) {
+    $('.launch-machine').append($('#chat-machine'));
+    $('.launch-model').append($('#chat-model'));
+    $('.launch-more').append(settingsToggle);
+    settingsPanel.prepend($('#chat-workspace'));
+    const attach = $('#chat-attach'); attach.textContent = '＋'; attach.title = rt('添加图片', 'Attach images'); attach.setAttribute('aria-label', attach.title);
+    $('#chat-launch-engine').onchange = event => {
+      const draft = $('#chat-prompt').value;
+      v.engine = event.target.value; v.accountId = ''; localStorage.setItem('panel-chat-engine', v.engine);
+      renderChat(); $('#chat-prompt').value = draft; updateChatSendState(v);
+    };
+  }
   const setSettingsCollapsed = collapsed => { settingsPanel.hidden = collapsed; settingsToggle.setAttribute('aria-expanded', String(!collapsed)); settingsToggle.textContent = rt(collapsed ? '设置 ⌄' : '收起 ⌃', collapsed ? 'Settings ⌄' : 'Collapse ⌃'); };
-  setSettingsCollapsed(localStorage.getItem('panel-chat-settings-collapsed') !== 'false');
-  settingsToggle.onclick = () => { const collapsed = !settingsPanel.hidden; localStorage.setItem('panel-chat-settings-collapsed', String(collapsed)); setSettingsCollapsed(collapsed); };
+  setSettingsCollapsed(launch ? !v.launchSettings : localStorage.getItem('panel-chat-settings-collapsed') !== 'false');
+  settingsToggle.onclick = () => { const collapsed = !settingsPanel.hidden; if (launch) v.launchSettings = !collapsed; else localStorage.setItem('panel-chat-settings-collapsed', String(collapsed)); setSettingsCollapsed(collapsed); };
   loadChatExecution(v);
   enhanceChatPicker($('#chat-route'));
   if ($('#chat-model').tagName === 'SELECT') enhanceChatPicker($('#chat-model'));
@@ -3184,7 +3212,7 @@ function renderChat() {
     document.querySelectorAll('[data-workspace]').forEach(option => option.setAttribute('aria-pressed', String((option.dataset.workspace === 'isolated') === v.worktreeEnabled)));
   });
   const box = $('#chat-messages');
-  if (!v.messages.length) box.innerHTML = `<div class="chat-welcome"><span class="empty-icon">${icon('sessions')}</span><h3>${esc(existing ? rt('这个会话里还没有可显示的对话', 'No messages to show in this session') : rt(`和 ${engineName} 开始一段新会话`, `Start a new ${engineName} session`))}</h3><p>${esc(engineCopy(v.engine, 'welcome') || rt(`由本机 ${engineName} CLI 执行；发出后会出现在左侧会话列表，之后可随时回来接续。`, `Runs on the local ${engineName} CLI. It appears in the session list so you can come back and continue.`, `ローカルの ${engineName} CLI で実行されます。送信後はセッション一覧に表示され、いつでも続きから再開できます。`))}</p></div>`;
+  if (!v.messages.length && existing) box.innerHTML = `<div class="chat-welcome"><span class="empty-icon">${icon('sessions')}</span><h3>${esc(existing ? rt('这个会话里还没有可显示的对话', 'No messages to show in this session') : rt(`和 ${engineName} 开始一段新会话`, `Start a new ${engineName} session`))}</h3><p>${esc(engineCopy(v.engine, 'welcome') || rt(`由本机 ${engineName} CLI 执行；发出后会出现在左侧会话列表，之后可随时回来接续。`, `Runs on the local ${engineName} CLI. It appears in the session list so you can come back and continue.`, `ローカルの ${engineName} CLI で実行されます。送信後はセッション一覧に表示され、いつでも続きから再開できます。`))}</p></div>`;
   else {
     if (v.truncated) box.innerHTML = `<button type="button" class="btn chat-older" id="chat-older">${esc(rt('加载更早的消息', 'Load earlier messages'))}</button>`;
     v.messages.forEach(m => { const body = appendChatMessage(box, m.role, m.text, m); paintChatImages(body, m.images || []); paintChatReasoning(body, m.reasoning || []); (m.tools || []).forEach(tool => paintChatTool(body, tool)); });
@@ -3248,7 +3276,11 @@ function renderChat() {
   $('#chat-prompt').onpaste = e => { const files = Array.from(e.clipboardData?.items || []).filter(item => item.kind === 'file' && item.type.startsWith('image/')).map(item => item.getAsFile()).filter(Boolean); if (files.length) { e.preventDefault(); addImages(files); } };
   $('#chat-attach').onclick = () => $('#chat-image-file').click();
   $('#chat-image-file').onchange = e => { addImages(Array.from(e.target.files)); e.target.value = ''; };
-  $('#chat-prompt').focus();
+  if (launch) {
+    $('#chat-prompt').oninput = () => updateChatSendState(v);
+    updateChatSendState(v);
+  }
+  if (!launch || !window.matchMedia('(pointer: coarse)').matches) $('#chat-prompt').focus({ preventScroll: true });
   startChatHistoryFollow(v);
 }
 let stopChatHistoryFollow = () => {};
@@ -3357,12 +3389,16 @@ function paintChatAttachments(v) {
     const img = document.createElement('img'); img.src = `data:${image.mimeType};base64,${image.data}`; img.alt = `[Image #${i + 1}]`;
     const label = document.createElement('span'); label.textContent = img.alt;
     const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×'; remove.setAttribute('aria-label', rt('移除图片', 'Remove image') + ` ${i + 1}`);
-    remove.onclick = () => { v.attachments.splice(i, 1); paintChatAttachments(v); };
+    remove.onclick = () => { v.attachments.splice(i, 1); paintChatAttachments(v); updateChatSendState(v); };
     preview.append(img, label, remove); gallery.append(preview);
   });
 }
 function updateChatSendState(v) {
   if (chatView !== v || !$('#chat-send')) return;
+  if ($('.chat-launch')) {
+    $('#chat-send').disabled = !!v.readingImages || (!$('#chat-prompt').value.trim() && !v.attachments?.length);
+    return;
+  }
   const running = !!v.run && Array.from(v.run.turns.values()).some(turn => !turn.finished);
   const native = !!(v.run?.nativeAttached || v.run?.taskState?.nativeAttached);
   $('#chat-send').disabled = !!v.readingImages;
@@ -3440,7 +3476,12 @@ async function sendChat(mode = 'steer') {
     v.lastLoginFailure = null;
     $('#chat-login-failure')?.remove();
   }
+  const fromLaunch = !v.sessionId;
   registerChatInSidebar(v, prompt);
+  if (fromLaunch) {
+    chatPageCache.delete('__draft__');
+    renderChat();
+  }
   const turn = createChatTurn(v, prompt, images);
   v.attachments = []; paintChatAttachments(v); $('#chat-prompt').value = '';
   if (v.run) {
@@ -3745,6 +3786,12 @@ function appendChatMessage(box, role, text, timing = {}) {
 const DEDICATED_CONNECTION_PANELS = ['claude', 'codex'];
 function genericConnectionPanel(engine) {
   const cli = engine.cli;
+  if (engine.id === 'deepseek') return `<section class="chart" data-connection-panel="deepseek" hidden>
+    <div class="route-heading"><div><h3>DeepSeek Harness</h3><p class="route-muted">${esc(rt('面板中的 Harness 对话可以直接选择 Claude Code 的代理账号和模型。', 'Harness conversations can use the same proxy accounts and models as Claude Code.'))}</p></div></div>
+    <p>${cli?.path ? esc(cli.path)+' · '+esc(cli.version) : esc(rt('本机尚未检测到 dsh。请在执行机器安装 DeepSeek Harness。', 'Install DeepSeek Harness on the execution machine.'))}</p>
+    <details data-dsh-provider><summary>${esc(rt('连接独立运行的 DeepSeek Harness', 'Connect a standalone DeepSeek Harness'))}</summary>
+      <p>${esc(rt('在 Harness 的「设置 → 模型 → 自定义模型 API」填写以下配置，保存后在新对话中选择模型。API 地址适用于与面板同一台电脑上的 Harness。','In Harness, open Settings → Models → Custom model API. Enter these values, save, and select the model in a new conversation. This endpoint is for Harness on the same computer as the panel.'))}</p>
+      <dl data-provider-fields></dl></details></section>`;
   return `<section class="chart" data-connection-panel="${esc(engine.id)}" hidden><div class="route-heading"><div><h3>${esc(engine.label)}</h3><p class="route-muted">${esc(rt(`${engine.label} 使用本机 CLI 自己的登录，面板不保存它的凭证。`, `${engine.label} uses the local CLI's own login. The panel never stores its credentials.`, `${engine.label} はローカル CLI 自身のログインを使用します。パネルは資格情報を保存しません。`))}</p></div></div>
     ${cli ? `<p>${esc(rt('CLI 路径', 'CLI path', 'CLI のパス'))}：<code>${esc(cli.path || '—')}</code>${cli.version ? ` · ${esc(cli.version)}` : ''}</p>` : `<p class="route-muted">${esc(rt('未在本机找到这个引擎的 CLI，安装后刷新页面。', 'This engine\'s CLI was not found on this machine. Install it and reload.', 'このエンジンの CLI が見つかりません。インストール後に再読み込みしてください。'))}</p>`}</section>`;
 }
@@ -3783,58 +3830,78 @@ function setupInfrastructure() {
   clearInterval(infrastructureTimer);
   const root = $('#render'), cluster = $('#cluster-panel');
   const overview = document.createElement('section'); overview.dataset.infraPanel = 'machines';
-  const projects = document.createElement('section'); projects.dataset.infraPanel = 'workspaces'; projects.id = 'workspaces-panel';
+  const projects = document.createElement('section'); projects.id = 'workspaces-panel';
   const accounts = document.createElement('section'); accounts.dataset.infraPanel = 'accounts';
   const children = Array.from(root.children), first = children.indexOf(cluster);
   children.slice(first + 1).forEach(child => accounts.append(child));
-  overview.append(cluster);
+  overview.append(cluster, projects);
   const tabs = document.createElement('div'); tabs.className = 'infrastructure-tabs'; tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', t('tabs').proxy);
-  tabs.innerHTML = [['machines', rt('连接电脑', 'Computers', 'コンピューター')], ['workspaces', rt('项目文件夹', 'Project folders', 'プロジェクトフォルダー')], ['accounts', rt('AI 账号', 'AI accounts', 'AI アカウント')]].map(([id, name]) => `<button type="button" data-infra-tab="${id}" role="tab">${esc(name)}</button>`).join('');
-  root.append(tabs, overview, projects, accounts);
-  const select = id => { if (!['machines','workspaces','accounts'].includes(id)) id = 'machines'; root.querySelectorAll('[data-infra-panel]').forEach(panel => { panel.hidden = panel.dataset.infraPanel !== id; }); tabs.querySelectorAll('button').forEach(button => button.setAttribute('aria-selected', String(button.dataset.infraTab === id))); localStorage.setItem('panel-infra-tab', id); };
+  tabs.innerHTML = [['machines', rt('连接电脑', 'Computers', 'コンピューター')], ['accounts', rt('AI 账号', 'AI accounts', 'AI アカウント')]].map(([id, name]) => `<button type="button" data-infra-tab="${id}" role="tab">${esc(name)}</button>`).join('');
+  root.append(tabs, overview, accounts);
+  const select = id => { if (!['machines','accounts'].includes(id)) id = 'machines'; root.querySelectorAll('[data-infra-panel]').forEach(panel => { panel.hidden = panel.dataset.infraPanel !== id; }); tabs.querySelectorAll('button').forEach(button => button.setAttribute('aria-selected', String(button.dataset.infraTab === id))); localStorage.setItem('panel-infra-tab', id); };
   tabs.querySelectorAll('button').forEach(button => button.onclick = () => select(button.dataset.infraTab));
   select(localStorage.getItem('panel-infra-tab') || 'machines');
-  infrastructureTimer = setInterval(() => { if (state.type !== 'proxy' || !overview.isConnected) { clearInterval(infrastructureTimer); return; } if (!document.hidden && !overview.hidden && !document.querySelector('.panel-select-menu:popover-open')) renderClusterPanel();
+  infrastructureTimer = setInterval(() => { if (state.type !== 'proxy' || !overview.isConnected) { clearInterval(infrastructureTimer); return; } if (!document.hidden && !overview.hidden && !document.querySelector('dialog[open], .panel-select-menu:popover-open') && !cluster.contains(document.activeElement) && !cluster.pendingSave) renderClusterPanel();
     if (!document.hidden && !accounts.hidden && document.hasFocus() && !document.querySelector('dialog[open]') && !['SELECT','INPUT','TEXTAREA'].includes(document.activeElement?.tagName)) {
       const engine=knownEngine(localStorage.getItem('panel-connection-engine'));if(['claude','codex'].includes(engine))renderEngineAccountPool(engine,{quiet:true});
     } }, 5000);
 }
-async function renderClusterPanel() {
-  const section = $('#cluster-panel'); if (!section) return;
+async function renderClusterPanel(savedConfig) {
+  const section = $('#cluster-panel'); if (!section || section.pendingSave) return;
+  const revision = section.loadRevision = (section.loadRevision || 0) + 1;
   try {
     const [data, spaces, nodeList] = await Promise.all([api('GET', 'cluster'), api('GET', 'workspaces').catch(() => null), api('GET', 'nodes').catch(() => ({ nodes: [] }))]);
-    if (!section.isConnected || state.type !== 'proxy') return;
-    const members = data.members || [], leaderId = typeof data.leader === 'object' ? data.leader?.id : data.leader; const self = members.find(item => item.id === data.nodeId), leader = members.find(item => item.id === leaderId);
-    const label = id => members.find(item => item.id === id)?.label || id;
-    const connected = data.gateway?.phase === 'connected' && data.role === 'leader' || leader?.gatewayStatus === 'connected';
-    const healthy = data.enabled === false || !!data.leader && data.hasQuorum;
-    const heading = !data.enabled ? rt('飞书消息接收', 'Feishu messages', '飛書メッセージの受信') : !leaderId ? rt('正在选择接收飞书消息的电脑', 'Selecting a computer to receive Feishu messages') : connected ? rt(`飞书消息由「${label(leaderId)}」接收`, `Feishu is handled by ${label(leaderId)}`) : rt(`「${label(leaderId)}」正在等待飞书连接`, `${label(leaderId)} is waiting for a Feishu connection`);
+    if (!section.isConnected || state.type !== 'proxy' || revision !== section.loadRevision) return;
+    if (savedConfig?.projects && spaces) {
+      spaces.config = savedConfig;
+      for (const machine of spaces.machines) machine.defaultDirectory = savedConfig.defaults[machine.id] || machine.home;
+    }
+    const members = data.members || [], selfId = spaces?.selfId || data.nodeId || 'local';
+    const leaderId = data.enabled === false ? selfId : typeof data.leader === 'object' ? data.leader?.id : data.leader;
+    const machines = spaces?.machines || [], preferred = spaces?.config.defaultMachine || '';
+    const label = id => machines.find(item => item.id === id)?.label || members.find(item => item.id === id)?.label || id;
+    const healthy = data.enabled === false || !!leaderId && data.hasQuorum;
+    const heading = leaderId ? rt(`聊天软件由「${label(leaderId)}」接入`, `Chat apps are handled by ${label(leaderId)}`) : rt('正在选择接收聊天消息的电脑', 'Choosing a computer to receive chat messages');
     const reason = data.health?.reason || (data.leader ? rt('会话固定在指定机器执行，切换主节点不会改写工作目录。', 'Sessions stay on their execution machine when leadership changes.') : rt('主节点选举未完成，消息接入暂不可用。下方显示连接与同步故障。', 'Election is incomplete. See connection and replication diagnostics below.'));
-    const cards = (members.length ? members : [{ id: spaces?.selfId || 'local', label: rt('本机', 'This computer'), online: true, runtimeConnected: true }]).map(member => {
-      const directory = spaces?.machines?.find(item => item.id === member.id)?.defaultDirectory;
-      const local = member.id === (data.nodeId || spaces?.selfId || 'local'), primary = member.id === leaderId;
-      const gateway = primary && member.gatewayStatus === 'connected' ? rt('已连接', 'Connected') : member.gatewayStatus === 'connecting' || member.gatewayStatus === 'reconnecting' ? rt('连接中', 'Connecting') : primary ? rt('未就绪', 'Not ready') : rt('待命', 'Standby');
+    const rows = members.length ? [...members] : [{ id: selfId, label: label(selfId), online: true, runtimeConnected: true }];
+    for (const node of nodeList.nodes || []) {
+      if (node.remote && !rows.some(member => member.id === node.id)) rows.push({ ...node, onlyRuns: true, online: node.connected, runtimeConnected: node.connected });
+    }
+    const cards = rows.map(member => {
+      const machine = machines.find(item => item.id === member.id), directory = machine?.defaultDirectory;
+      const local = member.id === selfId, primary = member.id === leaderId;
       const diagnostic = (data.diagnostics || []).find(item => item.id === member.id);
       const runs = member.runtimeConnected || local, up = member.online || local;
-      return `<article class="machine-card${primary ? ' is-leader' : ''}"><header><div><h3>${esc(member.label || member.id)}</h3><code>${esc(member.id)}</code></div>${clusterStatusBadge(primary ? rt('负责飞书', 'Handles Feishu') : local ? rt('本机', 'This computer') : rt('备用', 'Standby'), primary ? 'good' : 'muted')}</header><dl><dt>${esc(rt('状态', 'Status'))}</dt><dd>${clusterStatusBadge(up && runs ? rt('在线，可运行任务', 'Online') : up ? rt('在线，正在恢复任务连接', 'Online, reconnecting to run tasks') : rt('离线', 'Offline'), up && runs ? 'good' : 'danger')}${primary && member.gatewayStatus !== 'connected' ? ' · ' + esc(gateway) : ''}</dd><dt>${esc(rt('默认文件夹', 'Default folder', '既定のフォルダー'))}</dt><dd class="machine-directory-actions">${directory ? `<button type="button" data-copy-directory="${esc(directory)}">${esc(rt('复制', 'Copy'))}</button>` : ''}<button type="button" data-machine-directory="${esc(member.id)}">${esc(rt('修改', 'Edit'))}</button></dd><dd class="machine-directory">${esc(directory || rt('尚未获取', 'Not available'))}</dd></dl><footer><span class="route-muted">${esc([member.platform, member.version && 'v' + String(member.version).replace(/^v/, ''), member.build?.gitCommit?.slice(0, 8)].filter(Boolean).join(' · ') || rt('平台信息未上报', 'Platform not reported'))}</span>${data.leader && !primary && member.online && !member.witness ? `<button class="btn" data-cluster-transfer="${esc(member.id)}">${esc(rt('改为负责飞书', 'Handle Feishu here'))}</button>` : ''}</footer>${diagnostic?.error ? `<p class="machine-error">${esc(diagnostic.error)}</p>` : ''}</article>`;
-    }).join('') + (nodeList.nodes || []).filter(node => node.remote && !members.some(member => member.id === node.id)).map(node => `<article class="machine-card"><header><div><h3>${esc(node.label || node.id)}</h3><code>${esc(node.id)}</code></div>${clusterStatusBadge(rt('只运行任务', 'Runs tasks only'), 'muted')}</header><dl><dt>${esc(rt('状态', 'Status'))}</dt><dd>${clusterStatusBadge(node.connected ? rt('在线，可运行任务', 'Online') : rt('离线', 'Offline'), node.connected ? 'good' : 'danger')}</dd><dt>${esc(rt('连接', 'Link'))}</dt><dd>${esc(node.ssh ? 'SSH ' + node.ssh : 'WebSocket')}</dd></dl></article>`).join('');
+      const role = primary ? rt('接收聊天消息', 'Receives chat messages') : member.witness ? rt('见证节点', 'Witness') : member.onlyRuns ? rt('只运行任务', 'Runs tasks only') : local ? rt('本机', 'This computer') : rt('接收待命', 'On standby');
+      const folder = machine ? `<dt>${esc(rt('默认文件夹', 'Default folder'))}</dt><dd class="machine-directory-actions">${directory ? `<button type="button" data-copy-directory="${esc(directory)}">${esc(rt('复制', 'Copy'))}</button>` : ''}<button type="button" data-machine-directory="${esc(member.id)}" ${machine.online ? '' : 'disabled'}>${esc(rt('选择目录', 'Choose folder'))}</button></dd><dd class="machine-directory">${esc(directory || rt('尚未获取', 'Not available'))}</dd>` : '';
+      return `<article class="machine-card${primary ? ' is-leader' : ''}"><header><div><h3>${esc(member.label || member.id)}</h3><code>${esc(member.id)}</code></div><div class="machine-roles">${clusterStatusBadge(role, primary ? 'good' : 'muted')}${preferred && member.id === preferred ? clusterStatusBadge(rt('默认执行', 'Default for tasks'), 'good') : ''}</div></header><dl><dt>${esc(rt('状态', 'Status'))}</dt><dd>${clusterStatusBadge(!up ? rt('离线', 'Offline') : member.witness ? rt('在线', 'Online') : runs ? rt('在线，可运行任务', 'Online, ready for tasks') : rt('正在恢复执行连接', 'Reconnecting to run tasks'), up ? 'good' : 'danger')}</dd>${folder}</dl><footer><span class="route-muted">${esc([member.platform, member.version && 'v' + String(member.version).replace(/^v/, ''), member.build?.gitCommit?.slice(0, 8), member.onlyRuns && (member.ssh ? 'SSH' : 'WebSocket')].filter(Boolean).join(' · '))}</span>${data.leader && !primary && member.online && !member.witness && !member.onlyRuns ? `<button class="btn" data-cluster-transfer="${esc(member.id)}">${esc(rt('改由此机接收消息', 'Receive chat messages here'))}</button>` : ''}</footer>${diagnostic?.error ? `<p class="machine-error">${esc(diagnostic.error)}</p>` : ''}</article>`;
+    }).join('');
+    const automatic = rt('自动 · 接到任务的面板', 'Automatic · receiving panel');
+    const selector = spaces ? `<label class="machine-default-setting"><span><strong>${esc(rt('新任务默认执行机器', 'Default machine for new tasks'))}</strong><small>${esc(rt('自动模式下，网页任务在当前面板执行，聊天任务在接收消息的电脑执行。会话和机器人单独选过的机器优先。', 'Automatic runs web tasks on this panel and chat tasks on the receiver. Conversation and bot settings take precedence.'))}</small></span><select id="execution-default" aria-label="${esc(rt('新任务默认执行机器', 'Default machine for new tasks'))}"><option value="">${esc(automatic)}</option>${preferred && !machines.some(m => m.id === preferred) ? `<option selected disabled value="${esc(preferred)}">${esc(preferred)} · ${esc(rt('未连接','Disconnected'))}</option>` : ''}${machines.map(m => `<option value="${esc(m.id)}"${m.id === preferred ? ' selected' : ''}${m.online ? '' : ' disabled'}>${esc(m.label || m.id)}${m.online ? '' : ' · ' + esc(rt('离线','Offline'))}</option>`).join('')}</select></label>` : '';
     section.hidden = false;
     const connectedCount = (members.filter(member => member.online || member.id === data.nodeId).length || 1)
       + (nodeList.nodes || []).filter(node => node.remote && node.connected && !members.some(member => member.id === node.id)).length;
-    const availability = !data.enabled ? rt('在「聊天软件」里连接飞书后，本机负责接收机器人消息。', 'Connect Feishu under Chat apps to receive bot messages on this computer.')
-      : healthy ? rt(`${connectedCount} 台机器在线；负责飞书的机器关机时，会自动换另一台。`, `${connectedCount} machines online; another takes over Feishu if this one goes offline.`) : reason;
-    section.innerHTML = `<div class="machine-section-heading"><div><h2 id="computers-title">${esc(rt('运行任务的电脑', 'Computers that run tasks', 'タスクを実行するコンピューター'))}</h2><p class="route-muted">${esc(rt('新建对话时，可以选择本机或一台已连接的开发机来运行任务。', 'When starting a chat, choose this computer or a connected development machine to run the task.'))}</p></div><button class="btn primary" id="machine-add-node">＋ ${esc(rt('添加电脑', 'Add computer', 'コンピューターを追加'))}</button></div><div class="machine-grid">${cards}</div><section class="cluster-summary cluster-line ${healthy ? 'is-ready' : 'is-blocked'}"><div><h2 id="cluster-title">${esc(heading)}</h2><p>${esc(availability)}</p></div><button class="btn" id="cluster-refresh">${esc(rt('刷新', 'Refresh'))}</button></section><details class="cluster-diagnostics"><summary>${esc(rt('连接诊断（高级）', 'Election & connection diagnostics'))}</summary><p>${esc(rt(`可达成员 ${data.quorum?.online ?? members.length} / ${data.quorum?.total ?? members.length}；多数派需要 ${data.quorum?.required ?? 1} 个成员；主节点确认${data.hasQuorum ? '已完成' : '未完成'}`, `Reachable ${data.quorum?.online ?? members.length}/${data.quorum?.total ?? members.length}; majority ${data.quorum?.required ?? 1}; leader confirmation ${data.hasQuorum ? 'valid' : 'pending'}`))}</p><p>${esc(rt(`任期 ${data.term ?? '—'} · 同步版本 ${data.snapshotIndex ?? '—'} · 本机监听 ${data.panel?.bind || '未知'}:${data.panel?.port || ''}`, `Term ${data.term ?? '—'} · snapshot ${data.snapshotIndex ?? '—'} · bind ${data.panel?.bind || '?'}:${data.panel?.port || ''}`))}</p>${members.map(item => `<p><strong>${esc(item.label || item.id)}</strong> <code>${esc(item.url || '')}</code></p>`).join('')}</details>`;
+    const availability = !data.enabled ? rt('在「聊天软件」中管理飞书、企业微信等连接。', 'Manage Feishu and WeCom connections in Chat apps.')
+      : healthy ? rt(`${connectedCount} 台电脑在线。接收消息的电脑离线时，集群会选出另一台接管。`, `${connectedCount} machines online. Another takes over chat connections if the receiver goes offline.`) : reason;
+    section.innerHTML = `<div class="machine-section-heading"><div><h2 id="computers-title">${esc(rt('运行任务的电脑', 'Computers that run tasks', 'タスクを実行するコンピューター'))}</h2><p class="route-muted">${esc(rt('新建对话时，可以选择本机或一台已连接的开发机来运行任务。', 'When starting a chat, choose this computer or a connected development machine to run the task.'))}</p></div><button class="btn primary" id="machine-add-node">＋ ${esc(rt('添加电脑', 'Add computer', 'コンピューターを追加'))}</button></div>${selector}<div class="machine-grid">${cards}</div><section class="cluster-summary cluster-line ${healthy ? 'is-ready' : 'is-blocked'}"><div><h2 id="cluster-title">${esc(heading)}</h2><p>${esc(availability)}</p></div><button class="btn" id="cluster-refresh">${esc(rt('刷新', 'Refresh'))}</button></section><details class="cluster-diagnostics"><summary>${esc(rt('连接诊断（高级）', 'Election & connection diagnostics'))}</summary><p>${esc(rt(`可达成员 ${data.quorum?.online ?? members.length} / ${data.quorum?.total ?? members.length}；多数派需要 ${data.quorum?.required ?? 1} 个成员；主节点确认${data.hasQuorum ? '已完成' : '未完成'}`, `Reachable ${data.quorum?.online ?? members.length}/${data.quorum?.total ?? members.length}; majority ${data.quorum?.required ?? 1}; leader confirmation ${data.hasQuorum ? 'valid' : 'pending'}`))}</p><p>${esc(rt(`任期 ${data.term ?? '—'} · 同步版本 ${data.snapshotIndex ?? '—'} · 本机监听 ${data.panel?.bind || '未知'}:${data.panel?.port || ''}`, `Term ${data.term ?? '—'} · snapshot ${data.snapshotIndex ?? '—'} · bind ${data.panel?.bind || '?'}:${data.panel?.port || ''}`))}</p>${members.map(item => `<p><strong>${esc(item.label || item.id)}</strong> <code>${esc(item.url || '')}</code></p>`).join('')}</details>`;
     $('#cluster-refresh').onclick = renderClusterPanel;
     const addNode = $('#machine-add-node'); if (addNode) addNode.onclick = openNodeAccess;
     section.querySelectorAll('[data-copy-directory]').forEach(button => button.onclick = async () => { try { await navigator.clipboard.writeText(button.dataset.copyDirectory); toast(rt('已复制完整目录', 'Full path copied')); } catch { toast(rt('请选中下方完整路径手动复制', 'Select the full path below to copy it'), false); } });
+    const saveSetting = async input => {
+      section.pendingSave = true; ++section.loadRevision;
+      let saved;
+      try { saved = await api('PUT', 'workspaces', input); toast(rt('已保存', 'Saved')); }
+      catch (error) { toast(error.message, false); }
+      finally { section.pendingSave = false; await renderClusterPanel(saved?.config); }
+    };
+    const execution = $('#execution-default');
+    if (execution) execution.onchange = async () => { execution.disabled = true; await saveSetting({ defaultMachine: execution.value }); };
     section.querySelectorAll('[data-machine-directory]').forEach(button => button.onclick = async () => {
-      document.querySelector('[data-infra-tab="workspaces"]').click();
-      const find = () => Array.from(document.querySelectorAll('[data-machine-default]')).find(input => input.dataset.machineDefault === button.dataset.machineDirectory);
-      if (!find()) await renderWorkspacesPanel();
-      const input = find(); if (input) { input.scrollIntoView({ behavior: 'smooth', block: 'center' }); input.focus({ preventScroll: true }); }
+      const machine = machines.find(item => item.id === button.dataset.machineDirectory);
+      const path = await chooseMachineDirectory(machine, { reset: true });
+      if (path !== null) await saveSetting({ directory: { machineId: machine.id, path } });
     });
-
-    section.querySelectorAll('[data-cluster-transfer]').forEach(button => button.onclick = async () => { button.disabled = true; try { await api('POST', 'cluster/transfer', { target: button.dataset.clusterTransfer }); toast(rt('已请求移交 IM 主节点，当前执行机器保持不变', 'IM transfer requested; execution machines are unchanged')); await renderClusterPanel(); } catch (error) { toast(error.message, false); } finally { if (button.isConnected) button.disabled = false; } });
+    section.querySelectorAll('[data-cluster-transfer]').forEach(button => button.onclick = async () => { button.disabled = true; try { await api('POST', 'cluster/transfer', { target: button.dataset.clusterTransfer }); toast(rt('已请求移交聊天软件连接', 'Chat connection transfer requested')); await renderClusterPanel(); } catch (error) { toast(error.message, false); } finally { if (button.isConnected) button.disabled = false; } });
   } catch (error) { if (section.isConnected) { section.hidden = false; section.innerHTML = `<p class="cluster-warning" role="alert">${esc(error.message)}</p>`; } }
 }
 async function renderWorkspacesPanel() {
@@ -3842,15 +3909,33 @@ async function renderWorkspacesPanel() {
   try {
     const data = await api('GET', 'workspaces'); if (!section.isConnected) return;
     const config = data.config;
-    const project = item => `<article class="workspace-project" data-workspace-id="${esc(item.id)}"><header><label>${esc(rt('项目名称', 'Project name'))}<input data-project-name value="${esc(item.name)}" required maxlength="80"></label><button type="button" class="btn" data-remove-project>${esc(rt('移除项目', 'Remove project'))}</button></header><div class="workspace-paths">${data.machines.map(machine => `<label>${esc(machine.label)}<textarea rows="3" spellcheck="false" data-project-path="${esc(machine.id)}" placeholder="${esc(rt('项目在这台电脑上的路径（选填）', 'Path to this project on this computer (optional)'))}">${esc(item.paths[machine.id] || '')}</textarea></label>`).join('')}</div></article>`;
-    section.innerHTML = `<form id="workspace-form"><section class="workspace-section"><div class="route-heading"><h2>${esc(rt('我的项目', 'My projects', 'プロジェクト一覧'))}</h2><button type="button" class="btn" id="workspace-add">＋ ${esc(rt('添加项目', 'Add project'))}</button></div><p class="route-muted">${esc(rt('填写项目在每台电脑上已有的文件夹路径。新建对话时选项目名称，就能打开对应的文件夹。只在有这个项目的电脑下填写。', 'Enter the existing folder path on each computer that has a copy of the project. Choose the project by name when starting a chat to use the folder on that computer.'))}</p><div id="workspace-projects">${config.projects.map(project).join('')}</div></section><section class="workspace-section"><h2>${esc(rt('默认工作文件夹', 'Default working folder', '既定の作業フォルダー'))}</h2><p class="route-muted">${esc(rt('新建对话时如果没有选项目，就从这里开始。留空会使用该电脑的用户主目录。', 'New chats start here when you haven’t chosen a project. Leave a field empty to use that computer’s home folder.'))}</p><div class="workspace-paths">${data.machines.map(machine => `<label>${esc(machine.label)}<small>${esc(machine.id)} · ${esc(machine.online ? rt('已连接', 'Connected') : rt('未连接', 'Disconnected'))}</small><textarea rows="3" spellcheck="false" data-machine-default="${esc(machine.id)}" placeholder="${esc(machine.home || rt('留空使用用户主目录', 'Leave empty for the home folder'))}">${esc(config.defaults[machine.id] || '')}</textarea></label>`).join('')}</div></section><div class="workspace-save"><p id="workspace-result" role="status"></p><button class="btn primary" type="submit">${esc(rt('保存文件夹设置', 'Save folder settings', 'フォルダー設定を保存'))}</button></div></form>`;
+    const project = item => `<article class="workspace-project" data-workspace-id="${esc(item.id)}"><header><label>${esc(rt('项目名称', 'Project name'))}<input data-project-name value="${esc(item.name)}" required maxlength="80"></label><button type="button" class="btn" data-remove-project>${esc(rt('移除项目', 'Remove project'))}</button></header><div class="workspace-paths">${data.machines.map(machine => `<div><label>${esc(machine.label)}<input data-project-path="${esc(machine.id)}" value="${esc(item.paths[machine.id] || '')}" title="${esc(item.paths[machine.id] || '')}" spellcheck="false" placeholder="${esc(rt('未设置', 'Not set'))}"></label><button type="button" class="btn" data-browse-project="${esc(machine.id)}" ${machine.online ? '' : 'disabled'}>${esc(rt('浏览', 'Browse'))}</button></div>`).join('')}</div></article>`;
+    section.innerHTML = `<form id="workspace-form" class="workspace-section"><div class="route-heading"><div><h2>${esc(rt('项目文件夹', 'Project folders'))}</h2><p class="route-muted">${esc(rt('同一个项目可以在多台电脑上有不同的目录。只选择有这个项目的电脑即可。', 'Choose the folder on each computer that has a copy of the project.'))}</p></div><button type="button" class="btn" id="workspace-add">＋ ${esc(rt('添加项目', 'Add project'))}</button></div><div id="workspace-projects">${config.projects.map(project).join('')}</div><div class="workspace-save"><p id="workspace-result" role="status"></p><button class="btn primary" type="submit">${esc(rt('保存项目', 'Save projects'))}</button></div></form>`;
     const rows = $('#workspace-projects');
-    $('#workspace-add').onclick = () => rows.insertAdjacentHTML('beforeend', project({ id: crypto.randomUUID(), name: '', paths: {} }));
-    rows.onclick = event => { const button = event.target.closest('[data-remove-project]'); if (button) button.closest('[data-workspace-id]').remove(); };
-    $('#workspace-form').onsubmit = async event => { event.preventDefault(); const button = event.submitter; button.disabled = true; const result = $('#workspace-result'); result.textContent = rt('正在对应机器上校验目录…', 'Validating directories on their machines…');
-      const defaults = Object.fromEntries(Array.from(section.querySelectorAll('[data-machine-default]')).map(input => [input.dataset.machineDefault, input.value.trim()]).filter(([,value]) => value));
-      const projects = Array.from(rows.children).map(row => ({ id: row.dataset.workspaceId, name: row.querySelector('[data-project-name]').value.trim(), paths: Object.fromEntries(Array.from(row.querySelectorAll('[data-project-path]')).map(input => [input.dataset.projectPath, input.value.trim()]).filter(([,value]) => value)) }));
-      try { await api('PUT', 'workspaces', { defaults, projects }); result.textContent = rt('已保存。新对话将使用所选电脑上的文件夹。', 'Saved. New chats will use the folders on the selected computer.'); } catch (error) { result.textContent = error.message; } finally { button.disabled = false; }
+    $('#workspace-add').onclick = () => { rows.insertAdjacentHTML('beforeend', project({ id: crypto.randomUUID(), name: '', paths: {} })); rows.lastElementChild.querySelector('input').focus(); };
+    rows.onclick = async event => {
+      const remove = event.target.closest('[data-remove-project]');
+      if (remove) { remove.closest('[data-workspace-id]').remove(); return; }
+      const browse = event.target.closest('[data-browse-project]'); if (!browse) return;
+      const input = browse.parentElement.querySelector('input'), machine = data.machines.find(item => item.id === browse.dataset.browseProject);
+      const path = await chooseMachineDirectory(machine, { initial: input.value.trim() });
+      if (path !== null) { input.value = path; input.title = path; }
+    };
+    $('#workspace-form').onsubmit = async event => {
+      event.preventDefault(); const button = event.currentTarget.querySelector('[type=submit]'); button.disabled = true;
+      const result = $('#workspace-result'); result.textContent = rt('正在对应机器上校验目录…', 'Validating folders…');
+      const projects = Array.from(rows.children).map(row => {
+        const previous = config.projects.find(item => item.id === row.dataset.workspaceId);
+        const paths = { ...previous?.paths };
+        for (const input of row.querySelectorAll('[data-project-path]')) {
+          const value = input.value.trim(); if (value) paths[input.dataset.projectPath] = value; else delete paths[input.dataset.projectPath];
+        }
+        return { id: row.dataset.workspaceId, name: row.querySelector('[data-project-name]').value.trim(), paths };
+      });
+      try {
+        const saved = await api('PUT', 'workspaces', { projects, previousProjects: config.projects });
+        config.projects = saved.config.projects; result.textContent = rt('项目文件夹已保存', 'Project folders saved');
+      } catch (error) { result.textContent = error.message; } finally { button.disabled = false; }
     };
   } catch (error) { section.textContent = error.message; }
 }
@@ -4141,6 +4226,29 @@ async function renderProxyTab() {
       document.querySelectorAll('[data-connection-engine]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.connectionEngine === engine)));
     };
     document.querySelectorAll('[data-connection-engine]').forEach(button => button.onclick = () => selectConnection(button.dataset.connectionEngine));
+    const dshPanel = document.querySelector('[data-dsh-provider]');
+    if (dshPanel) dshPanel.ontoggle = async () => {
+      if (!dshPanel.open) return;
+      const fields = dshPanel.querySelector('[data-provider-fields]');
+      fields.textContent = rt('正在读取代理配置…','Loading proxy configuration…');
+      try {
+        const info = await api('GET','deepseek-provider');
+        if (!fields.isConnected || !dshPanel.open) return;
+        fields.replaceChildren();
+        for (const [label, value, secret] of [['Provider ID',info.provider], [rt('显示名称','Display name'),'my-agents'], [rt('API 地址','API URL'),info.baseURL],
+          [rt('API 协议','API protocol'),info.protocol], [rt('API 密钥','API key'),info.key,true], [rt('模型 ID','Model ID'),info.model]]) {
+          const term = document.createElement('dt'), detail = document.createElement('dd');
+          term.textContent = label;
+          if (secret) {
+            const copy = document.createElement('button'); copy.className='btn'; copy.textContent=rt('复制代理密钥','Copy proxy key');
+            copy.onclick = async () => { try { await navigator.clipboard.writeText(value); toast(rt('已复制代理密钥','Proxy key copied')); }
+              catch { const input=document.createElement('input');input.readOnly=true;input.value=value;detail.replaceChildren(input);input.select(); } };
+            detail.append(copy);
+          } else detail.textContent = value || '—';
+          fields.append(term,detail);
+        }
+      } catch (error) { fields.textContent = error.message; }
+    };
     selectConnection(knownEngine(localStorage.getItem('panel-connection-engine')));
     const dialog = document.createElement('dialog'); dialog.id = 'route-dialog';
     const envExample = { env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:8790', ANTHROPIC_AUTH_TOKEN: 'ferry', ANTHROPIC_API_KEY: '', CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1', CLAUDE_CODE_AUTO_MODE_SERVER: '0' } };

@@ -142,7 +142,7 @@ function createNodeHub({ registry, token, dir, routing = null, log = console, sp
   let wakeTimer = null;
 
   return {
-    upgrade, list, add, remove, reconnect, ensure, onWake,
+    upgrade, list, configured: () => saved.map(({ id, label }) => ({ id, label })), add, remove, reconnect, ensure, onWake,
     start() {
       for (const config of saved) if (config.enabled !== false) connectSSH(config);
       let last = Date.now();

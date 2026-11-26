@@ -41,3 +41,22 @@ test('offline execution follows the valid leader using project mappings; manual 
   assert.equal(store.resolve({switchMachine:true,machineId:'linux',workspaceId:'app'},owner).handoff.reason,'manual');
   assert.throws(()=>store.resolve({machineId:'mac'}, {...owner,project:'/Users/test/missing'}),/项目文件夹.*linux.*路径/);
 });
+
+test('new tasks share a stable default machine, explicit selections and existing conversations take precedence', async t => {
+  const { dir, store, hosts } = fixture(t);
+  const app = { id: 'app', name: 'App', paths: { mac: '/Users/test/app', linux: '/home/test/app' } };
+  await store.save({ projects: [app], defaults: {} });
+  await store.save({ defaultMachine: 'linux' });
+  assert.equal(store.resolve({ workspaceId: 'app' }).cwd, '/home/test/app');
+  assert.equal(store.resolve({ cwd: '/Users/test/app' }).cwd, '/home/test/app');
+  assert.throws(() => store.resolve({ cwd: '/Users/test/unmapped' }), /明确指定执行机器/);
+  assert.equal(store.resolve({ node: 'local' }).machineId, 'mac');
+  assert.equal(store.resolve({}, { machineId: 'mac', project: '/Users/test/app' }).cwd, '/Users/test/app');
+  await assert.rejects(store.save({ defaultMachine: 'missing' }), /执行机器/);
+  await Promise.all([store.save({ projects: [app], previousProjects: [app] }), store.save({ directory: { machineId: 'linux', path: '/home/test/work' } })]);
+  assert.deepEqual(store.read(), { projects: [app], defaults: { linux: '/home/test/work' }, defaultMachine: 'linux' });
+  await assert.rejects(store.save({ projects: [], previousProjects: [] }), { status: 409 });
+  assert.equal(createWorkspaces({ dir, selfId: () => 'mac', machines: () => [{ id: 'linux', online: true }], hostFor: id => hosts[id] }).resolve().cwd, '/home/test/work');
+  await store.save({ defaultMachine: '' });
+  assert.equal(store.resolve().machineId, 'mac');
+});

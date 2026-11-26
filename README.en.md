@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/13days/my-agents/main/install.sh | 
 
 The installer uses your existing Node.js 18+ and npm when available. On Intel and ARM 64-bit systems it can download a checksum-verified Node.js 24 LTS runtime into your home directory. The source lives in `~/.local/share/my-agents/source`. The panel runs in the foreground. Use the same command to start it again.
 
-1. Open **[localhost:4321](http://localhost:4321)**. Install Codex or Claude Code on the machine that will run your task. Sign in with your account, or connect Claude Code through one of the two proxies below. Choose **Conversations → New chat**, pick a project, and ask how to run it. [Install Codex](https://developers.openai.com/codex/cli/) · [Install Claude Code](https://code.claude.com/docs/en/quickstart)
+1. Open **[localhost:4321](http://localhost:4321)**. Install Codex or Claude Code on the machine that will run your task. Sign in with your account, or connect Claude Code through one of the two proxies below. Open **Conversations** and ask how to run your project. Use the controls above the composer to change its folder or execution machine. [Install Codex](https://developers.openai.com/codex/cli/) · [Install Claude Code](https://code.claude.com/docs/en/quickstart)
 2. Under **Chat apps**, scan the setup QR code or enter an existing bot’s credentials. Follow the pairing and card-button authorization prompts.
 3. Send the bot the `/new` example above. You can follow its progress in the thread. [Feishu cards and commands (Chinese)](docs/feishu-interaction.md)
 
@@ -61,6 +61,11 @@ Create an **intelligent bot** in WeCom, select **API mode → Long connection**,
 The first sender becomes the bot owner automatically. Other members can DM for their UserID and be added under **Additional member UserIDs**. Installation includes `lark-cli` and `wecom-cli`. Authorized members can send a text task privately or mention the bot in a group. The answer returns to that chat and is available in the web conversation. Follow-ups reuse the same conversation per member and chat. Send `/new` on its own to start another. Feishu share cards and the assistant’s personal-history source are configured separately. [WeCom setup (Chinese)](docs/im-channels.md)
 
 ![WeCom setup with bot credentials, allowed members and project defaults (Chinese UI)](docs/wecom-setup-preview.png)
+
+### DeepSeek Harness
+
+Select **DeepSeek Harness** for a new conversation on a machine with `dsh` installed. It can reuse Claude Code proxy accounts, models and routing. To connect a standalone Harness UI on the same machine, open the DeepSeek Harness tab under AI accounts and copy the local endpoint and proxy key into a custom **Anthropic Messages** provider. [Setup guide (Chinese)](docs/deepseek-harness.md)
+
 
 <details>
 <summary>Run a source checkout</summary>
@@ -78,7 +83,7 @@ Both the installer and this start command keep your terminal proxy configuration
 
 ## Run tasks on several machines from one panel
 
-In **Computers & AI accounts → Computers → Add computer**, enter a passwordless SSH address or host alias. The panel prepares the runtime, installs the runner, and connects the device. Once it shows **Connected**, map the project’s path under **Project folders** and choose the device for your next conversation.
+In **Computers & AI accounts → Computers → Add computer**, enter a passwordless SSH address or host alias. The panel prepares the runtime, installs the runner, and connects the device. On the same page, choose the default machine for new tasks. Use **Choose folder** on a computer card to browse its local or remote directories, or map a project across machines under **Project folders**. Existing sessions keep their execution machine.
 
 ![The design-kit checkout mapped to a different directory on each execution machine](https://raw.githubusercontent.com/13days/my-agents/main/docs/workspace-paths-preview.png)
 

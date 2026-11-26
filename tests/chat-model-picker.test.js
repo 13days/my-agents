@@ -15,7 +15,7 @@ function fixture(active) {
     rt: text => text, toast: message => calls.push(['toast', message]),
     registerChatInSidebar() {}, createChatTurn: () => ({ id: 'message-id' }), paintChatAttachments() {},
     streamChat: () => calls.push(['start']),
-    chatView: { engine: 'claude', attachments: [], run: { model: 'old-model', turns: new Map([['turn', { finished: !active }]]) } },
+    chatView: { sessionId: 'existing-session', engine: 'claude', attachments: [], run: { model: 'old-model', turns: new Map([['turn', { finished: !active }]]) } },
   });
   ctx.chatView.run.finished = Promise.resolve();
   ctx.chatView.run.abort = { abort: () => { calls.push(['detach']); ctx.chatView.run = null; } };
@@ -36,4 +36,15 @@ test('changing the selected model does not interrupt an active answer or discard
   assert.equal(calls[0][0], 'toast');
   assert.equal(prompt.value, 'Keep my message');
   assert.ok(ctx.chatView.run);
+});
+
+test('sending the first prompt enters its conversation once and clears the cached draft', async () => {
+  const { ctx, calls } = fixture(false);
+  ctx.chatView.sessionId = ''; ctx.chatView.run = null;
+  ctx.chatPageCache = new Map([['__draft__', {}]]);
+  ctx.registerChatInSidebar = v => { v.sessionId = 'new-session'; };
+  ctx.renderChat = () => calls.push(['render', ctx.chatView.sessionId]);
+  await vm.runInContext('sendChat()', ctx);
+  assert.deepEqual(calls, [['render', 'new-session'], ['start']]);
+  assert.equal(ctx.chatPageCache.has('__draft__'), false);
 });

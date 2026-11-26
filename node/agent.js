@@ -47,6 +47,7 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id, before
     peer.handle('history.userPage', async ({ item, page }) => history.userPage ? history.userPage({ item, page }) : require('../core/session-previews').userMessagePage(await history.messages(item.id), page, item));
   }
   peer.handle('host.resolveDir', ({ dir }) => host.resolveDir(dir));
+  if (host.listDirectories) peer.handle('host.listDirectories', options => host.listDirectories(options));
   peer.handle('host.createWorktree', async ({ dir, operationId }) => {
     const controller = new AbortController(); if (operationId) worktrees.set(operationId, controller);
     try { return await host.createWorktree(await host.resolveDir(dir), { signal: controller.signal }); }

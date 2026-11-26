@@ -336,3 +336,19 @@ test('a turn the node rejects ends with an error instead of an endless retry', a
   assert.ok(!run.job.events.some(e => e.event === 'warning'), 'not reported as a retry');
   await until(() => !manager.busy(sessionId));
 });
+
+test('the directory browser lists only folders on the selected host, including optional hidden and linked folders', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'machine-browse-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(dir, '我的项目')); fs.mkdirSync(path.join(dir, '.config'));
+  fs.writeFileSync(path.join(dir, 'not a folder'), ''); fs.symlinkSync('我的项目', path.join(dir, 'short-cut'), 'dir');
+  const { node, hubPeer } = await connected(); t.after(() => hubPeer.close());
+  for (const host of [createLocalHost(), node.host]) {
+    const listing = await host.listDirectories({ dir });
+    assert.deepEqual(new Set(listing.directories.map(item => item.name)), new Set(['我的项目', 'short-cut']));
+    assert.equal(listing.parent, path.dirname(fs.realpathSync(dir)));
+    const hidden = await host.listDirectories({ dir, hidden: true });
+    assert.ok(hidden.directories.some(item => item.name === '.config'));
+    await assert.rejects(host.listDirectories({ dir: 'relative' }), /绝对目录/);
+  }
+});

@@ -176,12 +176,13 @@ test('session entries retain readable CJK previews within Feishu limits', () => 
   assert.ok(nodes(card).filter(node => node.tag).length < 200);
 });
 
-test('long task actions use compact, content-sized buttons in rows of two', () => {
-  const card = cards.task({ ...context, binding: { id: 'session', cwd: '/project' }, view: { done: false, phase: '正在思考', text: '', tools: new Map(), permissions: new Map() }, title: 'Task', elapsed: 1000 });
+test('completed task actions share a single row and wrap to fit the client', () => {
+  const card = cards.task({ ...context, binding: { id: 'session', cwd: '/project' }, view: { done: true, phase: '已完成', text: '完成', tools: new Map(), permissions: new Map() }, title: 'Task', elapsed: 1000 });
   const rows = nodes(card).filter(node => node.tag === 'column_set' && node.columns?.some(column => column.elements?.some(item => item.tag === 'button')));
-  assert.equal(rows.length, 2);
-  assert.ok(rows.every(row => row.columns.length <= 2));
-  assert.ok(rows.flatMap(row => row.columns).every(column => column.width === 'auto' && column.elements[0].size === 'small'));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].flex_mode, 'flow');
+  assert.deepEqual(rows[0].columns.map(column => column.elements[0].behaviors[0].value.action), ['share_result', 'history', 'view', 'reply_format']);
+  assert.ok(rows[0].columns.every(column => column.elements[0].size === 'small'));
 });
 
 test('historical task actions carry stable ownership without relying on the gateway cache', () => {

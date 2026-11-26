@@ -11,16 +11,8 @@ const markdown = (content, small = false) => ({ tag: 'markdown', content: String
 const muted = content => markdown(`<font color='grey'>${content}</font>`, true);
 const button = (text, value, type = 'default') => ({ tag: 'button', text: plain(text), type, size: 'small', behaviors: [{ type: 'callback', value }] });
 function buttons(items) {
-  const rows = [];
-  for (let start = 0; start < items.length;) {
-    const trio = items.slice(start, start + 3);
-    const count = trio.length === 3 && trio.every(item => Array.from(item.text.content).length <= 5) ? 3 : 2;
-    const columns = items.slice(start, start + count).map(item => ({ tag: 'column', width: 'auto', elements: [item] }));
-    rows.push({ tag: 'column_set', flex_mode: 'none', horizontal_spacing: '4px', columns });
-    start += count;
-  }
-  if (rows.length === 1) return rows[0];
-  return { tag: 'column_set', columns: [{ tag: 'column', width: 'weighted', weight: 1, vertical_spacing: '4px', elements: rows }] };
+  return { tag: 'column_set', flex_mode: 'flow', horizontal_spacing: '4px', columns:
+    items.map(item => ({ tag: 'column', elements: [item] })) };
 }
 const collapse = (title, elements, expanded = false, id) => ({
   tag: 'collapsible_panel', ...(id ? { element_id: id } : {}), expanded, padding: '0px 0px 0px 0px',

@@ -25,6 +25,7 @@ async function attachRemoteNode({ peer, registry, transport = 'ws', pin = null, 
     id, label: info.label || id, platform: info.platform, remote: true,
     homeDir: () => info.home || '~',
     resolveDir: dir => peer.call('host.resolveDir', { dir }),
+    listDirectories: options => peer.call('host.listDirectories', options),
     createWorktree: info.worktrees ? async (dir, options = {}) => {
       const cancel = () => connection.peer.call('host.cancelWorktree', { operationId: options.operationId }).catch(() => {});
       options.signal?.addEventListener('abort', cancel, { once: true });

@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(__dirname, '..', 'panel.css'), 'utf8');
-const clusterSource = html.slice(html.indexOf('async function renderClusterPanel()'), html.indexOf('// Engine runtime nodes:'));
+const clusterSource = html.slice(html.indexOf('async function renderClusterPanel('), html.indexOf('// Engine runtime nodes:'));
 
 test('the connections page loads cluster state as an optional capability', () => {
   assert.match(clusterSource, /api\('GET', 'cluster'\)/);
@@ -23,7 +23,7 @@ test('cluster controls transfer leadership and expose the join command', () => {
 });
 
 test('cluster and runtime-node copy stays explicit in Chinese and English', () => {
-  for (const text of ['电脑与 AI 账号', 'Computers & AI accounts', '连接电脑', '项目文件夹', 'Project folders', 'AI 账号', 'AI accounts', '负责飞书', 'Handles Feishu', '只运行任务', 'Runs tasks only', '添加电脑', 'Add computer', 'SSH 地址', 'SSH address']) assert.ok(html.includes(text), `missing UI copy: ${text}`);
+  for (const text of ['电脑与 AI 账号', 'Computers & AI accounts', '连接电脑', '项目文件夹', 'Project folders', 'AI 账号', 'AI accounts', '接收聊天消息', 'Receives chat messages', '新任务默认执行机器', 'Default machine for new tasks', '只运行任务', 'Runs tasks only', '添加电脑', 'Add computer', 'SSH 地址', 'SSH address']) assert.ok(html.includes(text), `missing UI copy: ${text}`);
   assert.match(css, /\.machine-grid/);
   assert.match(css, /\.panel-layers/);
   assert.doesNotMatch(html, /data-node-kind/, 'one add-machine flow, no runtime/cluster choice');
@@ -31,7 +31,7 @@ test('cluster and runtime-node copy stays explicit in Chinese and English', () =
 });
 
 test('cluster member helpers normalize voting roles and engine CLI state', () => {
-  const helperSource = html.slice(html.indexOf('function clusterMemberKind('), html.indexOf('async function renderClusterPanel()'));
+  const helperSource = html.slice(html.indexOf('function clusterMemberKind('), html.indexOf('async function renderClusterPanel('));
   const context = vm.createContext({
     rt: (_zh, en) => en,
     hasEngine: id => id === 'claude',
@@ -70,11 +70,11 @@ test('cluster response renders health, membership, gateways, and transfer candid
   vm.runInContext(source, context);
   await vm.runInContext('renderClusterPanel()', context);
   assert.equal(section.hidden, false);
-  assert.match(section.innerHTML, /Feishu is handled by Mac/);
+  assert.match(section.innerHTML, /Chat apps are handled by Mac/);
   assert.match(section.innerHTML, /2 machines online/);
   assert.match(section.innerHTML, /majority/);
-  assert.match(section.innerHTML, /Handles Feishu/);
-  assert.match(section.innerHTML, /Standby/);
+  assert.match(section.innerHTML, /Receives chat messages/);
+  assert.match(section.innerHTML, /On standby/);
   assert.match(section.innerHTML, /data-cluster-transfer="linux"/);
   assert.doesNotMatch(section.innerHTML, /IM ingress|Agent runtime|Panel link/, 'no internal jargon');
 });

@@ -416,7 +416,7 @@ test('open groups hide session controls and tool details while explicitly select
   await f.gateway.receive(f.msg('公开群任务', group));
   await new Promise(resolve => setTimeout(resolve, 30));
   let rendered = JSON.stringify(f.sent.at(-1).content);
-  assert.equal(f.sent.at(-1).content.post.zh_cn.content[0][0].text, 'A complete response.\n\n本机 · Claude Code · /codex 或 /claude 切换引擎 · 模型：默认（CLI 配置） · /model 切换模型');
+  assert.equal(f.sent.at(-1).content.post.zh_cn.content[0][0].text, 'A complete response.\n\n执行机器：本机 · Claude Code · /codex 或 /claude 切换引擎 · 模型：默认（CLI 配置） · /model 切换模型');
   assert.equal(f.updated.length, 0);
   assert.deepEqual(f.reactions.map(x => x.action), ['add', 'remove']);
   assert.match(rendered, /A complete response/);
@@ -1516,4 +1516,21 @@ test('help offers bound shortcuts, matching text help and a smaller group comman
   await f.gateway.receive(f.msg('/help', { chatType: 'group', chatId: 'oc_public', mentionedBot: true }));
   assert.match(f.sent.at(-1).content.post.zh_cn.content[0][0].text, /\/queue/);
   assert.doesNotMatch(f.sent.at(-1).content.post.zh_cn.content[0][0].text, /\/sessions|\/route/);
+});
+
+test('Feishu follows the shared machine on a new topic and keeps the original binding after a settings change', async t => {
+  const f = await fixture(t); await f.pair();
+  f.panel.machineId = () => 'mac';
+  let preferred = 'linux';
+  f.panel.defaultExecutionMachine = () => preferred;
+  f.panel.defaultDirectory = id => id === 'linux' ? '/srv/project' : f.dir;
+  f.panel.nodes = () => [{ id: 'linux', label: 'Linux', connected: true }];
+  await f.gateway.configure({ defaultProject: '', defaultMachine: '' });
+  await f.gateway.receive(f.msg('first'));
+  assert.equal(f.calls.at(-1).machineId, 'linux');
+  assert.equal(f.calls.at(-1).cwd, '/srv/project');
+  preferred = 'mac';
+  await f.gateway.receive(f.msg('again'));
+  assert.equal(f.calls.at(-1).machineId, 'linux');
+  assert.equal(f.gateway.status().config.defaultMachine, '');
 });

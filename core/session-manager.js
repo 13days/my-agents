@@ -86,7 +86,7 @@ function createSessionManager({ registry, history, stallMs = 90 * 1000, idleMs =
     cancelled();
     let cwd;
     try { cwd = await host.resolveDir(location?.cwd || owner?.project || input.cwd); }
-    catch (error) { throw httpError(error.status || 400, `执行机器「${registry.node(nodeId).label || nodeId}」无法使用目录 ${location?.cwd || owner?.project || input.cwd || '(默认)'}：${error.message}。请在「电脑与 AI 账号 → 项目文件夹」核对这台电脑上的项目路径`); }
+    catch (error) { throw httpError(error.status || 400, `执行机器「${registry.node(nodeId).label || nodeId}」无法使用目录 ${location?.cwd || owner?.project || input.cwd || '(默认)'}：${error.message}。请在「连接电脑 → 项目文件夹」核对这台电脑上的项目路径`); }
 
     const previous = requested && runs.get(requested);
     if (live(previous) && !location?.handoff) {

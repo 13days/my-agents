@@ -38,7 +38,7 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
         </details>
         <div class="gateway-form-row"><label>${esc(rt('服务', 'Service'))}<select id="feishu-domain"><option value="feishu">飞书</option><option value="lark">Lark</option></select></label><label>${esc(rt('默认启动引擎', 'Default engine'))}<select id="feishu-default-engine" ${feishuEngineSupported(c) ? '' : 'disabled'}>${feishuEngineOptions(c)}</select></label></div>
         <p class="gateway-engine-hint route-muted">${esc(feishuEngineSupported(c) ? rt('新话题首次发送消息，或 /new 未指定引擎时，使用此默认值。已有话题继续使用各自绑定的引擎。', 'Used for the first message in an unbound topic and /new without an engine. Existing topics retain their engine.') : rt('当前运行的服务尚未加载引擎设置，请重启面板后使用默认引擎和 /engine 命令。', 'Restart the panel service to enable default-engine settings and /engine commands.'))}</p>
-        <label>${esc(rt('默认执行机器', 'Default execution machine'))}<select id="feishu-default-machine">${(data.execution?.machines || []).map(machine => `<option value="${esc(machine.id)}">${esc(machine.label)} (${esc(machine.id)})</option>`).join('') || `<option value="local">${esc(rt('当前机器', 'This machine'))}</option>`}</select><small>${esc(rt('默认项目的目录属于这台机器，切换 IM 主节点时不会改变。', 'The default project belongs to this machine, independent of the IM leader.'))}</small></label><label>${esc(rt('Claude Code 模型（选填）', 'Claude Code model (optional)'))}<input id="feishu-model" value="${esc(c.model)}" placeholder="${esc(rt('沿用 Claude Code 默认模型', 'Use Claude Code default'))}"></label>
+        <label>${esc(rt('默认执行机器', 'Default execution machine'))}<select id="feishu-default-machine"><option value="">${esc(rt('跟随新任务默认执行机器', 'Use the default machine for new tasks'))}</option>${(data.execution?.machines || []).map(machine => `<option value="${esc(machine.id)}">${esc(machine.label)} (${esc(machine.id)})</option>`).join('') || `<option value="local">${esc(rt('当前机器', 'This machine'))}</option>`}</select><small>${esc(rt('默认项目的目录属于这台机器，切换 IM 主节点时不会改变。', 'The default project belongs to this machine, independent of the IM leader.'))}</small></label><label>${esc(rt('Claude Code 模型（选填）', 'Claude Code model (optional)'))}<input id="feishu-model" value="${esc(c.model)}" placeholder="${esc(rt('沿用 Claude Code 默认模型', 'Use Claude Code default'))}"></label>
         <label>${esc(rt('默认项目', 'Default project'))}<div class="gateway-project"><input id="feishu-project" value="${esc(c.defaultProject)}" placeholder="${esc(rt('填写所选执行机器上的目录，或在飞书用 /new 选择', 'Enter a directory on the execution machine, or use /new in IM'))}"><button type="button" class="btn" id="feishu-project-pick">${esc(rt('选择文件夹', 'Choose folder'))}</button></div></label>
         <label class="gateway-check"><input type="checkbox" id="feishu-worktree" ${c.worktree !== false ? 'checked' : ''}>${esc(rt('新会话使用独立 Git worktree，避免并发任务修改同一目录', 'Use an isolated Git worktree for new sessions'))}</label><p class="route-muted">${esc(rt('从当前提交创建分支，未提交改动不带入；已有会话继续原目录。普通文件夹使用原目录。', 'Branches from the current commit without uncommitted changes. Existing sessions and non-Git folders retain their directory.'))}</p>
         <section id="feishu-access" class="gateway-access-card">
@@ -146,13 +146,18 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
 
   $('#feishu-domain').value = c.domain;
   $('#feishu-default-engine').value = c.defaultEngine || ENGINE_DEFAULT;
-  $('#feishu-default-machine').value = c.defaultMachine || data.execution?.selfId || 'local';
+  $('#feishu-default-machine').value = c.defaultMachine || '';
   $('#feishu-cli-brand').value = c.domain;
-  const syncProjectPicker = () => { $('#feishu-project-pick').disabled = $('#feishu-default-machine').value !== (data.execution?.selfId || 'local'); };
+  const selectedMachine = () => {
+    const id = $('#feishu-default-machine').value || data.execution?.defaultMachine || data.execution?.selfId || 'local';
+    return data.execution?.machines?.find(item => item.id === id) || { id, label: id };
+  };
+  const syncProjectPicker = () => { $('#feishu-project-pick').disabled = selectedMachine().online === false; };
   $('#feishu-default-machine').onchange = async () => {
     syncProjectPicker();
     const id = $('#feishu-default-machine').value;
     $('#feishu-project').value = '';
+    if (!id) return;
     try { const spaces = await api('GET', 'workspaces'); if ($('#feishu-default-machine')?.value === id) $('#feishu-project').value = spaces.machines.find(machine => machine.id === id)?.defaultDirectory || ''; } catch (error) { toast(error.message, false); }
   }; syncProjectPicker();
   let setupWasActive = ['starting', 'waiting', 'completing'].includes(cliSetup.phase), hasCredentials = c.hasSecret, recoverExisting = false, callbackReady = !!c.cardCallbacksReady;
@@ -405,7 +410,7 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
   $('#feishu-cli-cancel').onclick = async () => {
     try { paintSetup(await api('POST', 'feishu/setup', { cancel: true })); } catch (e) { toast(e.message, false); }
   };
-  $('#feishu-project-pick').onclick = async () => { try { const result = await api('POST', 'choose-folder', {}); if (result.path) $('#feishu-project').value = result.path; } catch (e) { toast(e.message, false); } };
+  $('#feishu-project-pick').onclick = async () => { try { const path = await chooseMachineDirectory(selectedMachine(), { initial: $('#feishu-project').value }); if (path) $('#feishu-project').value = path; } catch (e) { toast(e.message, false); } };
   $('#feishu-form').onsubmit = async e => {
     e.preventDefault(); const button = $('#feishu-save'); button.disabled = true; $('#feishu-save-result').textContent = rt('正在保存…', 'Saving…');
     try {

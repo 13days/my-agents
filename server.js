@@ -768,7 +768,11 @@ function sessionHistoryPage(id, options = {}) {
 function isCodexSession(id) {
   return !!codexSessions.pathFor(id) && !transcriptPathFor(id);
 }
-function sessionEngine(id) { return isCodexSession(id) || sessionStore.read()[id]?.engine === 'codex' ? 'codex' : 'claude'; }
+function sessionEngine(id) {
+  const saved = sessionStore.read()[id]?.engine;
+  if (saved === 'deepseek') return saved;
+  return isCodexSession(id) || saved === 'codex' ? 'codex' : 'claude';
+}
 const sessionPreviewCache = new Map();
 function readSessionPreviews(items) {
   const { sessionPreview } = require('./core/session-previews');
@@ -1697,7 +1701,7 @@ function recordExchange(reqPath, status, durationMs, reqBody, resBody, isStream,
   resBody = decodeBody(resBody, resEncoding);
   const ua = (reqHeaders && (reqHeaders['user-agent'] || reqHeaders['User-Agent'])) || '';
   let rec = {
-    upstreamId: upstreamId || '', upstreamName: upstreamName || '',
+    ...(requestInfo.engine ? { engine: requestInfo.engine } : {}), upstreamId: upstreamId || '', upstreamName: upstreamName || '',
     id: requestInfo.id ?? captureStore.nextId(), ts: new Date().toISOString(), path: reqPath, status, durationMs,
     ...(requestInfo.id != null ? { requestOrder: requestInfo.requestOrder ?? requestInfo.id, startedAt: requestInfo.startedAt } : {}),
     sessionId: requestInfo.sessionId || '', method: requestInfo.method || 'POST', routing: requestInfo.routing || null, incomplete: !!requestInfo.incomplete,
@@ -1872,6 +1876,18 @@ registry.register(createClaudeEngine({
   transcripts: { path: transcriptPathFor, messages: id => sessionMessages(id, { limit: 0 })?.messages || [] },
   nativeBusy: id => accountRouter.sessions().items.some(item => item.id === id && item.running) || require('./core/native-turn-state').nativeTurnLive(transcriptPathFor(id)),
 }));
+async function deepseekRoute({ sessionId, accountId, model } = {}) {
+  await accountPool?.refresh();
+  const env = await accountRouteEnv(accountRouter, { sessionId, accountId: accountId || undefined });
+  if (!env.ANTHROPIC_BASE_URL) return null;
+  const target = accountRouter.configuredTarget(sessionId);
+  env.ANTHROPIC_MODEL = model || accountPool?.defaultModels().claude || target?.model || env.ANTHROPIC_MODEL || env.ANTHROPIC_DEFAULT_SONNET_MODEL;
+  if (!env.ANTHROPIC_MODEL) {
+    const catalog = await accountRouter.models({ sessionId, accountId });
+    env.ANTHROPIC_MODEL = catalog.forcedModel || catalog.models[0]?.id || '';
+  }
+  return env;
+}
 registry.register(createCodexEngine({
   sessions: codexSessions, accounts: true,
   nativeSessions: require('./engines/codex/native').createCodexNativeSessions({ home: CODEX_HOME }),
@@ -1894,9 +1910,12 @@ async function waitForMachine(id, timeoutMs) {
   }
   if (!registry.node(id)) throw Object.assign(new Error(`执行机器 ${id} 连接中断，等待 ${Math.round(timeoutMs / 1000)} 秒仍未恢复`), { status: 503 });
 }
+registry.register(require('./engines/deepseek').createDeepseekEngine({ dir: DATA_DIR, route: deepseekRoute }));
+let nodeHub;
 const executionMachines = () => {
   const members = clusterConfig?.members || [], result = new Map();
-  for (const item of members) result.set(item.id, { id: item.id, label: item.label || item.id, panelOnline: item.id === machineId() || !!clusterNetwork?.connected().includes(item.id), online: item.id === machineId() || !!registry.node(item.id) });
+  for (const node of nodeHub?.configured() || []) result.set(node.id, { id: node.id, label: node.label || node.id, online: false });
+  for (const item of members.filter(item => !item.witness)) result.set(item.id, { id: item.id, label: item.label || item.id, panelOnline: item.id === machineId() || !!clusterNetwork?.connected().includes(item.id), online: item.id === machineId() || !!registry.node(item.id) });
   result.set(machineId(), { id: machineId(), label: members.find(item => item.id === machineId())?.label || '本机', panelOnline: true, online: true });
   for (const node of registry.nodes()) if (node.id !== 'local') result.set(node.id, { ...result.get(node.id), id: node.id, label: node.label, online: true });
   return [...result.values()];
@@ -1960,7 +1979,7 @@ const manager = createSessionManager({
   // A machine whose panel is reachable but whose execution link is still reconnecting (e.g. right
   // after a restart) is waited for instead of failed over or reported unavailable.
   resolveLocation: async (input, owner) => {
-    const target = input.switchMachine === true ? input.machineId || input.node : owner ? owner.machineId || owner.node : input.machineId || input.node;
+    const target = input.switchMachine === true ? input.machineId || input.node : owner ? owner.machineId || owner.node : input.machineId || input.node || workspaceStore.read().defaultMachine;
     if (target && target !== 'local' && target !== machineId() && executionMachines().find(item => item.id === target)?.panelOnline) await waitForMachine(target, 60 * 1000).catch(() => {});
     return workspaceStore.resolve(input, owner);
   },
@@ -1990,6 +2009,7 @@ if (!HISTORY_WORKER) proxyServer.listen(PROXY_PORT, '127.0.0.1');
 
 
 async function setValidatedDefaultModel(engine,model){
+  if (engine === 'deepseek') engine = 'claude';
   if(model){
     const catalog=engine==='codex'?await codexPoolModels({refresh:true}):await accountRouter.models({refresh:true});
     if(catalog.available===false||!Array.isArray(catalog.models))throw new Error('无法验证当前账号的模型列表，默认模型未保存');
@@ -2053,9 +2073,9 @@ async function submitIMTurn({ gatewayContext, ...input }) {
   const run = manager.get(input.sessionId), live = run && !run.job.closed;
   // The Claude adapter queues native handovers until the original turn is idle.
   if (!live && input.engine !== 'claude' && accountRouter.sessions().items.some(item => item.id === input.sessionId && item.running)) throw new Error('此会话正在外部 CLI 中运行，请等本轮结束后续接；可先用 /history 查看记录');
-  if (live && executionMachines().find(item => item.id === run.job.meta.machineId)?.online !== false && (run.job.meta.requestedModel ?? run.job.meta.model ?? '') === (input.model || '')) { manager.send(input.sessionId, { ...input, context: gatewayContext }); return { sessionId: run.id }; }
+  if (live && executionMachines().find(item => item.id === run.job.meta.machineId)?.online !== false && (run.job.meta.requestedModel ?? run.job.meta.model ?? '') === (input.model || '')) { manager.send(input.sessionId, { ...input, context: gatewayContext }); return { sessionId: run.id, engine: run.job.meta.engine, machineId: run.job.meta.machineId }; }
   const { sessionId, run: started } = await manager.start({ ...input, context: gatewayContext });
-  return { sessionId, cwd: started.job.meta.cwd, machineId: started.job.meta.machineId, handoff: started.job.meta.handoff, workspaceId: started.job.meta.workspaceId, worktree: started.job.meta.worktree };
+  return { sessionId, engine: started.job.meta.engine, cwd: started.job.meta.cwd, machineId: started.job.meta.machineId, handoff: started.job.meta.handoff, workspaceId: started.job.meta.workspaceId, worktree: started.job.meta.worktree };
 }
 const feishuGateway = require('./feishu-bots').createFeishuBots({
   dir: DATA_DIR, runtime: macRuntime, replyURL: `http://127.0.0.1:${PORT}/api/feishu/reply`, leadership: clusterLeadership,
@@ -2067,6 +2087,7 @@ const feishuGateway = require('./feishu-bots').createFeishuBots({
     },
     machineId,
     workspaces: () => workspaceStore.view(),
+    defaultExecutionMachine: () => workspaceStore.read().defaultMachine || machineId(),
     machines: executionMachines,
     defaultDirectory: id => workspaceStore.view().machines.find(item => item.id === (id === 'local' ? machineId() : id))?.defaultDirectory || '',
     resolveDirectory: (id, dir) => { const host = registry.node(!id || id === machineId() || id === 'local' ? 'local' : id)?.host; if (!host) throw new Error('执行机器未连接'); return host.resolveDir(dir); },
@@ -2091,7 +2112,7 @@ const feishuGateway = require('./feishu-bots').createFeishuBots({
       return engine==='codex'?codexPoolModels({sessionId,refresh}):accountRouter.models({sessionId,refresh});
     },
     validModel: (engine, model, node = 'local') => !!(registry.adapter(engine, node) || registry.get(engine))?.validModel(model),
-    defaultModel: engine => accountPool?.defaultModels()[engine] || '',
+    defaultModel: engine => accountPool?.defaultModels()[engine === 'deepseek' ? 'claude' : engine] || '',
     setDefaultModel: async (engine, model) => { if (!accountPool) throw new Error('账号池未就绪'); return setValidatedDefaultModel(engine, model); },
     routeObservation: ({ sessionId, node, since, until }) => {
       const self = machineId();
@@ -2126,7 +2147,9 @@ const feishuGateway = require('./feishu-bots').createFeishuBots({
 const wecom = require('./channels/wecom').createWecom({
   dir: DATA_DIR, canStart: clusterLeadership.canStart,
   panel: {
+    engines: () => registry.list().map(engine => ({ id: engine.id, label: engine.meta.label })),
     submit: submitIMTurn, watch: (id, listener) => manager.watch(id, listener),
+    machineLabel: id => executionMachines().find(machine => machine.id === id)?.label || id,
     validateWorkspace: workspaceId => workspaceStore.resolve({ workspaceId }),
   },
 });
@@ -2154,7 +2177,7 @@ async function gatewayView() {
   if (info.enabled && info.leader && !cluster.canStart()) {
     try { effective = await sharedGateway('status'); } catch (error) { effective = { ...local, lastError: error.message }; }
   }
-  return { ...effective, execution: local.execution, runtime: local.runtime, cluster: { nodeId: info.nodeId, leader: info.leader, label: info.members?.find(item => item.id === info.leader)?.label }, cliSetup: larkSetup.status(), health: imWatchdog?.status() || null };
+  return { ...effective, execution: effective.execution, runtime: local.runtime, cluster: { nodeId: info.nodeId, leader: info.leader, label: info.members?.find(item => item.id === info.leader)?.label }, cliSetup: larkSetup.status(), health: imWatchdog?.status() || null };
 }
 
 // Usage annotations must never delay the resource list itself.
@@ -2198,7 +2221,7 @@ const server = http.createServer(async (req, res) => {
   if (scope && !knownProjects().includes(scope)) scope = '';
 
   try {
-    if (req.method === 'GET' && ['/heartflow-ui.js', '/feishu-help.js', '/wecom-ui.js', '/conversation-state.js', '/mermaid-ui.js', '/vendor/mermaid/mermaid.tiny.js', '/vendor/qr.js'].includes(url.pathname)) {
+    if (req.method === 'GET' && ['/directory-browser.js', '/heartflow-ui.js', '/feishu-help.js', '/wecom-ui.js', '/conversation-state.js', '/mermaid-ui.js', '/vendor/mermaid/mermaid.tiny.js', '/vendor/qr.js'].includes(url.pathname)) {
       res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' });
       return fs.createReadStream(path.join(__dirname, url.pathname.slice(1))).pipe(res);
     }
@@ -2230,6 +2253,12 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store');
       try { const catalog = await subscriptionModels(); return sendJSON(res, 200, { basePath: '/codex-subscription', token: bridgeToken, ...catalog }); }
       catch (error) { return sendJSON(res, 503, { error: error.message }); }
+    }
+    if (parts[1] === 'deepseek-provider' && req.method === 'GET') {
+      res.setHeader('Cache-Control', 'no-store');
+      const env = await deepseekRoute();
+      if (!env) return sendJSON(res, 409, { error: '请先在 Claude Code 账号中启用一个代理。' });
+      return sendJSON(res, 200, { provider: 'my-agents', protocol: 'Anthropic Messages', baseURL: env.ANTHROPIC_BASE_URL, key: env.ANTHROPIC_AUTH_TOKEN, model: env.ANTHROPIC_MODEL });
     }
     const type = parts[1];
     if (type === 'heartflow') {
@@ -2344,9 +2373,18 @@ const server = http.createServer(async (req, res) => {
 
     if (type === 'workspaces') {
       res.setHeader('Cache-Control', 'no-store');
+      if (req.method === 'GET' && parts[2] === 'directories') {
+        const id = url.searchParams.get('machineId');
+        const host = id && registry.node(id === machineId() ? 'local' : id)?.host;
+        if (!host) return sendJSON(res, 409, { error: '执行机器未连接，暂时无法浏览目录' });
+        try {
+          const listing = await host.listDirectories({ dir: url.searchParams.get('path') || '~', hidden: url.searchParams.get('hidden') === '1', offset: Number(url.searchParams.get('offset') || 0) });
+          return sendJSON(res, 200, listing);
+        } catch (error) { return sendJSON(res, 400, { error: error.message }); }
+      }
       if (req.method === 'GET' && parts[2] === 'check') {
         try {
-          const target = workspaceStore.resolve({ machineId: url.searchParams.get('machineId') || machineId(), workspaceId: url.searchParams.get('workspaceId') || '', cwd: url.searchParams.get('path') || '' });
+          const target = workspaceStore.resolve({ machineId: url.searchParams.get('machineId'), workspaceId: url.searchParams.get('workspaceId') || '', cwd: url.searchParams.get('path') || '' });
           if (!registry.node(target.node)) throw new Error('执行机器未连接');
           const cwd = await registry.node(target.node).host.resolveDir(target.cwd);
           const id = url.searchParams.get('sessionId'), engine = url.searchParams.get('engine') || registry.defaultId();
@@ -2565,7 +2603,7 @@ const server = http.createServer(async (req, res) => {
       const byAccount = new Map();
       for (const r of captureStore.list()) {
         const requestedEngine=url.searchParams.get('engine')==='codex' ? 'codex' : 'claude';
-        if ((r.engine || 'claude') !== requestedEngine) continue;
+        if ((r.engine === 'deepseek' ? 'claude' : r.engine || 'claude') !== requestedEngine) continue;
         const id = r.upstreamId || 'unknown';
         const row = byAccount.get(id) || { id, name: r.upstreamName || (id === 'unknown' ? '未标记账号' : id), requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0, costKnown: true, lastUsedAt: '' };
         row.requests++;
@@ -2953,6 +2991,7 @@ server.on('error', e => {
 const runtimeRouting = {
   target: `http://127.0.0.1:${PROXY_PORT}`,
   engines: {
+    deepseek: deepseekRoute,
     async claude(options) {
       await accountPool?.refresh();
       const env = await accountRouteEnv(accountRouter, options);
@@ -2972,7 +3011,7 @@ const runtimeRouting = {
     }, { accounts: true }),
   },
 };
-const nodeHub = require('./node/hub').createNodeHub({ registry, token: auth?.token, dir: DATA_DIR, routing: runtimeRouting });
+nodeHub = require('./node/hub').createNodeHub({ registry, token: auth?.token, dir: DATA_DIR, routing: runtimeRouting });
 const addMachine = require('./node/provision').createMachineProvisioner({
   hub: nodeHub, reservedIds: () => [machineId(), ...(clusterConfig?.members || []).map(member => member.id)],
 });

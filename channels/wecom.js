@@ -38,9 +38,9 @@ function createWecom({ dir, panel, canStart, connect = connectWecom }) {
   function status() {
     const { secret, ...visible } = config;
     const recent = Object.hasOwn(saved.activity, config.botId) && saved.activity[config.botId];
-    const activity = recent ? { receivedAt: recent.receivedAt, chatType: recent.chatType, stage: recent.stage, errorCode: recent.errorCode } : null;
+    const activity = recent ? { receivedAt: recent.receivedAt, chatType: recent.chatType, stage: recent.stage, machineId: recent.machineId, engine: recent.engine, errorCode: recent.errorCode } : null;
     const hasHistory = !activity && saved.seen.some(key => JSON.parse(key)[0] === config.botId);
-    return { config: { ...visible, hasSecret: !!secret }, phase, lastError, ownerUserId: owner(), activity,
+    return { engines: panel.engines?.(), config: { ...visible, hasSecret: !!secret }, phase, lastError, ownerUserId: owner(), activity,
       lastMessageAt: activity?.receivedAt || (hasHistory ? saved.lastMessageAt : 0) };
   }
   function stop() {
@@ -96,7 +96,7 @@ function createWecom({ dir, panel, canStart, connect = connectWecom }) {
       next.allowedUsers = [...new Set(ids.map(id => id.trim()))];
     }
     if (input.engine !== undefined) {
-      if (!['claude', 'codex'].includes(input.engine)) throw Error('请选择 Claude Code 或 Codex');
+      if (!(panel.engines?.().map(item => item.id) || ['claude', 'codex']).includes(input.engine)) throw Error('请选择已接入的引擎');
       next.engine = input.engine;
     }
     if (input.workspaceId !== undefined) {
@@ -163,14 +163,15 @@ function createWecom({ dir, panel, canStart, connect = connectWecom }) {
         persist({ ...saved, activity: { ...saved.activity, [botId]: { ...recent, stage, errorCode: Number.isInteger(error?.code) ? error.code : undefined } } });
       }
     }
-    async function answer(text, finish = true) {
+    async function answer(text, finish = true, footer = '') {
       try {
-        const content = fitStream(text);
+        const frame = limit => fitStream(text, limit - Buffer.byteLength(footer)) + footer;
+        const content = frame(20480);
         try { await reply(stream, content, finish); }
         catch (error) {
           // Only a definite rejection permits sending a separate reply. A timeout may have delivered.
           if (!finish || !Number.isInteger(error.code) || !authorized() || !sendToChat) throw error;
-          await sendToChat(group ? body.chatid : user, fitStream(text, 4096));
+          await sendToChat(group ? body.chatid : user, frame(4096));
         }
         if (finish && authorized()) record('replied');
       } catch (error) { record('reply_failed', error); throw error; }
@@ -203,10 +204,14 @@ function createWecom({ dir, panel, canStart, connect = connectWecom }) {
         session = await panel.submit({ sessionId: binding?.id, engine, workspaceId: binding ? undefined : config.workspaceId || undefined, prompt, messageId, mode: 'queue' });
       } catch (error) { if (authorized()) await answer('任务未能启动。' + error.message); return; }
       if (!current()) return;
-      saved.bindings[key] = { id: session.sessionId, engine };
+      recent.machineId = session.machineId;
+      recent.engine = session.engine || engine;
+      saved.bindings[key] = { id: session.sessionId, engine: recent.engine };
       write(stateFile, saved);
       record('submitted');
-      observe(session.sessionId, messageId, authorized, answer);
+      const engineLabel = panel.engines?.().find(item => item.id === recent.engine)?.label || recent.engine;
+      const footer = session.machineId ? '\n\n执行机器：' + (panel.machineLabel?.(session.machineId) || session.machineId) + ' · ' + engineLabel : '';
+      observe(session.sessionId, messageId, authorized, (text, finished) => answer(text, finished, finished ? footer : ''));
     });
     starting.set(key, run);
     try { await run; } finally { if (starting.get(key) === run) starting.delete(key); }

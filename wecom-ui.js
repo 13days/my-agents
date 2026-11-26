@@ -24,7 +24,7 @@ async function renderWecom(revision) {
         <p data-owner></p><label>${t('其他可运行任务的成员 UserID', 'Additional member UserIDs')}<textarea rows="2" name="allowedUsers" spellcheck="false" placeholder="${t('每行一个 UserID', 'One UserID per line')}">${esc(config.allowedUsers.join('\n'))}</textarea></label>
         <p>${t('首位发消息的人自动成为 Owner，可以直接私聊或在群里 @机器人执行任务。其他成员可私聊获取 UserID，再添加到这里。', 'The first sender becomes the owner and can DM the bot or mention it in a group. Other members can DM for their UserID and be added here.')}</p></fieldset>
         <fieldset><legend>${t('新对话使用', 'New conversation defaults')}</legend><div class="channel-fields">
-        <label>${t('引擎', 'Engine')}<select name="engine"><option value="codex">Codex</option><option value="claude">Claude Code</option></select></label>
+        <label>${t('引擎', 'Engine')}<select name="engine">${(data.engines || [{id:'codex',label:'Codex'},{id:'claude',label:'Claude Code'}]).map(item => '<option value="'+esc(item.id)+'">'+esc(item.label)+'</option>').join('')}</select></label>
         <label>${t('项目文件夹', 'Project folder')}<select name="workspaceId"><option value="">${t('默认目录', 'Default folder')}</option>${workspaces.config.projects.map(item => '<option value="'+esc(item.id)+'">'+esc(item.name)+'</option>').join('')}</select></label></div>
         <p>${t('同一位成员在同一聊天中会继续原对话。发送 /new 开始新对话。工具授权在网页「对话」处理。', 'Messages from the same member in the same chat continue their conversation. Send /new to start over. Handle tool approvals in Conversations on the web.')}</p></fieldset>
         <footer><button type="submit" class="btn primary">${config.enabled ? t('保存设置', 'Save settings') : t('保存并连接', 'Save and connect')}</button>
@@ -46,7 +46,7 @@ async function renderWecom(revision) {
       const activity = status.activity;
       section.querySelector('[data-activity]').textContent = activity
         ? [new Date(activity.receivedAt).toLocaleString(), activity.chatType === 'group' ? rt('群聊', 'Group') : rt('私聊', 'DM'),
-           rt(...(stages[activity.stage] || stages.received)), activity.errorCode].filter(Boolean).join(' · ')
+           rt(...(stages[activity.stage] || stages.received)), activity.machineId && (rt('执行机器', 'Execution machine') + ' · ' + (workspaces.machines?.find(item => item.id === activity.machineId)?.label || activity.machineId)), activity.engine, activity.errorCode].filter(Boolean).join(' · ')
         : status.lastMessageAt
         ? rt('最近收信（旧版未记录回复回执）', 'Last received (reply receipt unavailable)') + ' · ' + new Date(status.lastMessageAt).toLocaleString()
         : rt('尚未收到消息。私聊发送 /whoami 测试连接。', 'No messages yet. DM /whoami to test.');

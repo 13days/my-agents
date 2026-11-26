@@ -1,0 +1,16 @@
+# Applies only to a panel-launched headless process. The credential stays in its environment.
+- id: llm-pi-ai
+  config:
+    providers:
+      my-agents:
+        api: anthropic-messages
+        apiKeyEnv: MY_AGENTS_DSH_KEY
+        baseURL: !!js process.env.MY_AGENTS_DSH_URL
+        headers:
+          x-my-agents-session: !!js process.env.MY_AGENTS_DSH_SESSION
+        models:
+          - id: !!js process.env.MY_AGENTS_DSH_MODEL
+- id: agent-default-model
+  config:
+    provider: my-agents
+    model: !!js process.env.MY_AGENTS_DSH_MODEL

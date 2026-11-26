@@ -42,7 +42,7 @@ test('WeCom long connection authenticates, fences membership and resumes only th
         const sessionId = input.sessionId || 'session-' + (sessions.size + 1);
         if (!sessions.has(sessionId)) sessions.set(sessionId, createChatJob({sessionId}));
         turns.push({ ...input, sessionId });
-        return { sessionId };
+        return input.prompt === 'two' ? { sessionId, machineId: 'devbox', engine: 'codex' } : { sessionId };
       },
       watch: (id, fn) => sessions.get(id).listen(fn),
     },
@@ -95,7 +95,7 @@ test('WeCom long connection authenticates, fences membership and resumes only th
   sessions.get(one.sessionId).publish('permission',{messageId:one.messageId,id:'approval'});
   finish(one,'first result'); finish(two,'second result');
   assert.equal((await final('a')).body.stream.content,'first result');
-  assert.equal((await final('b')).body.stream.content,'second result');
+  assert.equal((await final('b')).body.stream.content,'second result\n\n执行机器：devbox · codex');
   assert.deepEqual(frames('a').map(f => f.body.stream.finish),[false,false,true]);
   assert.equal(new Set(frames('a').map(f => f.body.stream.id)).size,1);
   assert.equal(frames('invalid').length + frames('group-stranger').length,0);

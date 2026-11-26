@@ -45,6 +45,7 @@ function localEngines(env = process.env) {
   };
   return [
     createClaudeEngine({ transcripts: { path: transcriptPath, messages: () => null }, nativeSessions: require('../core/claude-native-session').createClaudeNativeSessions({ home: claudeDir, transcriptPath }), env }),
+    require('../engines/deepseek').createDeepseekEngine({ env, dir: require('../core/data-dir').resolveDataDir({ claudeDir }).dir }),
     createCodexEngine({ sessions: createCodexSessions({ home: env.CODEX_HOME || path.join(os.homedir(), '.codex') }), env }),
   ];
 }

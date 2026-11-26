@@ -245,10 +245,15 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
       const enabled = snapshot.accounts.filter(a => a.enabled);
       let sessionId = '', model = '';
       try { const parsed = JSON.parse(body.toString()); sessionId = sessionIdOf(parsed); model = typeof parsed.model === 'string' ? parsed.model : ''; } catch {}
+      const trusted = req.headers.authorization === 'Bearer ' + config.localToken || req.headers['x-api-key'] === config.localToken;
+      const harnessSession = req.headers['x-my-agents-session'];
+      if (trusted && typeof harnessSession === 'string' && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(harnessSession)) {
+        sessionId = harnessSession.toLowerCase();
+        requestInfo.engine = 'deepseek';
+      }
       requestInfo.sessionId = sessionId;
       requestInfo.method = req.method;
       const delegated = req.headers['x-my-agents-account'];
-      const trusted = req.headers.authorization === 'Bearer ' + config.localToken || req.headers['x-api-key'] === config.localToken;
       if (delegated && (!trusted || !config.accounts.some(a => a.id === delegated && a.enabled))) { res.writeHead(403); return res.end(JSON.stringify({ error: '共享账号不可用或转发凭证无效' })); }
       const pinned = !isOAuth ? (delegated ? config.accounts.find(a => a.id === delegated) : sessionId && enabled.find(a => a.id === snapshot.sessionRoutes?.[sessionId])) : null;
       // A selected account is a preference, not a single point of failure. Owner
@@ -293,7 +298,7 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
         const entry = sessionId && live.get(sessionId);
         if (entry) Object.assign(entry, { accountId: account.id, accountName: account.name });
         const target = new URL(account.url);
-        const attemptInfo = { ...(index === 1 ? requestInfo : reserveCapture()), requestOrder: requestInfo.id, sessionId, method: req.method,
+        const attemptInfo = { ...(index === 1 ? requestInfo : reserveCapture()), requestOrder: requestInfo.id, sessionId, engine: requestInfo.engine, method: req.method,
           routing: { mode: snapshot.mode, reason: index > 1 ? 'failover' : pinned ? 'session_pin' : !snapshot.accounts.length || isOAuth ? 'passthrough' : snapshot.mode === 'manual' ? 'manual' : index > 1 ? 'failover' : snapshot.mode, attempt: index, requestedModel: model, actualModel: model } };
         const saveAttempt = (code, responseBody, stream = false, encoding = '', incomplete = false) => {
           if (lastAttemptCaptured) return; lastAttemptCaptured = true;
@@ -320,6 +325,7 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
         const association = associateBridge(account, trace);
         if (association) headers[TRACE_HEADER] = association;
         observeRoute({ ...attemptInfo, purpose, upstreamId: account.id, upstreamName: account.name, model: attemptInfo.routing.actualModel });
+        delete headers['x-my-agents-session'];
         delete headers['x-my-agents-account'];
         if (account.delegateAccount) headers['x-my-agents-account'] = account.delegateAccount;
         delete headers['accept-encoding'];
