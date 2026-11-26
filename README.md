@@ -4,7 +4,9 @@
 
 [English](README.en.md) · [使用手册](docs/user-guide.md)
 
-![在飞书发任务、跟进进度并生成分享卡](https://raw.githubusercontent.com/13days/my-agents/main/docs/feishu-share.gif)
+[![点击播放 my-agents 产品介绍，从飞书接续会话到网页协作](https://raw.githubusercontent.com/13days/my-agents/main/docs/feishu-share.gif)](https://cdn.jsdelivr.net/gh/13days/my-agents@bdadbb6c08c8ef17e2872f091494e7f7a53bc1bf/docs/my-agents-intro.mp4)
+
+**[▶ 播放产品介绍](https://cdn.jsdelivr.net/gh/13days/my-agents@bdadbb6c08c8ef17e2872f091494e7f7a53bc1bf/docs/my-agents-intro.mp4)** · 58 秒 · 中文旁白 · 中英字幕 · [下载 MP4](https://raw.githubusercontent.com/13days/my-agents/main/docs/my-agents-intro.mp4)
 
 *动图录自网关生成的飞书卡片的本地预览。下面的截图来自真实面板，使用示例账号、项目和对话。*
 
