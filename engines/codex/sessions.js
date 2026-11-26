@@ -7,6 +7,7 @@ const { messageTimestamp, annotateMessageTimings } = require('../../message-timi
 // Newer files wrap records as {timestamp, type, payload}; older ones store the
 // response items at top level. Both are normalized to the panel's message shape.
 const GATEWAY_START = '[my-agents 飞书发送上下文，本轮有效]\n', GATEWAY_END = '[/my-agents 飞书发送上下文]';
+const { titleText } = require('../../conversation-state');
 const ID_RE = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
 
 function stripGatewayContext(text) {
@@ -141,9 +142,9 @@ function createCodexSessions({ home } = {}) {
       if (kind === 'event_msg' && p.type === 'thread_settings_applied' && p.thread_settings?.model) state.model = p.thread_settings.model;
       if (kind === 'response_item' && p.type === 'message' && p.role === 'user') {
         const text = codexUserText(p.content);
-        if (!text) return;
+        if (!text && !p.content?.some?.(b => b?.type === 'input_image')) return;
         state.count++;
-        const line = text.replace(/\s+/g, ' ').slice(0, 200);
+        const line = titleText(text).slice(0, 200) || '图片对话';
         if (!state.firstTitle) state.firstTitle = line;
         state.title = line; state.promptAt = at || state.promptAt;
       }

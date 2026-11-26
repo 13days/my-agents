@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
-const normalizeTitle = text => String(text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+const { titleText } = require('./conversation-state');
+const normalizeTitle = text => titleText(text).slice(0, 80);
 function isManualTitle(meta = {}, firstTitle = '') {
   if (meta.titleSource) return meta.titleSource === 'manual';
   if (!meta.title) return false;

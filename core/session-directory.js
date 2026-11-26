@@ -1,3 +1,4 @@
+const { titleText } = require('../conversation-state');
 const time = value => typeof value === 'number' ? value : Date.parse(value || '') || 0;
 function searchSessions(rows, query = '') {
   const words = String(query).toLowerCase().trim().split(/\s+/).filter(Boolean);
@@ -8,7 +9,9 @@ function searchSessions(rows, query = '') {
 }
 function normalize(row, source, native = false) {
   const project = row.cwd || row.project || '', split = project.split('/.claude/worktrees/');
-  return { ...row, machineId: native ? source : row.machineId || (row.node && row.node !== 'local' ? row.node : source), project,
+  const prompt = titleText(row.latestPrompt);
+  const title = row.titleSource === 'manual' ? row.title : titleText(row.title) || (row.title ? prompt || '图片对话' : row.title);
+  return { ...row, title, ...(row.latestPrompt ? { latestPrompt: prompt || '图片对话' } : {}), machineId: native ? source : row.machineId || (row.node && row.node !== 'local' ? row.node : source), project,
     repository: row.worktree?.repository || row.repository || split[0] || project,
     workspaceLabel: split.length > 1 ? split[1].split('/')[0] : row.workspaceLabel || '', native: native || row.native === true };
 }

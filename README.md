@@ -23,7 +23,7 @@
 已安装 Node.js 18+ 和 npm 的机器，可以用一条命令启动：
 
 ```sh
-npx --yes my-agents@latest
+npx --yes @wuchupeng/my-agents@latest
 ```
 
 新 Mac 或 Linux 开发机上只有 Git 和 curl？使用源码安装命令，它会在需要时自动下载并校验 Node.js 24 LTS（Intel / ARM 64 位）。

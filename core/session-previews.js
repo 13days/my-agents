@@ -1,8 +1,9 @@
 const { messageTimestamp } = require('../message-timing');
+const { titleText } = require('../conversation-state');
 const shorten = (text, size) => Array.from(text).slice(0, size).join('');
 // Attachment transport markup is not a useful conversation label.
 function previewText(text) {
-  return String(text || '').replace(/<\/?image\b[^>]*>/gi, '').replace(/\[Image #\d+\]/g, '')
+  return titleText(text)
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[邮箱已隐藏]').replace(/\s+/g, ' ').trim();
 }
 function userMessages(history) {

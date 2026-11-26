@@ -84,7 +84,7 @@ async function provisionMachine({ ssh: target, repoDir = path.resolve(__dirname,
   const installed = !existingCommand && !found.repo && !found.panelSource;
   if (installed) await install(target, { repoDir, hasGit: found.git, step, runtimePath });
   else {
-    const repair = existingCommand ? '' : `cd ${source}; node -e 'if (require("./package.json").name !== "my-agents") process.exit(1)';
+    const repair = existingCommand ? '' : `cd ${source}; node -e 'if (!["my-agents","@wuchupeng/my-agents"].includes(require("./package.json").name)) process.exit(1)';
       node -e 'require("ws")' 2>/dev/null || npm install --omit=dev --no-package-lock --no-audit --no-fund;`;
     await ssh(target, `set -e; ${runtimePath}; ${repair} ${server} node --help`, { timeout: 600000 });
   }

@@ -85,7 +85,7 @@ function proxyBlock(rcFile) {
   if (rcFile.endsWith('config.fish')) {
     return `${RC_START}
 # Routes \`claude\` through the local inspector proxy when the panel is running.
-# Remove with: npx my-agents uninstall-proxy
+# Remove with: npx @wuchupeng/my-agents uninstall-proxy
 function claude
     set -l my_agents_cli "$CLAUDE_CLI"
     if test -z "$my_agents_cli"
@@ -106,7 +106,7 @@ ${RC_END}`;
   }
   return `${RC_START}
 # Routes \`claude\` through the local inspector proxy when the panel is running.
-# Falls back to a direct connection when the panel is off. Remove with: npx my-agents uninstall-proxy
+# Falls back to a direct connection when the panel is off. Remove with: npx @wuchupeng/my-agents uninstall-proxy
 claude() (
   my_agents_cli="$CLAUDE_CLI"
   if [ -z "$my_agents_cli" ]; then
@@ -637,7 +637,7 @@ function transcriptHead(fp) {
     if (!head.cwd && d.cwd) head.cwd = d.cwd;
     if (!head.title && d.type === 'user' && !d.isMeta && d.message) {
       const t = transcriptUserText(d.message.content);
-      if (t) head.title = t.replace(/\s+/g, ' ').slice(0, 200);
+      if (t) head.title = normalizeTitle(t) || '图片对话';
     }
     if (head.cwd && head.title) break;
   }
@@ -2894,7 +2894,7 @@ const server = http.createServer(async (req, res) => {
 server.on('error', e => {
   if (e.code === 'EADDRINUSE') {
     console.error(`\n⚠ 端口 ${PORT} 已被占用——面板可能已经在运行了：http://localhost:${PORT}`);
-    console.error(`  直接在浏览器打开即可；或换端口启动：  PORT=其它端口 npx my-agents\n`);
+    console.error(`  直接在浏览器打开即可；或换端口启动：  PORT=其它端口 npx @wuchupeng/my-agents\n`);
   } else {
     console.error(`启动失败：${e.message}`);
   }

@@ -21,7 +21,7 @@ Choose a project and an engine, then submit. The task card updates as the agent 
 With Node.js 18+ and npm, start the panel with:
 
 ```sh
-npx --yes my-agents@latest
+npx --yes @wuchupeng/my-agents@latest
 ```
 
 On a fresh Mac or Linux host with Git and curl, use the source installer:

@@ -1,6 +1,6 @@
 # Migrating to my-agents
 
-The project, npm package and executable are now named `my-agents`. The repository is [13days/my-agents](https://github.com/13days/my-agents). The npm package is not published yet. Before the first release, run a local checkout with `npm install` and `npm start`.
+The project and executable are named `my-agents`. Install the public npm package with `npm install -g @wuchupeng/my-agents`, or run a local checkout with `npm install` and `npm start`. [Source repository](https://github.com/13days/my-agents)
 
 ## Keep your data
 

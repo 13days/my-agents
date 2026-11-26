@@ -3,6 +3,12 @@
   if (typeof module === 'object' && module.exports) module.exports = value;
   else root.ConversationState = value;
 })(typeof globalThis === 'object' ? globalThis : this, function () {
+  // Native CLIs include attachment descriptors in user text. Historical titles
+  // may end inside a descriptor because older clients clipped the raw prompt.
+  function titleText(text) {
+    return String(text || '').replace(/<\/?image\b[^>]*(?:>|$)/gi, ' ')
+      .replace(/\[Image\s+#\d+\]/gi, ' ').replace(/\s+/g, ' ').trim();
+  }
   const warningPhases = { storage_error: '存储异常', native_handoff: '等待原会话接续', native_attachment: '已连接原终端', native_background: '等待后台任务', native_summary: '等待原会话汇总', native_approval: '等待原窗口确认', native_delivery_pending: '投递待确认', node_reconnecting: '等待节点重连', recovery_unknown: '结果待核对', recovery: '结果待核对' };
   function create() { return { text: '', tools: new Map(), reasoning: new Map(), permissions: new Map(), phase: '正在处理', done: false, nativeAttached: false }; }
   function apply(view, event, data = {}) {
@@ -23,5 +29,5 @@
     return view;
   }
   const translations = { '等待后台任务': ['Waiting for background tasks','バックグラウンドタスク待ち'], '等待原会话汇总': ['Waiting for terminal summary','元のセッションの要約待ち'], '等待原窗口确认': ['Waiting for terminal approval','元のターミナルの承認待ち'], '投递待确认': ['Delivery awaiting confirmation','送信確認待ち'], '等待节点重连': ['Waiting for node reconnection','ノードの再接続待ち'], '结果待核对': ['Outcome needs review','結果の確認が必要'], '已连接原终端': ['Original terminal connected','元のターミナルに接続済み'], '等待原会话接续': ['Waiting to continue the original session','元のセッションの再開待ち'], '连接重试中': ['Retrying connection','接続を再試行中'] };
-  return { create, apply, labels: phase => translations[phase] || [phase, phase] };
+  return { titleText, create, apply, labels: phase => translations[phase] || [phase, phase] };
 });

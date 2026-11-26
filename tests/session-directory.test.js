@@ -52,3 +52,17 @@ test('handoff follows the native worktree directory without changing recorded ma
   assert.equal(liveSessionMetadata(meta, { ...item, machineId: 'other' }), meta);
   assert.equal(liveSessionMetadata(meta, { ...item, sourceUnavailable: true }), meta);
 });
+
+test('legacy truncated image titles use the full native caption in the directory', () => {
+  const marker = '<image name="[Image #1]" path="/private/local/file.png"></image>[Image #1]';
+  const dir = createSessionDirectory({selfId:()=>'local',peers:()=>[],local:()=>[
+    {id:'caption',title:marker.slice(0,40),latestPrompt:marker+' 请看这个问题'},
+    {id:'image',title:marker.slice(0,40)},
+    {id:'manual',title:'自己的名称',titleSource:'manual',latestPrompt:marker},
+  ]});
+  const rows = dir.snapshot();
+  assert.equal(rows.find(r=>r.id==='caption').title,'请看这个问题');
+  assert.equal(rows.find(r=>r.id==='image').title,'图片对话');
+  assert.equal(rows.find(r=>r.id==='manual').title,'自己的名称');
+  assert.doesNotMatch(JSON.stringify(rows),/private\/local/);
+});

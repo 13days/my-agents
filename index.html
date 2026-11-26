@@ -388,7 +388,7 @@ function updateBrowserTitle() {
   const section = t('tabs')[state.type];
   const heading = state.type === 'sessions' && $('#title').firstChild.textContent.trim();
   const label = heading || section;
-  document.title = label ? label + ' · my-agents' : 'my-agents';
+  document.title = label ? 'my-agents｜' + label : 'my-agents';
 }
 function updateWorkspaceChrome() {
   updateBrowserTitle();
@@ -1278,7 +1278,7 @@ async function loadReplay(id) {
         wrap.appendChild(note);
       } else {
         // 真没装：给开启方法
-        const cmd = `npx my-agents install-proxy`;
+        const cmd = `npx @wuchupeng/my-agents install-proxy`;
         note.innerHTML = `${esc(t('replayNoCapTitle'))}<br><br><code style="background:var(--code-bg);border:1px solid var(--border);padding:2px 8px;border-radius:6px;font-family:ui-monospace,monospace;color:var(--accent2)">${esc(cmd)}</code> <button class="btn" id="ncCopy" style="padding:3px 10px;font-size:11.5px;margin-left:6px">${esc(t('insCopy'))}</button><br><br>${esc(t('replayNoCapHint'))}`;
         wrap.appendChild(note);
         setTimeout(() => { const b = $('#ncCopy'); if (b) b.onclick = () => { navigator.clipboard.writeText(cmd); toast('✓'); }; }, 0);
@@ -2947,7 +2947,7 @@ async function openSessionChat(id, { fresh=false } = {}) {
     if (!Array.isArray(d.messages)) throw new Error(rt('会话数据暂未就绪，请稍后重试', 'Session data is not ready. Please try again.'));
     chatView = { sessionId: id, cwd: d.project || '', worktree: d.worktree, messages: d.messages, truncated: d.truncated, historyBefore: d.historyBefore, revision: d.revision, machineId: d.machineId, engine: d.engine || LEGACY_ENGINE };
     const first = d.messages.find(m => m.role === 'user');
-    chatChrome(state.items.find(item => item.key === id)?.name || (first ? first.text.replace(/\s+/g, ' ').slice(0, 60) : id.slice(0, 8)), (d.project || '').replace(/^\/Users\/[^/]+/, '~'));
+    chatChrome(state.items.find(item => item.key === id)?.name || (first ? ConversationState.titleText(first.text).slice(0, 60) || rt('图片对话','Image conversation') : id.slice(0, 8)), (d.project || '').replace(/^\/Users\/[^/]+/, '~'));
     renderChat();
     if (d.liveReplay) streamChat(chatView, { reconnect: true });
   } catch (e) { toast(t('loadFail') + e.message, false); }
@@ -3203,14 +3203,14 @@ function updateChatSendState(v) {
 function registerChatInSidebar(v, prompt) {
   if (!v.sessionId) v.sessionId = crypto.randomUUID();
   if (!state.items.some(item => item.key === v.sessionId)) {
-    const name = prompt.replace(/\s+/g, ' ').slice(0, 80) || rt('图片对话', 'Image conversation');
+    const name = ConversationState.titleText(prompt).slice(0, 80) || rt('图片对话', 'Image conversation');
     v.optimisticItem = { key: v.sessionId, name, description: `${v.cwd.split('/').filter(Boolean).pop() || '/'} · ${new Date().toLocaleDateString('sv-SE')}`, origin: 'user', titleSource: 'auto', engine: v.engine };
     state.items.unshift(v.optimisticItem);
     $('#title').firstChild.textContent = name;
   }
   else {
     const index = state.items.findIndex(item => item.key === v.sessionId);
-    if (state.items[index].titleSource !== 'manual') state.items[index].name = prompt.replace(/\s+/g, ' ').slice(0, 80) || rt('图片对话', 'Image conversation');
+    if (state.items[index].titleSource !== 'manual') state.items[index].name = ConversationState.titleText(prompt).slice(0, 80) || rt('图片对话', 'Image conversation');
     state.items.unshift(...state.items.splice(index, 1));
   }
   $('#title').firstChild.textContent = state.items.find(item => item.key === v.sessionId).name;

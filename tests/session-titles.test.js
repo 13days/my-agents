@@ -35,3 +35,11 @@ test('latest transcript prompt scans backwards past large replies, tools and int
     assert.equal(vm.runInContext('latestTranscriptPrompt(file).title', context), 'Another question');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('attachment descriptors do not hide the caption or expose local paths in conversation titles', () => {
+  const marker = '<image name="[Image #1]" path="/private/' + 'long-path/'.repeat(25) + 'photo.png"></image>[Image #1]';
+  assert.equal(normalizeTitle(marker + '\n怎么变成这样了'), '怎么变成这样了');
+  assert.equal(autoTitlePatch({}, marker).title, '图片对话');
+  assert.equal(normalizeTitle(marker.slice(0, 80)), '');
+  assert.equal(normalizeTitle('检查 /tmp/photo.png'), '检查 /tmp/photo.png');
+});

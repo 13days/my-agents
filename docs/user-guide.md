@@ -21,7 +21,7 @@ npm install
 npm start
 ```
 
-打开 `http://localhost:4321`。npm 包尚未发布，当前不要把 `npx my-agents` 当作首次安装入口。
+打开 `http://localhost:4321`。已安装 Node.js 18+ 的机器也可以用 `npx --yes @wuchupeng/my-agents@latest` 启动。
 
 在自己的 npm 可写安装前缀中安装或更新外部 CLI：
 
