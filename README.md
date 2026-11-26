@@ -1,12 +1,22 @@
 # <img src="https://raw.githubusercontent.com/13days/my-agents/main/assets/my-agents.png" width="42" height="42" alt=""> my-agents
 
-在飞书里把任务交给 Codex 或 Claude Code。它在你选的机器和项目目录里工作，把结果回到原话题。一个终端启动面板，就能从浏览器或飞书调度多台机器。你也可以留在熟悉的聊天程序里，通过代理选用不同模型。
+在 Codex 或 Claude Code 终端开始的对话，出门后可以在飞书接着聊，回到电脑也能在网页或原终端继续。前面问过什么、改过什么，都留在同一个会话里。一个面板就能调度多台机器，也能让同一个引擎通过代理使用不同模型。
 
 [English](README.en.md) · [使用手册](docs/user-guide.md)
 
 ![在飞书发任务、跟进进度并生成分享卡](https://raw.githubusercontent.com/13days/my-agents/main/docs/feishu-share.gif)
 
 *虚构任务演示，飞书部分按实际生成的卡片数据预览。*
+
+## 在终端、飞书和网页接着聊
+
+1. **在终端开始。** 比如，你在项目目录里用 Codex 或 Claude Code 问「这周合入了哪些产品更新？」。两种引擎各自保存会话，后面接手的是你选中的那一条。
+2. **出门后用飞书接手。** 给机器人发 `/sessions 产品更新`，按机器、项目和最近的问题找到刚才的会话，点「切换到此会话」。直接发「把第二条展开，写给设计组看」，它就能接着上文回答。
+3. **回到电脑继续。** 在网页的「对话」里打开同一条记录，可以看到飞书里的追问和答复，继续改稿。也可以回到原终端接着聊。如果窗口已经关闭，在原机器的项目目录用 `codex resume <会话ID>` 或 `claude --resume <会话ID>` 恢复。
+
+要接手仍开着的终端窗口，Codex 需要原机器的 daemon 已加载该会话，Claude Code 需要原窗口允许接收会话消息。[原终端接续说明](docs/user-guide.md)
+
+![在网页中接着查看同一场关于产品更新的对话](https://raw.githubusercontent.com/13days/my-agents/main/docs/conversation-preview.png)
 
 ## 从飞书里用一次
 
@@ -15,8 +25,6 @@
 > /new 帮我看一下这个项目本周合入的改动，整理三条给团队看的更新。
 
 选好项目和引擎，提交任务。完成后，卡片直接展示写好的三条更新。展开底部的「详情与操作」可以看工具记录。想改口吻，直接在话题里说「改成发给设计同学的版本」。想发到周会群，点 **详情与操作 → 生成分享卡**，预览正文，再用飞书转发。卡片底部的「my-agents」链接会带收件人回到这里。
-
-已经在终端里做了一半？发 `/sessions 关键词`，选中原来的会话再继续。
 
 ## 启动第一台
 
@@ -38,8 +46,6 @@ curl -fsSL https://raw.githubusercontent.com/13days/my-agents/main/install.sh | 
 2. **接上飞书。** 打开「聊天软件」，点「扫码创建机器人」。如果已有机器人，也可以填入应用凭证。跟随页面完成配对和卡片按钮授权。
 3. **发第一条任务。** 私聊机器人，发送上面的 `/new` 示例。执行进度和结果都会回到飞书。 [飞书卡片与命令](docs/feishu-interaction.md)
 
-![在浏览器里继续同一个项目对话](https://raw.githubusercontent.com/13days/my-agents/main/docs/conversation-preview.png)
-
 <details>
 <summary>已经有开发环境，想从源码运行</summary>
 
@@ -60,7 +66,7 @@ MY_AGENTS_NO_PROXY_SETUP=1 npm start
 
 SSH 连不进去，但开发机能访问面板时，展开「其他接入方式」，复制接入命令到开发机运行即可。
 
-比如，你想让笔记本上的 Claude Code 检查前端，同时让 Linux 开发机上的 Codex 跑测试。打开两个对话，各选自己的机器和项目目录，就可以在同一个面板看两边的进度。若已有终端会话，可以在飞书发 `/sessions 关键词` 找回它，继续在原来的机器上做。
+比如，你想让笔记本上的 Claude Code 检查前端，同时让 Linux 开发机上的 Codex 跑测试。打开两个对话，各选自己的机器和项目目录，就可以在同一个面板看两边的进度。
 
 在飞书里，发 `/node` 查看在线机器。假设开发机名为 `devbox`、项目已在 `~/repos/web`，发 `/node devbox ~/repos/web`，然后在同一话题发「跑一下项目的测试」。命令和文件操作都会在开发机的这份代码上执行。
 
