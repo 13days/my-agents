@@ -4,7 +4,7 @@
 
 [![Play the 58-second product tour showing a terminal conversation continued in Feishu](https://raw.githubusercontent.com/13days/my-agents/main/docs/product-tour-en.png)](https://cdn.jsdelivr.net/gh/13days/my-agents@bdadbb6c08c8ef17e2872f091494e7f7a53bc1bf/docs/my-agents-intro.mp4)
 
-Start a conversation in Codex or Claude Code, pick it up in Feishu on your phone, and continue in your browser or the original terminal. A ChatGPT subscription with Codex access can also power GPT in Claude Code, where you can keep editing files and running commands. [Download the tour (MP4)](https://raw.githubusercontent.com/13days/my-agents/main/docs/my-agents-intro.mp4)
+Start a conversation in Codex or Claude Code, pick it up in Feishu on your phone, and continue in your browser or the original terminal. You can use Claude Code without access to a Claude model. Connect your own compatible gateway, or use GPT through the Codex subscription proxy with a ChatGPT subscription that includes Codex. [Download the tour (MP4)](https://raw.githubusercontent.com/13days/my-agents/main/docs/my-agents-intro.mp4)
 
 ## Continue the same conversation in the terminal, chat, or browser
 
@@ -44,7 +44,7 @@ curl -fsSL https://raw.githubusercontent.com/13days/my-agents/main/install.sh | 
 
 The installer uses your existing Node.js 18+ and npm when available. On Intel and ARM 64-bit systems it can download a checksum-verified Node.js 24 LTS runtime into your home directory. The source lives in `~/.local/share/my-agents/source`. The panel runs in the foreground. Use the same command to start it again.
 
-1. Open **[localhost:4321](http://localhost:4321)**. Install and sign in to [Codex](https://developers.openai.com/codex/cli/) or [Claude Code](https://code.claude.com/docs/en/quickstart) on the machine that will run your task. Choose **Conversations → New chat**, pick a project, and ask how to run it.
+1. Open **[localhost:4321](http://localhost:4321)**. Install Codex or Claude Code on the machine that will run your task. Sign in with your account, or connect Claude Code through one of the two proxies below. Choose **Conversations → New chat**, pick a project, and ask how to run it. [Install Codex](https://developers.openai.com/codex/cli/) · [Install Claude Code](https://code.claude.com/docs/en/quickstart)
 2. Under **Chat apps**, scan the setup QR code or enter an existing bot’s credentials. Follow the pairing and card-button authorization prompts.
 3. Send the bot the `/new` example above. You can follow its progress in the thread. [Feishu cards and commands (Chinese)](docs/feishu-interaction.md)
 
@@ -82,15 +82,20 @@ On a Mac, turn on keep-awake under the Feishu connection’s runtime settings to
 
 An execution node is enough to run remote tasks. To keep receiving Feishu messages when your laptop goes offline, run three persistent full panels. The other two can form a majority and elect a new receiver. [Cluster setup and failover (Chinese)](docs/cluster-setup.md)
 
-## Use different models in the same coding engine
+## Use Claude Code without a Claude model
 
-Claude Code or Codex manages the conversation, files, and tools. Your account and proxy supply the model. For example, use a fast model for a routine edit, then choose a reasoning model in the same Feishu thread for a difficult bug.
+Open **Computers & AI accounts → AI accounts → Claude Code** and choose the model access you already have. With either option, Claude Code reads and edits project files and runs commands on the computer you select.
 
-1. In **Computers & AI accounts → AI accounts**, choose Claude Code or Codex and add a subscription or proxy account. Set **Default model for new chats** from the available list. Each engine has its own default.
-2. Send `/model` in a Feishu thread to choose the model for its next turn. Send `/model default` to restore the default. After a reply, open **详情与操作** to inspect the observed model and proxy. A fixed model mapping on the proxy can override the selection.
-3. To use a Codex subscription from Claude Code, open the Claude Code subscription proxy configuration in the Codex account pool. Use it in a separate Claude configuration directory. Claude Code still runs tools on the selected machine, while the Codex subscription handles model requests. [Configuration and supported features (Chinese)](docs/codex-subscription-proxy.md)
+| What you have | How to connect |
+| --- | --- |
+| A gateway compatible with the Anthropic Messages API | Choose **Connect a custom proxy**. Paste the Claude Code configuration from your gateway, or enter its URL and token. Save the account, then open **Choose model** to see the models your gateway offers. |
+| A ChatGPT subscription that includes Codex | Sign in under **AI accounts → Codex → Add account → Sign in with a subscription**. Once the subscription is in the pool, choose **Use Codex subscription proxy → Set up a Claude Code account**, review the model, and save. Claude Code can now use GPT through your subscription. |
 
-![The default model picker in the Claude Code account pool showing models from the example gateway](https://raw.githubusercontent.com/13days/my-agents/main/docs/engine-models-preview.png)
+Set the saved account as preferred in the panel, or send `/route` in a Feishu thread to see and select accounts. To use the same subscription in a standalone terminal, the proxy dialog also provides a separate Claude Code configuration and its launch command. [Terminal setup and supported features (Chinese)](docs/codex-subscription-proxy.md)
+
+![Claude Code account settings with both the custom proxy and Codex subscription proxy options](https://raw.githubusercontent.com/13days/my-agents/main/docs/engine-models-preview.png)
+
+Claude Code and Codex each have a **Default model for new chats** setting. Send `/model` in a Feishu thread to choose the model for its next turn, or `/model default` to restore the default. A fixed mapping on your gateway can override this selection. Open **详情与操作** on the completed reply to see the recorded model and proxy.
 
 ## Let the assistant follow your chats
 

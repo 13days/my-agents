@@ -120,7 +120,9 @@ Codex CLI 与扩展会共用登录缓存；在同一目录退出或换号，可�
 
 Claude 原生凭证从 macOS 钥匙串或对应配置目录的 `.credentials.json` 发现；Codex 从 `CODEX_HOME/auth.json` 发现。自定义 Claude 登录目录应与面板 / 节点的 `CLAUDE_CONFIG_DIR` 一致。原生登录方法见 [Claude Code 官方认证说明](https://code.claude.com/docs/en/authentication)。
 
-代理账号点击当前引擎池的「添加代理账号」填写地址与 Token：Claude 代理应兼容 Anthropic Messages API，Codex 代理应兼容 OpenAI Responses API，通常使用以 `/v1` 结尾的地址。不要将聊天网页地址当作 API 地址。
+使用自定义网关时，在「电脑与 AI 账号 → AI 账号 → Claude Code」点「连接自定义代理」。网关需要支持 Anthropic Messages API。粘贴 Claude Code 的 env 配置，或填写网关地址和 Token，保存后可在账号的「选择模型」里选用网关提供的模型。若希望独立启动的终端 Claude Code 也用这个账号，在同一页的「终端 Claude 接入与抓包」点击「一键配置」，再重新启动 Claude Code。
+
+Codex 自定义网关从「Codex → 添加账号 → 代理 / API 账号」接入，地址应为兼容 OpenAI Responses API 的端点，通常以 `/v1` 结尾。
 
 - **自动故障切换**：优先选定账号，符合条件的失败再选择可用账号。
 - **轮询**：新选择在可用账号间轮转；会话尽量保持账号稳定。
@@ -225,7 +227,7 @@ node server.js service status
 
 ### Claude Code 使用 Codex 订阅
 
-在 Codex 账号池点击「Claude Code 使用订阅代理」，复制独立配置。此入口只使用共享 Codex 订阅，不会回退到 API 账号。工具仍在 Claude Code 所在机器执行。配置与限制见 [Codex 订阅代理](codex-subscription-proxy.md)。
+在「AI 账号 → Codex」登录带 Codex 权限的 ChatGPT 订阅，然后在 Claude Code 账号页点「使用 Codex 订阅代理」。选择「填入 Claude Code 账号」并保存后，可为面板和飞书任务选择它。使用独立终端时，选择「复制配置」并按弹窗里的命令启动。可用 GPT 模型与额度来自订阅，文件和工具操作仍由 Claude Code 在所选机器上完成。 [配置与支持范围](codex-subscription-proxy.md)
 
 ### 从终端会话接到 IM
 

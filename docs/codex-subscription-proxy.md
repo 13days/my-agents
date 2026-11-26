@@ -4,9 +4,10 @@
 
 ## 获取配置
 
-在「电脑与 AI 账号 → AI 账号 → Codex」账号池中点击「Claude Code 使用订阅代理」，复制 JSON 配置。模型从订阅账号的实际模型目录获取，不硬编码默认模型。配置包含独立代理密钥，不包含订阅 access token 或 refresh token。
-
-建议把配置保存到独立目录，例如 `~/.claude-codex-proxy/settings.json`，再运行：
+1. 打开「电脑与 AI 账号 → AI 账号 → Codex」。如果还没有带 Codex 权限的 ChatGPT 订阅账号，点「添加账号 → 登录订阅账号」，完成官方登录。
+2. 在 Claude Code 账号页点「使用 Codex 订阅代理」，或在 Codex 账号页点「在 Claude Code 使用 Codex 订阅代理」。弹窗显示当前订阅目录提供的模型。
+3. **面板和飞书**可以点「填入 Claude Code 账号」，核对后保存。要用这个账号执行任务，可在面板设为首选，或在飞书话题发 `/route` 选择账号。
+4. **独立终端**可以点「复制配置」，将 JSON 保存到新建的 `~/.claude-codex-proxy/settings.json`，然后运行以下命令。配置包含可使用此代理的专用密钥，请保存在自己的配置目录。
 
 ```bash
 CLAUDE_CONFIG_DIR="$HOME/.claude-codex-proxy" claude

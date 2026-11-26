@@ -2178,6 +2178,7 @@ const server = http.createServer(async (req, res) => {
     const denied = auth.check(req);
     if (denied) return sendJSON(res, 403, { error: denied });
     if (parts[1] === 'codex-bridge' && req.method === 'GET') {
+      res.setHeader('Cache-Control', 'no-store');
       try { const catalog = await subscriptionModels(); return sendJSON(res, 200, { basePath: '/codex-subscription', token: bridgeToken, ...catalog }); }
       catch (error) { return sendJSON(res, 503, { error: error.message }); }
     }

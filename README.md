@@ -4,7 +4,7 @@
 
 [![播放 58 秒产品介绍：在飞书追问终端里那条产品更新](https://raw.githubusercontent.com/13days/my-agents/main/docs/product-tour-zh.png)](https://cdn.jsdelivr.net/gh/13days/my-agents@bdadbb6c08c8ef17e2872f091494e7f7a53bc1bf/docs/my-agents-intro.mp4)
 
-在终端用 Codex 或 Claude Code 开始的对话，出门后可以在飞书接手，回到电脑也能在网页或原终端继续。手上有带 Codex 使用权的 ChatGPT 订阅，还可以用它在 Claude Code 里调用 GPT，照常改文件、跑命令。 [下载介绍视频（MP4）](https://raw.githubusercontent.com/13days/my-agents/main/docs/my-agents-intro.mp4)
+在终端用 Codex 或 Claude Code 开始的对话，出门后可以在飞书接手，回到电脑也能在网页或原终端继续。没有 Claude 模型也能用 Claude Code 改文件、跑命令。你可以接入自己的兼容网关，也可以通过 Codex 订阅代理，让带 Codex 权限的 ChatGPT 订阅提供 GPT 模型。 [下载介绍视频（MP4）](https://raw.githubusercontent.com/13days/my-agents/main/docs/my-agents-intro.mp4)
 
 ## 在终端、飞书和网页接着聊
 
@@ -44,7 +44,7 @@ curl -fsSL https://raw.githubusercontent.com/13days/my-agents/main/install.sh | 
 
 打开 **[localhost:4321](http://localhost:4321)**。使用源码安装命令时，代码放在 `~/.local/share/my-agents/source`，面板在当前终端运行。下次可以重用同一条命令。
 
-1. **先跑通本机。** 在要执行任务的机器上安装并登录 [Codex](https://developers.openai.com/codex/cli/) 或 [Claude Code](https://code.claude.com/docs/en/quickstart)。在「对话 → ＋ 新对话」选项目，试试「这个项目怎么启动？」。
+1. **先跑通本机。** 在执行任务的机器上安装 Codex 或 Claude Code。有对应账号可以直接登录，使用 Claude Code 的人也可以接入下面的两种代理。在「对话 → ＋ 新对话」选项目，试试「这个项目怎么启动？」。 [Codex 安装](https://developers.openai.com/codex/cli/) · [Claude Code 安装](https://code.claude.com/docs/en/quickstart)
 2. **接上飞书。** 打开「聊天软件」，点「扫码创建机器人」。如果已有机器人，也可以填入应用凭证。跟随页面完成配对和卡片按钮授权。
 3. **发第一条任务。** 私聊机器人，发送上面的 `/new` 示例。执行进度和结果都会回到飞书。 [飞书卡片与命令](docs/feishu-interaction.md)
 
@@ -82,15 +82,20 @@ SSH 连不进去，但开发机能访问面板时，展开「其他接入方式�
 
 只需要远程执行时，加执行节点就够了。如果希望笔记本关机后飞书机器人仍在线，可以部署三台常驻完整面板。主面板离线时，其余两台形成多数派，其中一台接管后续消息。 [集群搭建与接管](docs/cluster-setup.md)
 
-## 同一个引擎，按任务选模型
+## 没有 Claude 模型，也能用 Claude Code
 
-Claude Code 或 Codex 负责读文件、跑命令和维护会话。回答问题的模型由账号和代理提供。比如，日常修改可以用响应快的模型，遇到复杂排查，再在同一飞书话题换一个擅长推理的模型。
+打开 **电脑与 AI 账号 → AI 账号 → Claude Code**，按你手上已有的账号选一种。两种方式都由 Claude Code 在所选电脑上读写项目文件、运行命令。
 
-1. **接入模型。** 打开「电脑与 AI 账号 → AI 账号」，选择 Claude Code 或 Codex，添加订阅或代理账号。在「新对话默认模型」里，从该引擎可用的列表选择默认值。两个引擎分别设置。
-2. **给当前会话换模型。** 在飞书话题发 `/model`，从列表选一个，下一轮生效。发 `/model default` 恢复默认。任务结束后，展开「详情与操作」查看本轮记录到的实际模型和代理。若代理设置了固定模型映射，最终模型由该规则决定。
-3. **在 Claude Code 里用 Codex 订阅。** 在 Codex 账号池打开「Claude Code 使用订阅代理」，按提示把配置放入独立的 Claude 配置目录。此后 Claude Code 仍在选定机器执行工具，模型请求交给 Codex 订阅池。 [配置示例和支持范围](docs/codex-subscription-proxy.md)
+| 你手上有什么 | 怎么接入 |
+| --- | --- |
+| 兼容 Anthropic Messages API 的网关 | 点 **连接自定义代理**。粘贴网关提供的 Claude Code 配置，或手动填地址和 Token。保存后可在账号的「选择模型」里查看网关提供的模型。 |
+| 带 Codex 权限的 ChatGPT 订阅 | 在 **AI 账号 → Codex → 添加账号 → 登录订阅账号** 完成登录。已有订阅账号可直接点 **使用 Codex 订阅代理 → 填入 Claude Code 账号**，核对模型并保存。Claude Code 就可以调用订阅提供的 GPT。 |
 
-![在 Claude Code 账号池选择新会话的默认模型，下拉框列出示例网关提供的模型](https://raw.githubusercontent.com/13days/my-agents/main/docs/engine-models-preview.png)
+在面板里将保存的账号设为首选，或在飞书话题发 `/route` 查看并选择账号。想在自己的终端用同一订阅，订阅代理窗口也提供独立的 Claude Code 配置和启动命令。 [终端配置与支持范围](docs/codex-subscription-proxy.md)
+
+![Claude Code 账号页上的自定义代理和 Codex 订阅代理入口](https://raw.githubusercontent.com/13days/my-agents/main/docs/engine-models-preview.png)
+
+Claude Code 和 Codex 可以分别设置「新对话默认模型」。要为当前飞书话题换模型，发 `/model` 选择，下一轮生效。发 `/model default` 恢复默认。若网关固定了模型映射，最终调用以该映射为准。完成后可在卡片「详情与操作」查看本轮实际记录的模型和代理。
 
 ## 让助理替你留意消息
 

@@ -324,7 +324,7 @@ test('account cards offer a visible model action for every Claude proxy and reus
   assert.match(pool, /if\(action==='models'\)return accountPoolEditors\.claude\(account,\{models:true\}\)/);
   assert.match(pool, /if\(action==='edit'\)\{if\(engine==='claude'\)return accountPoolEditors\.claude\(account\)/);
   assert.doesNotMatch(pickerSource, /Ferry|claude-gpt-6-1-sol-max/);
-  assert.match(html, /accountPoolEditors\.claude = \(account, options\) => openForm\(account, options\?\.models\)/);
+  assert.match(html, /accountPoolEditors\.claude = openForm/);
   assert.match(html, /id="route-default-model" aria-describedby="route-model-hint route-model-rules"/);
   assert.match(html, /更具体的精确 \/ 家族规则优先/);
   assert.match(html, /固定规则会覆盖客户端 \/model；只修改「\*」/);
