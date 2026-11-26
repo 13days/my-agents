@@ -49,10 +49,10 @@ function createChatJob(meta, { journal = null, recovered = false } = {}) {
       for (const res of subscribers) write(res, event, data, seq);
       for (const listener of listeners) { try { listener(event, data); } catch {} }
     },
-    subscribe(res, after = null) {
+    subscribe(res, after = null, displayMeta = meta) {
       res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
       res.socket?.setNoDelay(true); res.flushHeaders?.();
-      write(res, 'meta', meta);
+      write(res, 'meta', displayMeta);
       const replay = after !== null && journalHealthy ? journal.read(after) : after !== null ? events.filter(item => item.seq > after) : events;
       for (const item of replay) write(res, item.event, item.data, item.seq);
       write(res, 'replay_end', {});

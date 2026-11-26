@@ -31,7 +31,20 @@ function codexProviderConfig(proxyPort, { apiKey = false } = {}) {
 // the relay token comes from MY_AGENTS_CODEX_TOKEN and never Codex's own (absent) login.
 const RELAY_TOKEN_ENV = 'MY_AGENTS_CODEX_TOKEN';
 function codexRelayConfig(base, { accountId = '', provider = 'panel' } = {}) {
+  // Codex reserves the built-in provider name. Its supported base URL setting
+  // and exec's CODEX_API_KEY keep the original thread resumable.
+  if (provider === 'openai') {
+    const endpoint = accountId ? base + '/_account/' + encodeURIComponent(accountId) : base;
+    return ['openai_base_url=' + JSON.stringify(endpoint), 'model_provider="openai"'];
+  }
   return [`model_providers.${/^[A-Za-z0-9_-]+$/.test(provider) ? provider : JSON.stringify(provider)}={name="my-agents",base_url="${base}",wire_api="responses",env_key="${RELAY_TOKEN_ENV}",requires_openai_auth=false${accountId ? ',http_headers={"x-my-agents-codex-account"=' + JSON.stringify(accountId) + '}' : ''}}`, `model_provider=${JSON.stringify(provider)}`];
+}
+
+// The built-in provider first negotiates WebSocket. HTTP 426 selects its SSE transport
+// immediately, before the proxy forwards or records a model request.
+function codexHttpUpgrade(req, socket) {
+  const status = isCodexPath(req.url) ? '426 Upgrade Required' : '404 Not Found';
+  socket.end('HTTP/1.1 ' + status + '\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
 }
 
 // Headers that replace the relay token, from this machine's ~/.codex/auth.json.
@@ -126,19 +139,33 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
       return res.end(JSON.stringify({ error: route ? '模型代理不接受浏览器跨域请求' : 'not found' }));
     }
     const relayedEgress = req.headers['x-my-agents-egress-hop'] === '1';
-    const forcedAccount = String(req.headers['x-my-agents-codex-account'] || '');
+    let forcedAccount = String(req.headers['x-my-agents-codex-account'] || '');
+    const accountPath = req.url.slice(route.prefix.length).match(/^_account\/([^/?]+)\//);
+    if (accountPath) {
+      if (!relay?.token || !sameSecret(req.headers.authorization || '', 'Bearer ' + relay.token)) {
+        res.writeHead(403); return res.end();
+      }
+      try { forcedAccount = decodeURIComponent(accountPath[1]); }
+      catch { res.writeHead(400); return res.end(); }
+      req.url = route.prefix + req.url.slice(route.prefix.length + accountPath[0].length);
+    }
     let swap = null, delegatedURL = null, selectedAccount = null;
+    const failedAccounts = new Set();
+    const onResolveError = error => {
+      for (const name of error?.failedAccounts || []) failedAccounts.add(name);
+      return null;
+    };
     const pooled = relay?.token && sameSecret(req.headers.authorization || '', `Bearer ${relay.token}`) && !req.headers['x-my-agents-local-account'];
     if (relay?.token && sameSecret(req.headers.authorization || '', `Bearer ${relay.token}`)) {
       if (!req.headers['x-my-agents-local-account'] && relay.resolve) {
-        const selected = await relay.resolve(route.mode, String(req.headers['session-id'] || req.headers['thread-id'] || ''), [], forcedAccount).catch(() => null);
+        const selected = await relay.resolve(route.mode, String(req.headers['session-id'] || req.headers['thread-id'] || ''), [], forcedAccount).catch(onResolveError);
         selectedAccount = selected;
         if (selected?.url) { delegatedURL = selected.url; swap = { authorization: `Bearer ${selected.token}`, 'x-my-agents-local-account': '1' }; }
       }
       if (!delegatedURL) swap = selectedAccount?.headers || (!pooled || !relay.resolve ? relay.credentials(route.mode) : null);
       if (!swap) {
         res.writeHead(401, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ error: { message: '共享账号池未登录或没有可用凭证，请在任一节点登录一次并同步', type: 'invalid_request_error' } }));
+        return res.end(JSON.stringify({ error: { message: failedAccounts.size ? 'Codex 登录刷新失败。本轮尝试的账号：' + [...failedAccounts].join('、') + '。请到「AI 账号 → Codex」重新授权。' : '共享账号池未登录或没有可用凭证，请在任一节点登录一次并同步', type: 'invalid_request_error' } }));
       }
     }
     const info = reserveCapture();
@@ -176,8 +203,9 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
       const switchAccount = async (status, retryAfter) => {
         if (!pooled || !selectedAccount || !relay.resolve || res.headersSent || res.destroyed) return false;
         relay.rejected?.(selectedAccount, status, retryAfter);
+        if (selectedAccount.label || selectedAccount.accountId) failedAccounts.add(selectedAccount.label || selectedAccount.accountId.slice(-8));
         if (!excluded.includes(selectedAccount.id)) excluded.push(selectedAccount.id);
-        const next = await relay.resolve(route.mode, sessionId, excluded, forcedAccount).catch(() => null);
+        const next = await relay.resolve(route.mode, sessionId, excluded, forcedAccount).catch(onResolveError);
         if (!next || excluded.includes(next.id) || res.destroyed) return false;
         selectedAccount = next; delegatedURL = next.url || null;
         delete headers['chatgpt-account-id'];
@@ -214,7 +242,7 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
           response.on('end', async () => {
             save(response.statusCode, Buffer.concat(rejected), false, response.headers['content-encoding'], false);
             if (res.destroyed) return;
-            if (!await switchAccount(response.statusCode, response.headers['retry-after'])) { res.writeHead(response.statusCode, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { message: '共享 Codex 账号暂不可用：可用账号已尝试，请检查账号状态、额度或稍后重试' } })); }
+            if (!await switchAccount(response.statusCode, response.headers['retry-after'])) { res.writeHead(response.statusCode, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { message: 'Codex 账号请求失败（HTTP ' + response.statusCode + '）。' + (failedAccounts.size ? '本轮尝试的账号：' + [...failedAccounts].join('、') + '。' : '') + '请在「AI 账号 → Codex」核对授权或额度。' } })); }
             send();
           });
           return;
@@ -254,4 +282,4 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
   const sessions = () => [...live.entries()].map(([id, e]) => ({ id, running: e.inflight > 0, lastAt: e.lastAt, engine: 'codex' }));
   return { handle, sessions };
 }
-module.exports = { createCodexProxy, codexProviderConfig, codexRelayConfig, codexCredentials, RELAY_TOKEN_ENV, extractResponses, isCodexPath, normalizeUsage };
+module.exports = { createCodexProxy, codexHttpUpgrade, codexProviderConfig, codexRelayConfig, codexCredentials, RELAY_TOKEN_ENV, extractResponses, isCodexPath, normalizeUsage };

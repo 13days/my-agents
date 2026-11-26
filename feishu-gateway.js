@@ -10,22 +10,7 @@ const { createFeishuInbox } = require('./feishu-inbox');
 const { commandText } = require('./feishu-commands');
 const { engineCatalog } = require('./channels/engine-catalog');
 
-// The help text lists whichever engines the panel has registered.
-function helpText(engines) {
-  const ids = engines.ids();
-  return [
-    '/sessions [关键词] 查看会话卡片', '/switch 序号、ID前缀或名称 切换会话', '/projects 查看项目',
-    `/new [${ids.join('|')}] [第一条问题] 打开新任务表单，选择机器、项目、模型后提交启动`,
-    ...engines.list.map(engine => `/${engine.id} [问题] 切到 ${engine.label}，可直接带问题`),
-    '/node [节点名] [路径] 查看或切换运行位置（本机 / 远程开发机），例如 /node devbox ~/repos/项目',
-    '/leader [节点名] 查看集群或主动迁移 Timi 主节点',
-    '/model [模型 ID|default] 查看或切换当前会话模型，default 恢复默认', '/model global [模型 ID|current|default] 设置所有机器共享的全局默认模型', '/use 引擎 切换引擎（支持别名）', '/engine 查看当前引擎和切换选项', '/current 查看当前位置的绑定会话', '/history 查看最近对话',
-    '/rename 新名称 固定会话名称', '/queue 内容 排队处理', '/steer 内容 立即引导', '/stop 停止当前任务',
-    '/route 代理路由：/route 序号切账号、auto 故障转移、rr 轮询、reset 清除冷却、pin 序号|off 固定当前会话、codex direct|proxy',
-    '/reply [wide|card|markdown] 回复形式：宽屏卡片（保留思考过程）、标准卡片或普通 Markdown 消息（按聊天保存）',
-    '/status 网关状态', '/ask 内容 将内容作为正文发给当前引擎',
-  ].join('\n');
-}
+const { feishuHelp } = require('./feishu-help');
 const clip = (text, size) => Array.from(String(text || '')).slice(0, size).join('');
 const threadOf = msg => msg.threadId || msg.raw?.message?.thread_id || msg.raw?.event?.message?.thread_id || '';
 const contextKey = msg => JSON.stringify([msg.chatType === 'p2p' ? msg.senderId : '*', msg.chatId, msg.chatType === 'p2p' ? 'main' : threadOf(msg) || 'main']);
@@ -759,7 +744,17 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     const newTarget = explicitEngine ? arg.slice(firstWord.length).trim() : arg;
     if (command === 'new' && panel.workspaces) return newForm(msg, newTarget, newEngine);
     if (!detailed(msg) && (['sessions', 'projects', 'switch', 'history', 'rename', 'route'].includes(command) || command === 'new' && newTarget)) return managementNotice(msg);
-    if (!detailed(msg) && command === 'help') return send(msg, { text: `直接发送消息，或 @机器人，在当前位置独立会话中处理。\n/new [${engines.ids().join('|')}] 默认项目新建\n${engines.ids().map(id => '/' + id).join(' 或 ')} 切换引擎\n/model [模型ID|default] 查看或切换模型\n/current 查看当前引擎与绑定\n/node [节点名] [路径] 切换运行位置（本机 / 开发机）\n/queue 内容 排队\n/steer 内容 引导任务\n/stop 停止任务\n此群使用普通文字回复和临时思考表情，会话管理请先在面板逐项授权此群。` });
+    if (command === 'help') {
+      const full = detailed(msg), sections = feishuHelp(engines.ids(), { detailed: full });
+      if (!full || replyFormat(msg) === 'markdown') {
+        const intro = full ? '直接发送问题可继续当前会话。' : '在群里 @机器人 即可提问。此群使用简洁回复，会话管理需在面板授权。';
+        const groups = sections.map(section => section.title + '\n' + section.rows.map(([cmd, hint]) => cmd + '  ' + hint).join('\n'));
+        return send(msg, { text: [intro, ...groups].join('\n\n') });
+      }
+      const result = await send(msg, { card: cards.helpCard({ sections, owner: msg.senderId, key: contextKey(msg) }) });
+      rememberCard(result, msg);
+      return result;
+    }
     if (!detailed(msg) && command === 'status') return send(msg, { text: `my-agents 在线 · ${contextLabel(msg)}独立会话\n当前引擎：${catalog().label(binding ? engineOf(binding) : defaultEngine())}\n${engines.switchHint(binding ? engineOf(binding) : defaultEngine())} 切换引擎\n此群使用简洁显示：普通文字回复，处理时显示思考表情。` });
     // /<引擎 id 或别名> [问题] 直接切换；/use 与 /engine 带参数时同样切换
     if (command && engines.find(command) && !['new', 'use', 'engine'].includes(command)) return useEngine(msg, engines.find(command), arg);
@@ -772,7 +767,6 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (command === 'model' && /^(global|全局)(\s|$)/i.test(arg)) return setDefaultModel(msg, arg.replace(/^\S+\s*/, ''));
     if (command === 'model') return arg ? setModel(msg, arg) : modelsCard(msg);
     if (command === 'reply') return setReplyFormat(msg, arg);
-    if (command === 'help') return send(msg, { text: helpText(engines) });
     if (command === 'node' || command === 'nodes') {
       if (!arg) return nodesCard(msg);
       const [name, ...rest] = arg.split(/\s+/), node = findNode(name);

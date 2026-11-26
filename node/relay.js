@@ -84,6 +84,7 @@ function createRelayClient(initialPeer, { reconnectable = false } = {}) {
     url() {
       listening ||= new Promise((resolve, reject) => {
         server = http.createServer(handle);
+        server.on('upgrade', require('../engines/codex/proxy').codexHttpUpgrade);
         server.on('error', reject);
         server.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${server.address().port}`));
         server.unref(); // the hub link keeps the node alive, not the relay

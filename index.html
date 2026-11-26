@@ -111,7 +111,7 @@ function userGuideSections() {
       [copy('执行机器', 'Execution machine'), copy('保存项目、worktree 和原生 CLI 历史，实际运行任务的机器。已有会话记录自己的机器归属。', 'The machine storing the project, worktree and native CLI history and running the task. Existing sessions retain their machine ownership.')],
     ], note: copy('主节点切换不会复制项目或迁移正在运行的 CLI 进程。执行机器离线后，下一轮会尝试转到有效 IM 主节点，并按项目映射接续；未同步的 worktree 需手动选择目标项目，不能重放未知结果的命令。', 'A leader change does not copy projects or migrate running CLI processes. If the original execution machine is offline, wait for it or explicitly start a new task elsewhere.'), target: 'proxy', infra: 'machines', action: copy('查看机器状态', 'View machine status') },
     { id: 'machines', title: copy('添加开发机：执行节点与集群面板', 'Add machines: execution nodes versus cluster panels'), lead: copy('两种接入解决的问题不同，请先确定你要增加执行能力，还是让另一台机器接管机器人。', 'Choose whether you need more execution capacity or another panel capable of taking over the bot.'), rows: [
-      [copy('添加执行节点', 'Add an execution node'), copy('在「电脑与 AI 账号 → 连接电脑 → 添加电脑」填入免密 SSH 地址。看到「已连接」后即可在新对话里选择这台机器。', 'Open Computers & AI accounts → Computers → Add computer and enter a passwordless SSH address. Choose the machine in a new chat once connected.')],
+      [copy('添加执行节点', 'Add an execution node'), copy('在「连接电脑 → 添加电脑」选免密 SSH，或自行用密码 / MFA 登录远端，在终端运行页面给出的命令。两种方式都可接入尚未安装 my-agents 的电脑。看到「已连接」即可新建对话。', 'Choose passwordless SSH in Add computer, or sign in with a password / MFA and run the displayed command in the remote terminal. Neither method requires my-agents to be preinstalled. Select the connected machine in a new chat.')],
       [copy('添加集群面板', 'Add a cluster panel'), copy('需要在另一台机器部署常驻面板服务，配置相同集群身份、成员和认证，并保证成员互通。普通 node 命令只连接执行通道，不参加主节点选举。', 'Deploy a persistent panel with matching cluster identity, membership and authentication and reachable peers. The normal node command only connects execution; it does not join leader elections.')],
       [copy('不会自动准备的内容', 'What is not prepared automatically'), copy('CLI 的安装和登录、项目代码、项目路径及节点自启仍需准备。连接令牌不等于 Agent 的登录凭证，目录映射也不会拉取仓库。', 'Prepare CLI installations and sign-ins, project code, project paths and node startup. A connection token is not an agent login, and mapping a directory does not clone a repository.')],
     ], note: copy('WebSocket 接入要求面板监听可访问地址，网络能到达面板端口。页面若提示「仅监听本机」，远程机器不能直接连接。复制命令包含访问令牌，请只在自己的机器使用。', 'WebSocket connections require a reachable panel listener and port. A loopback-only listener cannot accept remote connections. Copied commands contain an access token; use them only on your own machines.'), target: 'proxy', infra: 'machines', action: copy('打开机器接入', 'Open machine connections') },
@@ -134,15 +134,12 @@ function userGuideSections() {
       [copy('模型', 'Model'), copy('在对话设置中选择可用模型。可用选项取决于引擎、当前代理账号及服务支持；Codex 默认项从账号实时可见模型中推荐；其他引擎依接入配置。', 'Choose available models in chat settings. Options depend on the engine, proxy account and provider. Codex defaults use the live account model catalog; other engines follow their integration settings.')],
       [copy('代理账号', 'Proxy account'), copy('Claude Code 和 Codex 各自一个账号池，都支持订阅与代理；订阅在任一已接入机器正常登录后自动收录，无需点击导入。账号池不能代替目标机器上的 CLI 环境。', 'Manage provider accounts and request routing under AI accounts. This is distinct from execution machines and does not replace their CLI environment.')],
     ], target: 'sessions', action: copy('查看会话', 'View sessions') },
-    { id: 'im', title: copy('在飞书中使用和切换任务', 'Use and switch tasks in Feishu'), lead: copy('「IM 接入」统一管理聊天入口，目前可用渠道为飞书 / Lark。企业微信等其他渠道尚未接入。', 'IM connections manages messaging entry points. Feishu / Lark is currently available; channels such as WeCom are not yet connected.'), rows: [
-      ['/help', copy('查看当前版本支持的命令；以机器人返回的帮助为准。', 'See the commands supported by the running version; the bot’s help is authoritative.')],
-      ['/projects · /new', copy('查看项目；/new 第一条问题 打开预填表单，一次选择机器、项目、引擎和模型后提交。失败保留内容，可修改重提。', 'View projects, choose directories and create sessions. /new claude or /new codex specifies the engine.')],
-      ['/node · /engine', copy('查看或选择执行节点和引擎；先确认项目确实存在于目标机器。', 'View or choose the execution node and engine. Confirm the project exists on the destination.')],
-      ['/claude · /codex', copy('切换引擎，也可直接带问题。各引擎接续自己的会话上下文。', 'Switch engines, optionally with a prompt. Each engine continues its own session context.')],
-      ['/model', copy('查看当前模型，或用卡片选择模型；也可发送 /model 模型ID，/model default 恢复默认。', 'View the current model or select one from the card. /model MODEL_ID selects it; /model default restores the default.')],
-      ['/current · /sessions · /switch', copy('查看当前绑定、列出会话和切换会话。绑定只影响当前聊天位置，群话题之间相互独立。', 'View the current binding, list sessions and switch sessions. Bindings apply to the current chat location; group topics are independent.')],
-      ['/history · /stop', copy('查看最近对话、停止当前任务。任务卡片会显示执行进展；简洁模式减少展示，仍可使用命令。', 'View recent conversation or stop the task. Task cards show progress; simple mode reduces presentation while retaining commands.')],
-    ], note: copy('机器人是否回应同时受连接状态、用户/群权限、禁用规则和群内 @要求影响。默认设置用于未绑定的新位置，已有话题继续原绑定。', 'Replies depend on connectivity, user/group access, disabled-user rules and mention requirements. Defaults apply to unbound locations; existing topics retain their bindings.'), target: 'im', action: copy('打开 IM 接入', 'Open IM connections') },
+    { id: 'im', title: copy('飞书与 Lark', 'Feishu and Lark'), lead: copy('发送 /help 可打开「找会话」和「新建任务」。简洁群仅显示该群可用的文字命令。', 'Send /help for Find session and New task. Basic groups receive commands for their access level.'), groups: feishuHelp(ENGINES.map(engine => engine.id), { copy }), note: copy('首次连接时在面板生成配对码，再私聊机器人发送 /pair 配对码。权限和回复格式按聊天生效。', 'For first-time pairing, generate a code in the panel and DM /pair CODE to the bot. Chat access and reply format apply per chat.'), target: 'im', channel: 'feishu', action: copy('打开聊天软件', 'Open chat apps') },
+    { id: 'wecom', title: copy('企业微信', 'WeCom'), lead: copy('在「聊天软件 → 企业微信」填写智能机器人的 Bot ID 和 Secret，保存并连接。成员可以私聊，或在群里 @机器人。', 'Enter the intelligent bot’s Bot ID and Secret in Chat apps → WeCom, then save and connect. Members can DM the bot or mention it in a group.'), rows: [
+      ['/whoami', copy('查看自己的 UserID，将它加入面板的允许成员后即可执行任务。', 'Get your UserID and add it to the panel’s allowed members to run tasks.')],
+      ['/new', copy('下一条文字开始新对话。直接发文字会继续当前对话。', 'Start a new session on the next message. Ordinary text continues the current conversation.')],
+      ['/help', copy('查看企业微信文字命令。完整执行记录和授权在网页对话中。', 'Show WeCom text commands. Open the web conversation for full output and approvals.')],
+    ], target: 'im', channel: 'wecom', action: copy('打开聊天软件', 'Open chat apps') },
     { id: 'diagnostics', title: copy('没有回应、目录报错和节点离线', 'Troubleshoot missing replies, paths and offline nodes'), lead: copy('先分清失败发生在哪一层，再决定是否需要切换。', 'Identify the failing layer before deciding what to switch.'), rows: [
       [copy('页面打不开', 'The page will not open'), copy('检查当前访问的那台面板服务和端口。localhost 只表示你当前这台电脑；它关闭后，需要访问另一台在线面板的地址。', 'Check the service and port of the panel you are visiting. localhost refers to your current computer; use another online panel’s address if it is off.')],
       [copy('机器人没回', 'The bot does not reply'), copy('在「连接电脑」查看是否有有效 IM 主节点，再检查「IM 接入」实际连接状态、权限和消息记录。成员可达不代表已经取得主节点租约。', 'Check for a valid IM leader under Computers, then inspect the actual IM connection, access rules and message records. Reachable peers do not by themselves imply a valid leader lease.')],
@@ -166,19 +163,22 @@ function renderUserGuide() {
   $('#render').style.display = 'block'; $('#render').classList.add('wide');
   $('#title').firstChild.textContent = rt('使用指南', 'User guide'); $('#fpath').textContent = '';
   const sections = userGuideSections();
-  $('#render').innerHTML = `${viewHeading('guide')}<div class="user-guide"><div class="guide-search"><label for="guide-search">${esc(rt('查找使用方法', 'Find instructions'))}</label><input id="guide-search" type="search" placeholder="${esc(rt('搜索：开发机、目录、模型、飞书、离线…', 'Search: machines, directories, models, IM, offline…'))}"><span id="guide-result" role="status" aria-live="polite"></span></div><nav class="guide-contents" aria-label="${esc(rt('指南目录', 'Guide contents'))}">${sections.map(section => `<button type="button" data-guide-jump="${section.id}">${esc(section.title)}</button>`).join('')}</nav><div class="guide-sections">${sections.map((section, index) => `<details class="guide-section" id="guide-${section.id}" ${index === 0 ? 'open' : ''}><summary><span class="guide-number">${String(index + 1).padStart(2, '0')}</span>${esc(section.title)}</summary><div class="guide-section-body"><p>${esc(section.lead)}</p>${section.steps ? `<ol>${section.steps.map(step => `<li>${esc(step)}</li>`).join('')}</ol>` : ''}${section.rows ? `<dl>${section.rows.map(([title, body]) => `<div><dt>${esc(title)}</dt><dd>${esc(body)}</dd></div>`).join('')}</dl>` : ''}${section.note ? `<p class="guide-note">${esc(section.note)}</p>` : ''}${section.manuals ? `<p><a href="https://github.com/13days/my-agents/blob/main/docs/user-guide.md" target="_blank" rel="noopener noreferrer">${esc(rt('完整使用手册', 'Full user guide'))}</a> · <a href="https://github.com/13days/my-agents/blob/main/docs/cluster-setup.md" target="_blank" rel="noopener noreferrer">${esc(rt('集群搭建手册', 'Cluster setup'))}</a> · <a href="https://github.com/13days/my-agents/blob/main/docs/agent-install.md" target="_blank" rel="noopener noreferrer">${esc(rt('Agent 安装协议', 'Agent installation protocol'))}</a></p><pre class="guide-install-prompt" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(agentInstallPrompt())}</pre><button type="button" class="btn" data-guide-copy-install>${esc(rt('复制给 Agent 安装', 'Copy Agent installation request'))}</button>` : ''}${section.target ? `<button type="button" class="btn" data-guide-target="${section.target}" data-guide-infra="${section.infra || ''}">${esc(section.action)} →</button>` : ''}</div></details>`).join('')}</div><p id="guide-no-results" class="route-muted" hidden>${esc(rt('没有匹配内容，请换一个关键词。', 'No matches. Try another keyword.'))}</p></div>`;
+  const terms = rows => `<dl>${rows.map(([title, body]) => `<div><dt>${esc(title)}</dt><dd>${esc(body)}</dd></div>`).join('')}</dl>`;
+  $('#render').innerHTML = `${viewHeading('guide')}<div class="user-guide"><div class="guide-search"><label for="guide-search">${esc(rt('查找使用方法', 'Find instructions'))}</label><input id="guide-search" type="search" placeholder="${esc(rt('搜索：开发机、目录、模型、飞书、离线…', 'Search: machines, directories, models, IM, offline…'))}"><span id="guide-result" role="status" aria-live="polite"></span></div><nav class="guide-contents" aria-label="${esc(rt('指南目录', 'Guide contents'))}">${sections.map(section => `<button type="button" data-guide-jump="${section.id}">${esc(section.title)}</button>`).join('')}</nav><div class="guide-sections">${sections.map((section, index) => `<details class="guide-section" id="guide-${section.id}" ${index === 0 ? 'open' : ''}><summary>${esc(section.title)}</summary><div class="guide-section-body"><p>${esc(section.lead)}</p>${section.steps ? `<ol>${section.steps.map(step => `<li>${esc(step)}</li>`).join('')}</ol>` : ''}${section.rows ? terms(section.rows) : ''}${section.groups ? section.groups.map(group => `<h4>${esc(group.title)}</h4>${terms(group.rows)}`).join('') : ''}${section.note ? `<p class="guide-note">${esc(section.note)}</p>` : ''}${section.manuals ? `<p><a href="https://github.com/13days/my-agents/blob/main/docs/user-guide.md" target="_blank" rel="noopener noreferrer">${esc(rt('完整使用手册', 'Full user guide'))}</a> · <a href="https://github.com/13days/my-agents/blob/main/docs/cluster-setup.md" target="_blank" rel="noopener noreferrer">${esc(rt('集群搭建手册', 'Cluster setup'))}</a> · <a href="https://github.com/13days/my-agents/blob/main/docs/agent-install.md" target="_blank" rel="noopener noreferrer">${esc(rt('Agent 安装协议', 'Agent installation protocol'))}</a></p><pre class="guide-install-prompt" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(agentInstallPrompt())}</pre><button type="button" class="btn" data-guide-copy-install>${esc(rt('复制给 Agent 安装', 'Copy Agent installation request'))}</button>` : ''}${section.target ? `<button type="button" class="btn" data-guide-target="${section.target}" data-guide-channel="${section.channel || ''}" data-guide-infra="${section.infra || ''}">${esc(section.action)} →</button>` : ''}</div></details>`).join('')}</div><p id="guide-no-results" class="route-muted" hidden>${esc(rt('没有匹配内容，请换一个关键词。', 'No matches. Try another keyword.'))}</p></div>`;
   const host = $('#render'), filter = $('#guide-search');
   filter.oninput = () => {
     const query = filter.value.trim().toLocaleLowerCase(); let count = 0;
     host.querySelectorAll('.guide-section').forEach(section => { const visible = !query || section.textContent.toLocaleLowerCase().includes(query); section.hidden = !visible; if (query && visible) section.open = true; if (visible) count++; });
-    host.querySelectorAll('[data-guide-copy-install]').forEach(button => button.onclick = async () => { try { await navigator.clipboard.writeText(agentInstallPrompt()); toast(rt('已复制安装要求', 'Installation request copied')); } catch { toast(rt('请选中上方安装要求手动复制', 'Select the installation request above and copy it'), false); } });
-  host.querySelectorAll('[data-guide-jump]').forEach(button => { button.hidden = $('#guide-' + button.dataset.guideJump).hidden; });
+    host.querySelectorAll('[data-guide-jump]').forEach(button => { button.hidden = $('#guide-' + button.dataset.guideJump).hidden; });
     $('#guide-no-results').hidden = !!count; $('#guide-result').textContent = query ? rt(`找到 ${count} 个主题`, `${count} topics found`) : '';
   };
+  host.querySelectorAll('[data-guide-copy-install]').forEach(button => button.onclick = async () => { try { await navigator.clipboard.writeText(agentInstallPrompt()); toast(rt('已复制安装要求', 'Installation request copied')); } catch { toast(rt('请选中上方安装要求手动复制', 'Select the installation request above and copy it'), false); } });
   host.querySelectorAll('[data-guide-jump]').forEach(button => button.onclick = () => { const section = $('#guide-' + button.dataset.guideJump); section.open = true; section.scrollIntoView({ behavior: 'smooth', block: 'start' }); section.querySelector('summary').focus({ preventScroll: true }); });
-  host.querySelectorAll('[data-guide-target]').forEach(button => button.onclick = () => { if (button.dataset.guideInfra) localStorage.setItem('panel-infra-tab', button.dataset.guideInfra); switchType(button.dataset.guideTarget); });
+  host.querySelectorAll('[data-guide-target]').forEach(button => button.onclick = () => { if (button.dataset.guideInfra) localStorage.setItem('panel-infra-tab', button.dataset.guideInfra); if (button.dataset.guideChannel) imSelectedChannel = button.dataset.guideChannel; switchType(button.dataset.guideTarget); });
 }
 </script>
+<script src="/feishu-help.js"></script>
+<script src="/wecom-ui.js"></script>
 <script src="/conversation-state.js"></script>
 <script src="/feishu-ui.js"></script>
 
@@ -188,7 +188,7 @@ function renderUserGuide() {
 // IM entry points. A planned channel never receives an active configuration form.
 const IM_CHANNELS = [
   { id: 'feishu', name: ['飞书 / Lark', 'Feishu / Lark'], available: true, description: ['机器人接入，支持私聊、群聊与话题', 'Bot access for private chats, groups and topics'] },
-  { id: 'wecom', name: ['企业微信', 'WeCom'], available: false, description: ['预留渠道，适配器尚未接入', 'Planned channel; adapter not implemented yet'] },
+  { id: 'wecom', name: ['企业微信', 'WeCom'], available: true, description: ['智能机器人，支持私聊与群聊文字任务', 'Intelligent bot for direct and group text tasks'] },
 ];
 let imSelectedChannel = localStorage.getItem('panel-im-channel') || 'feishu', imRenderRevision = 0;
 if (!IM_CHANNELS.some(channel => channel.id === imSelectedChannel)) imSelectedChannel = 'feishu';
@@ -196,7 +196,7 @@ if (localStorage.getItem('panel-section') === 'feishu') localStorage.setItem('pa
 function isFeishuView() { return state.type === 'im' && imSelectedChannel === 'feishu'; }
 function imHeader(data) {
   return viewHeading('im') + `<div class="im-channels" role="group" aria-label="${esc(rt('IM 渠道', 'IM channels'))}">${IM_CHANNELS.map(channel => {
-    const status = !channel.available ? rt('尚未接入', 'Not available') : data?.phase === 'connected' ? rt('已连接', 'Connected') : rt('可接入', 'Available');
+    const status = !channel.available ? rt('尚未接入', 'Not available') : channel.id === imSelectedChannel && data?.phase === 'connected' ? rt('已连接', 'Connected') : rt('可接入', 'Available');
     return `<button type="button" class="im-channel" data-im-channel="${channel.id}" aria-pressed="${channel.id === imSelectedChannel}"><span class="im-channel-icon">${icon('chat')}</span><span class="im-channel-copy"><strong>${esc(rt(...channel.name))}</strong><small>${esc(rt(...channel.description))}</small></span><span class="im-channel-state${channel.available ? ' available' : ''}">${esc(status)}</span></button>`;
   }).join('')}</div>`;
 }
@@ -214,7 +214,7 @@ function prepareIMPage() {
   $('#editBtn').disabled = $('#delBtn').disabled = true;
 }
 function imChannelError(message) {
-  $('#render').innerHTML = imHeader() + `<section class="chart im-channel-placeholder" role="alert"><p>${esc(message)}</p><button type="button" class="btn" data-im-channel="feishu">${esc(rt('重试', 'Retry'))}</button></section>`;
+  $('#render').innerHTML = imHeader() + `<section class="chart im-channel-placeholder" role="alert"><p>${esc(message)}</p><button type="button" class="btn" data-im-channel="${imSelectedChannel}">${esc(rt('重试', 'Retry'))}</button></section>`;
   bindIMChannelControls();
 }
 let heartflowLoadPromise;
@@ -248,8 +248,7 @@ async function renderIMAccess() {
     bindIMChannelControls();
     return renderFeishuGateway(revision);
   }
-  $('#render').innerHTML = imHeader() + `<section class="chart im-channel-placeholder"><span class="im-channel-state">${esc(rt('尚未接入', 'Not available'))}</span><h2>${esc(rt('企业微信', 'WeCom'))}</h2><p>${esc(rt('企业微信适配器尚未实现，目前还不能配置或收发消息。', 'The WeCom adapter is not implemented. Configuration and messaging are not available yet.'))}</p><p class="route-muted">${esc(rt('当前可通过飞书 / Lark 使用会话、引擎、模型和任务管理。后续 IM 渠道将接入同一套工作空间。', 'Use Feishu / Lark for sessions, engines, models and tasks today. Future IM channels will connect to the same workspace.'))}</p><button type="button" class="btn" data-im-channel="feishu">${esc(rt('配置飞书 / Lark', 'Configure Feishu / Lark'))}</button></section>`;
-  bindIMChannelControls();
+  return renderWecom(revision);
 }
 
 const $ = s => document.querySelector(s);
@@ -431,7 +430,8 @@ function updateWorkspaceChrome() {
 function emptyState() {
   const type = state.type;
   const hint = ui('从左侧选择一项，查看内容与可用操作。', 'Select an item from the library to view its content and actions.');
-  $('#empty').innerHTML = `<div class="empty-state"><span class="empty-icon">${icon(type)}</span><h2>${esc(t('tabs')[type])}</h2><p>${esc(viewDescription(type))}</p><p>${esc(hint)}</p>${CAPS[type].new ? `<button class="btn" id="emptyCreate">${esc(newBtnLabel(type))}</button>` : ''}</div>`;
+  $('#empty').innerHTML = `<div class="empty-state"><span class="empty-icon">${icon(type)}</span><h2>${esc(t('tabs')[type])}</h2><p>${esc(viewDescription(type))}</p><p class="empty-library-hint">${esc(hint)}</p><div class="empty-actions"><button type="button" class="btn" id="emptyBrowse">${esc(rt('浏览列表', 'Browse list'))}</button>${CAPS[type].new ? `<button class="btn" id="emptyCreate">${esc(newBtnLabel(type))}</button>` : ''}</div></div>`;
+  $('#emptyBrowse').onclick = () => $('#libraryToggle').click();
   const create = $('#emptyCreate'); if (create) create.onclick = () => $('#newbtn').click();
 }
 
@@ -794,7 +794,7 @@ async function renderProductPage(type) {
   let body='';
   try{
     if(type==='today'||type==='tasks'){
-      const [taskResult,assistantResult]=await Promise.allSettled([api('GET','tasks'),api('GET','heartflow')]);if(state.type!==type)return;
+      const [taskResult,assistantResult]=await Promise.allSettled([api('GET','tasks'),type === 'today' ? api('GET','heartflow') : null]);if(state.type!==type)return;
       const rows=taskResult.status==='fulfilled'?taskResult.value.items:[],assistant=assistantResult.status==='fulfilled'?assistantResult.value:null;
       const active=rows.filter(t=>['running','preparing','queued','executing'].includes(t.state));
       const attention=rows.filter(t=>['failed','unknown','blocked'].includes(t.state));
@@ -813,21 +813,21 @@ async function renderProductPage(type) {
       };
       const list=items=>items.map(t=>`<article class="product-task"><span class="product-status">${esc(labels[t.state]||t.state)}</span><div>${breadcrumbs(t)}<strong>${esc((t.prompt||'执行任务').slice(0,180))}</strong><small>${esc(new Date(t.updatedAt||t.createdAt).toLocaleString())}</small></div>${t.sessionId||t.conversationId?`<a href="/sessions/${encodeURIComponent(t.sessionId||t.conversationId)}">查看对话 →</a>`:''}</article>`).join('');
       const groupedList=items=>groupTasksByProject(items,rows).map(group=>`<section class="task-project"><header class="task-project-heading"><div><h2>${esc(group.cwd.split(/[\\/]/).filter(Boolean).pop()||'未记录项目目录')} <span>${group.items.length}</span></h2><p>${esc(group.cwd||'这些历史任务没有可用的目录信息')}</p></div><span class="task-project-node">${esc(group.node==='local'?'本机':group.node)}</span></header>${list(group.items)}</section>`).join('');
-      body=`${taskResult.status==='rejected'?'<p role="alert">任务记录暂时无法读取，请稍后刷新。</p>':''}<div class="product-summary">${tile('heartflow','待你确认 · '+(pending??'暂不可读'),'查看助理整理的判断与建议')}${tile('tasks','进行中 · '+active.length,'跟进已发起的任务')}${tile('connections','管理连接','聊天软件、电脑和 AI 账号')}</div>`;
+      if(type==='today') body=`${taskResult.status==='rejected'?'<p role="alert">任务记录暂时无法读取，请稍后刷新。</p>':''}<div class="product-summary">${tile('heartflow','待你确认 · '+(pending??'暂不可读'),'查看助理整理的判断与建议')}${tile('tasks','进行中 · '+active.length,'跟进已发起的任务')}${tile('connections','管理连接','聊天软件、电脑和 AI 账号')}</div>`;
       if(type==='today')body+=`<h3>正在推进</h3>${list(active.slice(0,8))||'<p class="product-empty">暂无正在执行的任务，可以从助理建议或新对话开始。</p>'}<h3>需要处理</h3>${list(attention.slice(0,5))||'<p class="product-empty">暂无执行异常。</p>'}${tile('sessions','开始对话','提出问题，或继续之前的工作')}`;
-      else body+=`<p class="product-muted">这里展示实际发起的执行任务及结果；讨论记录保留在对话中。</p><div class="product-filter"><label for="product-task-filter">状态</label><select id="product-task-filter"><option value="all">全部</option><option value="active">进行中</option><option value="attention">需要处理</option><option value="completed">已完成</option></select></div><div id="product-task-list">${groupedList(rows)||'<p class="product-empty">还没有任务记录。</p>'}</div>`;
+      else body=`${taskResult.status==='rejected'?'<p role="alert">任务记录暂时无法读取，请稍后刷新。</p>':''}<div class="product-filter"><label for="product-task-filter">状态</label><select id="product-task-filter"><option value="all">全部</option><option value="active">进行中</option><option value="attention">需要处理</option><option value="completed">已完成</option></select></div><div id="product-task-list">${groupedList(rows)||'<p class="product-empty">还没有任务记录。</p>'}</div>`;
       root._productTasks={rows,active,attention,list:groupedList};
     }else if(type==='connections'){
-      body=`<p class="product-muted">连接你的消息来源与执行环境。助理使用已授权的消息范围，任务使用可用的执行设备。</p><div class="product-grid">${tile('im','聊天软件','当前支持飞书 / Lark；更多渠道将在这里统一管理。')}${tile('proxy',t('tabs').proxy,'连接电脑，设置项目文件夹和 AI 账号。')}${tile('heartflow','助理关注范围','选择助理关注的聊天，以及通知与确认方式。')}</div><p class="product-note">机器人连接与个人聊天读取授权是不同能力。飞书机器人已连接，不代表助理可以读取你的所有聊天。</p>`;
+      body=`<p class="product-muted">连接你的消息来源与执行环境。助理使用已授权的消息范围，任务使用可用的执行设备。</p><div class="product-grid">${tile('im','聊天软件','接入飞书 / Lark 或企业微信智能机器人。')}${tile('proxy',t('tabs').proxy,'连接电脑，设置项目文件夹和 AI 账号。')}${tile('heartflow','助理关注范围','选择助理关注的聊天，以及通知与确认方式。')}</div><p class="product-note">机器人连接与个人聊天读取授权是不同能力。飞书机器人已连接，不代表助理可以读取你的所有聊天。</p>`;
     }else if(type==='capabilities'){
       body=`<p class="product-muted">把常用方法、专属助手和扩展能力放在一起，按需要选用。</p><label>适用工具 <select id="product-capability-engine">${resourceEngines().map(e=>`<option value="${esc(e.id)}" ${state.resourceEngine===e.id?'selected':''}>${esc(e.short)}</option>`).join('')}</select></label><div class="product-grid">${[['commands','快捷操作','复用常用指令，减少重复输入。'],['skills','技能','完成具体工作的知识与方法。'],['agents','专属助手','为不同工作准备合适的助手。'],['plugins','扩展','管理已安装的插件。'],['workflows','工作流','把多个步骤组织成可复用的流程。']].filter(([id])=>can(state.resourceEngine,'resources',id)).map(([id,title,description])=>tile(id,title,description)).join('')}</div>`;
     }else{
       body=`<div class="product-grid">${tile('config','偏好与指令','管理个人偏好及项目约定。')}${tile('connections','连接管理','聊天软件、电脑和 AI 账号。')}${tile('guide','帮助与使用指南','了解如何开始对话和协作。')}</div><section class="product-advanced"><h3>工具与记录</h3><p class="product-muted">需要排查问题或查看详细运行数据时使用。</p><div class="product-grid">${tile('inspector','请求诊断','查看模型请求、上下文和响应。')}${tile('stats','使用统计','查看用量、成本与运行情况。')}${tile('voyage','工作回顾','按时间回看历史活动；当前基于 Claude 记录。')}</div></section>`;
     }
     if(state.type!==type)return;
-    root.innerHTML=`<section class="product-page"><header><h1>${titles[type]}</h1><button class="btn" id="product-refresh">刷新</button></header>${body}</section>`;
+    root.innerHTML=`<section class="product-page"><header><h1>${titles[type]}</h1>${['tasks','today'].includes(type)?'<button class="btn" id="product-refresh">刷新</button>':''}</header>${body}</section>`;
     root.querySelectorAll('[data-product-target]').forEach(b=>b.onclick=()=>switchType(b.dataset.productTarget));
-    $('#product-refresh').onclick=()=>renderProductPage(type);
+    if($('#product-refresh'))$('#product-refresh').onclick=()=>renderProductPage(type);
     if($('#product-capability-engine'))$('#product-capability-engine').onchange=e=>{state.resourceEngine=e.target.value;localStorage.setItem('panel-resource-engine',state.resourceEngine);renderResourceEngines();renderProductPage(type);};
     if($('#product-task-filter'))$('#product-task-filter').onchange=e=>{const x=root._productTasks;const rows=e.target.value==='active'?x.active:e.target.value==='attention'?x.attention:e.target.value==='completed'?x.rows.filter(t=>t.state==='completed'):x.rows;$('#product-task-list').innerHTML=x.list(rows)||'<p class="product-empty">此状态下没有任务。</p>';};
   }catch(e){if(state.type===type)root.innerHTML=`<p role="alert">${esc(e.message)}</p>`;}
@@ -2901,11 +2901,13 @@ function routeOf(id) {
   const r = routeInfo; if (!r || !id) return null;
   const sid = id.toLowerCase(), e = r.items.find(x => x.id === sid), pin = r.routes[sid] || '';
   const pinName = pin && (r.accounts.find(a => a.id === pin) || {}).name;
-  return e || pin ? { ...(e || {}), pin, pinName } : null;
+  const lastAccount = r.codexRouting?.lastAccounts?.[sid];
+  const used = lastAccount && r.accounts.find(account => account.id === lastAccount);
+  return e || pin || used ? { accountName: used?.email || used?.name, ...(e || {}), pin, pinName } : null;
 }
 function routeOptions(current) {
   const r = routeInfo, opts = [`<option value="">${esc(routeGlobalLabel())}</option>`];
-  for (const a of (r ? r.accounts : []).filter(a => (!a.engine || a.engine === (chatView?.engine || 'claude')) && (a.enabled || a.id === current))) opts.push(`<option value="${esc(a.id)}"${a.id === current ? ' selected' : ''}${a.enabled ? '' : ' disabled'}>📌 ${esc(a.name)}</option>`);
+  for (const a of (r ? r.accounts : []).filter(a => (!a.engine || a.engine === (chatView?.engine || 'claude')) && (a.enabled || a.id === current))) opts.push(`<option value="${esc(a.id)}"${a.id === current ? ' selected' : ''}${a.enabled ? '' : ' disabled'}>📌 ${esc(a.email || a.name)}</option>`);
   return opts.join('');
 }
 function paintRoutes() {
@@ -3328,7 +3330,17 @@ function paintChatImages(body, images) {
   images.forEach((image, i) => {
     const figure = document.createElement('figure'), img = document.createElement('img'), caption = document.createElement('figcaption');
     img.src = `data:${image.mimeType};base64,${image.data}`; img.alt = `[Image #${i + 1}]`; caption.textContent = img.alt;
-    figure.append(img, caption); gallery.append(figure);
+    const open = document.createElement('button');
+    open.type = 'button'; open.setAttribute('aria-label', rt('查看原图', 'Open image') + ' ' + (i + 1)); open.append(img);
+    open.onclick = () => {
+      const dialog = document.createElement('dialog'), close = document.createElement('button');
+      dialog.className = 'chat-image-dialog'; dialog.setAttribute('aria-label', open.getAttribute('aria-label'));
+      close.type = 'button'; close.className = 'btn'; close.textContent = rt('关闭', 'Close');
+      close.onclick = () => dialog.close(); dialog.onclick = event => { if (event.target === dialog) dialog.close(); };
+      dialog.onclose = () => { dialog.remove(); open.focus(); };
+      dialog.append(close, img.cloneNode()); document.body.append(dialog); dialog.showModal();
+    };
+    figure.append(open, caption); gallery.append(figure);
   });
   body.before(gallery);
 }
@@ -3396,6 +3408,7 @@ function createChatTurn(v, prompt, images, id = crypto.randomUUID()) {
     paintChatTiming(node, answer);
     if (turn.finished) return;
     if (paintFrame) { cancelAnimationFrame(paintFrame); paintFrame = 0; }
+    if (article.querySelector('.chat-warning') && (timing.isError || timing.error)) article.querySelector('.chat-warning').remove();
     turn.finished = true; article.classList.remove('is-streaming', 'is-waiting'); article.removeAttribute('aria-busy'); activity.remove();
     turn.transcriptText = answer.text; // Status/error notices below are not native assistant text.
     answer.tools.forEach(tool => { if (tool.state === 'running') { tool.state = 'interrupted'; paintChatTool(node, tool); } });
@@ -3455,6 +3468,7 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
     let payload; try { payload = JSON.parse(data || '{}'); } catch { return; }
     if (kind === 'meta' && run.metaSeen && payload.jobId && payload.jobId !== v.lastReplayJobId) { resetRun(); run.lastSeq = 0; run.taskState = ConversationState.create(); }
     if (sequence && sequence <= (run.lastSeq || 0)) return;
+    if (v.engine === 'codex' && (kind === 'error' || kind === 'done') && payload.error) payload.error = ConversationState.codexLoginHint(payload.error, run.codexLogin);
     if (sequence) run.lastSeq = sequence;
     run.taskState ||= ConversationState.create(); ConversationState.apply(run.taskState, kind, payload);
     const shown = visible();
@@ -3472,6 +3486,7 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
     }
     if (kind === 'meta') {
       run.metaSeen = true;
+      run.codexLogin = payload.codexLogin || { machineLabel: payload.machineId || payload.node, routed: !!payload.routed };
       run.nativeAttached = !!payload.nativeAttached;
       // Engines may mint the thread id on the CLI side: replace the id the browser pre-allocated for a new chat.
       if (payload.sessionId && v.sessionId !== payload.sessionId) {
@@ -3512,7 +3527,18 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
       updateChatSendState(v); updateStatus(); return;
     }
     if (kind === 'idle') { run.activeId = ''; updateChatSendState(v); updateStatus(); return; }
-    if (kind === 'warning') { const active = run.turns.get(payload.messageId || run.activeId); if (active && !active.finished) { active.phase = rt(run.taskState.phase, ...ConversationState.labels(run.taskState.phase)); active.label.textContent = active.phase; } if (shown) toast(payload.warning, false); updateChatSendState(v); updateStatus(); return; }
+    if (kind === 'warning') {
+      if (ConversationState.codexNotice(payload.warning)) return;
+      const active = run.turns.get(payload.messageId || run.activeId);
+      if (active && !active.finished) {
+        active.phase = rt(run.taskState.phase, ...ConversationState.labels(run.taskState.phase));
+        active.label.textContent = active.phase;
+        let detail = active.article.querySelector('.chat-warning');
+        if (!detail) { detail = document.createElement('small'); detail.className = 'chat-warning'; active.article.append(detail); }
+        detail.textContent = payload.warning;
+      }
+      updateChatSendState(v); updateStatus(); return;
+    }
     if (kind === 'permission') {
       if (run.permissions.has(payload.id) || !shown) return;
       const card = document.createElement('section'); card.className = 'chat-permission';
@@ -3701,7 +3727,7 @@ function appendChatMessage(box, role, text, timing = {}) {
   box.querySelector('.chat-welcome')?.remove();
   const article = document.createElement('article'); article.className = 'chat-message ' + role;
   const label = document.createElement('div'); label.className = 'chat-message-label'; label.textContent = role === 'user' ? rt('你', 'You', 'あなた') : engineLabel(chatView?.engine || LEGACY_ENGINE);
-  const body = document.createElement('div'); body.className = 'chat-message-body'; body.innerHTML = role === 'assistant' ? md(text) : esc(text).replace(/\n/g, '<br>');
+  const body = document.createElement('div'); body.className = 'chat-message-body'; body.innerHTML = role === 'assistant' ? md(text) : esc(ConversationState.messageText(text, timing.images)).replace(/\n/g, '<br>');
   article.append(label, body); box.append(article); paintChatTiming(body, { role, ...timing }); return body;
 }
 
@@ -3824,7 +3850,7 @@ async function renderWorkspacesPanel() {
 async function openNodeAccess() {
   document.querySelector('#node-access-dialog')?.remove();
   const dialog = document.createElement('dialog'); dialog.id = 'node-access-dialog'; dialog.className = 'node-access-dialog';
-  dialog.innerHTML = `<header><div><span class="cluster-eyebrow">my-agents</span><h2>${esc(rt('添加电脑', 'Add computer', 'コンピューターを追加'))}</h2></div><button class="btn" data-node-close aria-label="${esc(rt('关闭', 'Close'))}">×</button></header><section id="node-access-runtime"><section id="node-access-content"></section></section>`;
+  dialog.innerHTML = `<header><div><h2>${esc(rt('添加电脑', 'Add computer', 'コンピューターを追加'))}</h2></div><button class="btn" data-node-close aria-label="${esc(rt('关闭', 'Close'))}">×</button></header><section id="node-access-runtime"><section id="node-access-content"></section></section>`;
   document.body.append(dialog);
   dialog.querySelector('[data-node-close]').onclick = () => dialog.close();
   dialog.addEventListener('close', () => dialog.remove(), { once: true });
@@ -3836,7 +3862,7 @@ async function renderNodesPanel(editing = false) {
 
   let section = $('#node-access-content');
   if (!section) { section = document.createElement('section'); section.className = 'nodes-panel chart'; section.id = 'node-access-content'; $('#render').append(section); }
-  section.innerHTML = `<div class="route-heading"><div><p class="route-muted">${esc(rt('填写平时用来 SSH 登录的地址或别名。面板会在远端准备 Node.js、安装执行程序，再连接这台设备。', 'Enter a passwordless SSH address or host alias. The panel prepares Node.js, installs the runner and connects the device.'))}</p></div><button class="btn" id="nodes-refresh">${esc(rt('刷新', 'Refresh'))}</button></div><div id="nodes-body"><p class="route-muted">${esc(rt('加载中…', 'Loading…'))}</p></div>`;
+  section.innerHTML = `<div class="route-heading"><div><p class="route-muted">${esc(rt('远端无需预装 my-agents。选择一种方式安装执行器，连接后即可在新对话中选择这台电脑。运行任务还需要相应的 Codex 或 Claude Code CLI 和可用账号。', 'Choose how to install the runner. No prior my-agents installation is required. Once connected, choose this computer in a new conversation. Tasks also require the corresponding Codex or Claude Code CLI and an account.'))}</p></div><button class="btn" id="nodes-refresh">${esc(rt('刷新', 'Refresh'))}</button></div><div id="nodes-body"><p class="route-muted">${esc(rt('加载中…', 'Loading…'))}</p></div>`;
   const load = async () => {
     const box = $('#nodes-body'); if (!box) return;
     let data;
@@ -3850,15 +3876,18 @@ async function renderNodesPanel(editing = false) {
       ${node.error ? `<small class="codex-warn">${esc(node.error)}</small>` : ''}</div>
       <div class="node-actions">${node.ssh ? `<button class="btn" data-node-action="reconnect">${esc(rt('重连', 'Reconnect'))}</button>` : ''}${node.transport !== 'cluster' ? `<button class="btn" data-node-action="remove">${esc(node.ssh ? rt('删除', 'Remove') : rt('断开', 'Disconnect'))}</button>` : ''}</div></div>`).join('');
     box.innerHTML = `
+      <div class="node-methods"><section class="node-method"><h3>${esc(rt('通过免密 SSH 添加', 'Use passwordless SSH'))}</h3>
+        <p>${esc(rt('适合已配置 SSH 密钥或 SSH agent 的电脑。面板使用当前用户的 SSH 配置自动安装并连接。', 'Use this when a key or SSH agent lets the panel user sign in without a prompt. Host aliases are supported.'))}</p>
       <form id="node-form" class="node-form node-quick"><div class="gateway-form-row"><label>${esc(rt('SSH 地址', 'SSH address'))}<input name="ssh" required placeholder="user@10.0.0.8" autocomplete="off" spellcheck="false"></label><label>${esc(rt('名称（选填）', 'Name (optional)'))}<input name="label" placeholder="${esc(rt('默认用主机名', 'Defaults to the host name'))}" autocomplete="off"></label></div>
         <p id="node-form-status" class="route-muted" role="status"></p><p id="node-form-error" class="codex-warn" role="alert"></p><button class="btn primary" type="submit">${esc(rt('添加电脑', 'Add computer', 'コンピューターを追加'))}</button></form>
+      </section><section class="node-method"><h3>${esc(rt('在远端终端接入', 'Connect from the remote terminal'))}</h3>
+        <p>${esc(rt('适合密码、验证码登录，或只能从远端访问面板的电脑。先自行登录远端，再运行接入命令。', 'For password or MFA logins, or when only the remote machine can reach the panel. Sign in on that machine, then run the connection command.'))}</p>
+        ${data.loopback ? `<p class="route-muted">${esc(rt('面板当前只接受本机连接。在面板服务环境中将 MY_AGENTS_BIND 设为可信内网地址，重启面板，再回来复制命令。也可以先配置免密 SSH。', 'This panel only accepts local connections. Set MY_AGENTS_BIND to its trusted LAN address in the service environment, restart the panel, then return to copy the command. You can also configure SSH keys.'))}</p>` : `<p class="route-muted">${esc(rt('命令含本面板令牌，仅在自己的远端终端运行。保持该进程运行即可接单。', 'The command includes your panel token. Run it in your own terminal and leave the process running to receive tasks.'))}</p><button class="btn" type="button" id="node-copy-command">${esc(rt('复制接入命令', 'Copy connection command'))}</button><textarea readonly hidden class="node-cmd" id="node-connect-command" aria-label="${esc(rt('接入命令', 'Connection command'))}"></textarea>`}
+      </section></div>
       ${rows ? `<details class="node-existing" open><summary>${esc(rt('已添加的电脑', 'Saved computers'))} · ${remote.length}</summary>${rows}</details>` : ''}
-      <details class="node-guide"><summary>${esc(rt('其他接入方式（一般用不到）', 'Other ways to connect (rarely needed)'))}</summary>
-        <p><strong>${esc(rt('让开发机主动连接', 'Connect from the development machine'))}</strong></p>
-        ${data.loopback ? `<p class="route-muted">${esc(rt('当前面板只接受本机连接。请使用上方 SSH 地址，或先在可信内网启用远程访问。', 'This panel listens on loopback. Use SSH above or enable remote access on your private network first.'))}</p>` : `<p>${esc(rt('把接入命令复制到自己的开发机终端。它会安装执行程序并连接当前面板，命令含访问令牌。', 'Paste the connection command into your own development terminal. It installs the runner and connects to this panel. The command contains an access token.'))}</p><button class="btn" type="button" id="node-copy-command">${esc(rt('复制接入命令', 'Copy connection command'))}</button><textarea readonly hidden class="node-cmd" id="node-connect-command" aria-label="${esc(rt('接入命令', 'Connection command'))}"></textarea>`}
-
-        <p><strong>${esc(rt('让它在本机关机时也能接管飞书', 'Let it take over Feishu when this Mac is off'))}</strong> · ${esc(rt('需要加入集群：在已有成员上运行 my-agents cluster add --id 名称 --url http://地址:4321，把输出的 join 命令拿到新机器上运行，再重启各面板。普通「添加电脑」不需要这一步。', 'Requires joining the cluster: run my-agents cluster add --id NAME --url http://HOST:4321 on a member, run the printed join command on the new machine, then restart the panels. Not needed for adding a machine.'))}</p>
-      </details>`;
+      <aside class="node-failover"><strong>${esc(rt('本机关机后仍要接收机器人消息？', 'Keep receiving messages when this computer is off?'))}</strong>
+        <p>${esc(rt('在其他常驻电脑安装完整面板，再组成三个投票成员的集群。只有执行器的电脑仅负责运行任务。', 'Install the full panel on always-on computers and form a three-voter cluster. A runner-only computer executes tasks.'))}
+        <a href="https://github.com/13days/my-agents/blob/main/docs/cluster-setup.md" target="_blank" rel="noopener">${esc(rt('集群安装与接管', 'Cluster setup and failover'))}</a></p></aside>`;
     const copyButton = $('#node-copy-command');
     if (copyButton) copyButton.onclick = async () => {
       const command = data.installHint || data.hint;
@@ -3923,12 +3952,12 @@ async function renderEngineAccountPool(engine, { quiet=false, refresh=false } = 
   section.innerHTML=`<div class="route-heading"><div><h3>${esc(title)} ${esc(rt('账号','accounts','アカウント'))} <small>(${data.accounts.length})</small></h3><p class="route-muted">${esc(rt('可以登录订阅账号，也可以添加代理或 API 账号。已连接的电脑共用这个工具的账号设置。','Sign in with a subscription or add a proxy or API account. Connected computers share the account settings for this tool.', 'サブスクリプションでログインするか、プロキシまたは API アカウントを追加できます。このツールの設定は接続済みのコンピューターで共有されます。'))}</p></div><button class="btn" id="${prefix}refresh">${esc(rt('刷新','Refresh'))}</button></div><div class="codex-pool-controls"><label>${esc(rt('新对话如何选择账号','Account selection for new chats','新規チャットのアカウント選択'))}<select id="${prefix}mode">${Object.entries(labels).map(([id,label])=>`<option value="${id}"${data.mode===id?' selected':''}>${esc(label)}</option>`).join('')}</select></label>${data.defaultModelsReady?`<label>${esc(rt('新对话默认模型','Default model for new chats','新規チャットの既定モデル'))}<select id="${prefix}default-model"><option value="">${esc(engine==='codex'?rt('未设置 · 账号实时推荐','Unset · account recommendation'):rt('未设置 · 跟随网关 / CLI 配置','Unset · gateway / CLI default'))}</option>${[...new Set([...(data.defaultModel?[data.defaultModel]:[]),...data.modelOptions])].map(id=>`<option value="${esc(id)}"${id===data.defaultModel?' selected':''}>${esc(id)}</option>`).join('')}</select></label>`:''}<details class="pool-add"><summary class="btn primary">＋ ${esc(rt('添加账号','Add account'))}</summary><div class="pool-add-menu"><button class="btn" id="${prefix}login"><strong>${esc(rt('登录订阅账号','Sign in with a subscription'))}</strong><small>${esc(rt('官方登录，完成后自动加入','Official sign-in, joins automatically'))}</small></button><button class="btn" id="${prefix}proxy"><strong>${esc(rt('代理 / API 账号','Proxy / API account'))}</strong><small>${esc(rt('填地址和 Token','Enter URL and token'))}</small></button><button class="btn" id="${prefix}file"><strong>${esc(rt('导入登录文件','Import a login file'))}</strong><small>auth.json</small></button></div></details><input type="file" accept=".json,application/json" id="${prefix}file-input" hidden></div>${modelSources}${engine==='codex'?`<div class="pool-more-body"><button type="button" class="btn" id="${prefix}bridge">${esc(rt('在 Claude Code 使用 Codex 订阅代理','Use a Codex subscription in Claude Code','Claude Code で Codex サブスクリプションを使う'))}</button>${data.terminal?`<button class="btn" id="codex-pool-terminal" title="${esc(data.terminal.file)}">${esc(data.terminal.enabled?rt('终端 Codex：走账号池（点击关闭）','Terminal Codex: via pool (click to turn off)'):rt('终端 Codex：直连本机登录（点击改走账号池）','Terminal Codex: native login (click to use pool)'))}</button>`:''}</div>`:''}<p id="${prefix}notice" class="route-muted" role="status"></p><div class="codex-pool-list">${data.accounts.map(account=>{
     const subscription=account.mode==='subscription'||account.mode==='chatgpt', cooling=account.cooldownUntil>Date.now();
     const usage=subscription?account.usage:null, revoked=!!usage?.revoked, exhausted=!!usage&&!revoked&&usage.limitReached;
-    const authFailed=subscription&&([401,403].includes(account.lastStatus)||revoked);
+    const authFailed=[401,403].includes(account.lastStatus)||revoked;
     const sharedWorkspace=usage?.workspace&&data.accounts.some(other=>other.id!==account.id&&other.usage?.workspace===usage.workspace);
     const resetText=usage?.resetAt?new Date(usage.resetAt).toLocaleString():'';
     const quota=!usage||revoked||usage.error?'':exhausted?rt('本周额度已用完','Weekly limit reached')+(resetText?rt(' · 重置于 ',' · resets ')+resetText:''):rt('本周已用 ','Weekly usage ')+Math.round(usage.usedPercent)+'%'+(resetText?rt(' · 重置于 ',' · resets ')+resetText:'');
     const quotaNote=[quota,sharedWorkspace?rt('与池中其他账号同一 workspace，共享 workspace credits','Same workspace as another pool account; workspace credits are shared'):''].filter(Boolean).join(' · ');
-    const status=!account.enabled?rt('已停用','Disabled'):authFailed?rt('凭证已失效，需重新授权','Credential revoked; sign in again'):exhausted?rt('额度已用完','Limit reached'):cooling?rt('冷却中','Cooling down'):account.available===false?(account.renewable?rt('可自动刷新','Refreshable'):rt('需重新登录','Sign in needed')):rt('可用','Ready');
+    const status=!account.enabled?rt('已停用','Disabled'):authFailed?(subscription?rt('认证失败，需重新授权','Authentication failed; sign in again'):rt('认证失败，请检查 Token 或访问权限','Authentication failed; check token or permissions')):exhausted?rt('额度已用完','Limit reached'):cooling?rt('冷却中','Cooling down'):account.available===false?(account.renewable?rt('可自动刷新','Refreshable'):rt('需重新登录','Sign in needed')):rt('可用','Ready');
     const origin=account.origin||account.sourceNode;
     return `<article class="codex-pool-account" data-engine-account="${esc(account.id)}"><div><h4>${esc(subscription&&account.email?account.email:account.name)} ${data.selected===account.id?`<small>${esc(rt('首选','Preferred'))}</small>`:''}</h4>${subscription&&account.email&&account.name!==account.email?`<small class="route-muted">${esc(account.name)}</small>`:''}<p class="route-muted"><span class="route-badge">${esc(subscription?rt('订阅','Subscription'):rt('代理 / API','Proxy / API'))}</span> · ${esc(status)}${origin?' · '+esc(rt('来源 ','Source ')+origin):''}</p>${!subscription&&account.url?`<small class="route-muted">${esc(account.url)}</small>`:''}${subscription&&account.expiresAt?`<small class="route-muted">${esc(rt('凭证有效期至 ','Credential expires ')+new Date(account.expiresAt).toLocaleString())}</small>`:''}${quotaNote?`<small class="route-muted">${esc(quotaNote)}</small>`:''}${account.unavailableReason?`<p class="route-muted">${esc(account.unavailableReason)}</p>`:''}</div><div class="node-actions pool-row-actions">${subscription&&authFailed?`<button class="btn primary" data-engine-action="login">${esc(rt('重新授权','Sign in again'))}</button>`:''}${account.enabled&&data.selected!==account.id&&!authFailed?`<button class="btn" data-engine-action="use">${esc(rt('设为首选','Make preferred'))}</button>`:''}${!account.enabled?`<button class="btn" data-engine-action="toggle">${esc(rt('启用','Enable'))}</button>`:''}<details class="pool-row-more"><summary class="btn" aria-label="${esc(rt('更多操作','More actions'))}">⋯</summary><div class="pool-add-menu pool-row-menu"><button class="btn" data-engine-action="check" ${account.enabled?'':'disabled'}>${esc(rt('检查连接','Check connection'))}</button>${subscription&&!authFailed?`<button class="btn" data-engine-action="login">${esc(rt('重新授权','Sign in again'))}</button>`:''}${!subscription?`${engine==='claude'?`<button class="btn" data-engine-action="models">${esc(rt('选择模型','Choose model'))}</button>`:''}<button class="btn" data-engine-action="edit">${esc(rt('编辑','Edit'))}</button>`:''}<button class="btn" data-engine-action="rename">${esc(rt('改名','Rename'))}</button>${account.enabled?`<button class="btn" data-engine-action="toggle">${esc(rt('停用','Disable'))}</button>`:''}<button class="btn" data-engine-action="remove">${esc(rt('移除','Remove'))}</button></div></details></div></article>`;
   }).join('')||`<p class="route-muted">${esc(rt('暂无账号。完成上方订阅登录，或添加一个代理账号。','No accounts yet. Sign in with a subscription or add a proxy account.'))}</p>`}</div>`;

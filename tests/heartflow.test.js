@@ -48,7 +48,18 @@ test('normalize preserves mentions, quoted parent, edited/deleted state without 
  const m=normalizeMessage({message_id:'om_1',chat_id:'oc_x',msg_type:'text',body:{content:'{"text":"@_user_1 <script>bad</script>"}'},mentions:[{key:'@_user_1',name:'吴',id:'me'}],parent_id:'om_0',create_time:'10',update_time:'20',deleted:true});assert.equal(m.text,'@吴 <script>bad</script>');assert.equal(m.parentId,'om_0');assert.equal(m.deleted,true);assert.equal(m.updatedAt,20);
 });
 test('cards bind approval to version and owner; truncated descriptions cannot be approved',()=>{
- const proposal={id:'p',version:3,title:'任务',summary:'说明',reason:'相关',actions:[action('a')]};let c=heartflowCard({proposal,owner:'owner',coordinator:'mac'});const b=c.elements.at(-1).actions[0];assert.equal(b.value.version,3);assert.equal(b.value.owner,'owner');proposal.actions[0].prompt='x'.repeat(17000);c=heartflowCard({proposal,owner:'owner',coordinator:'mac'});assert.ok(c.elements.at(-1).actions.every(b=>b.value?.decision!=='approve'));
+ const proposal = { id: 'p', version: 3, title: '任务', summary: '说明', reason: '相关', actions: [action('a')] };
+ const decisions = () => {
+   const values = [];
+   JSON.stringify(heartflowCard({ proposal, owner: 'owner', coordinator: 'mac' }), (key, value) => {
+     if (value?.type === 'callback') values.push(value.value);
+     return value;
+   });
+   return values;
+ };
+ assert.deepEqual(decisions().find(value => value.decision === 'approve'), { action: 'heartflow_review', id: 'p', version: 3, owner: 'owner', coordinator: 'mac', decision: 'approve' });
+ proposal.actions[0].prompt = 'x'.repeat(17000);
+ assert.ok(decisions().every(value => value.decision !== 'approve'));
 });
 
 test('new evidence joins an existing pending proposal and makes the old card stale',async t=>{

@@ -3,6 +3,7 @@ const { sendMarkdown } = require('./feishu-markdown');
 // message. Capture the transport so cleanup also works while the gateway stops.
 function createSimpleReply({ channel, msg, messageId, footer = '', onError = () => {}, onFinish = () => {}, onClose = () => {} }) {
   let reactionId, unsubscribe, timer, closed = false, closing, text = '', done = false, fallback = '已完成。', permissionPending = false, failed = false, handoverNotice = false;
+  const errorText = error => msg.chatType === 'group' && /本轮尝试的账号：/.test(error) ? '模型账号暂时不可用，请在面板「AI 账号」查看本轮登录状态。' : error;
   async function clearReaction() {
     if (!reactionId) return;
     const id = reactionId; reactionId = null;
@@ -47,8 +48,8 @@ function createSimpleReply({ channel, msg, messageId, footer = '', onError = () 
           sendText('任务需要工具授权，请在当前任务所在面板中确认后继续。').catch(onError);
         }
         if (event === 'permission_resolved') permissionPending = false;
-        if (event === 'error') { failed = true; text += (text ? '\n' : '') + '未能完成：' + (data.error || '执行失败'); done = true; }
-        if (event === 'done') { if (data.isError) failed = true; done = true; if (data.interrupted) fallback = ''; else if (data.isError) fallback = data.error || '执行失败，请查看 Panel 中的任务记录。'; }
+        if (event === 'error') { failed = true; text += (text ? '\n' : '') + '未能完成：' + (errorText(data.error) || '执行失败'); done = true; }
+        if (event === 'done') { if (data.isError) failed = true; done = true; if (data.interrupted) fallback = ''; else if (data.isError) fallback = errorText(data.error) || '执行失败，请查看 Panel 中的任务记录。'; }
         if (event === 'stopped') { done = true; fallback = '已停止。'; }
         if (event === 'end' && !done) { done = true; fallback = '任务连接已结束，请重新发送消息继续。'; }
         if (done) { clearTimeout(timer); timer = setTimeout(finish, 0); }

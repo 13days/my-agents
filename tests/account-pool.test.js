@@ -341,3 +341,24 @@ test('subscription status exposes email metadata without credentials and preserv
  assert.equal(accountEmail({tokens:{id_token:'broken',access_token:token({'https://api.openai.com/profile':{email:'fallback@example.com'}})}}),'fallback@example.com');
  assert.equal(accountEmail({tokens:{id_token:token({email:'<invalid>'})}}),'');assert.equal(accountEmail({}), '');
 });
+
+test('expired subscriptions try other renewable accounts and manual selection stays fixed', async t => {
+  const expired = id => ({ tokens: { account_id: id, access_token: jwt(1, 2), refresh_token: id } });
+  const f = fixture(t), calls = [];
+  let first;
+  const node = f.add('local', null, { renew: async login => {
+    const id = accountId(login, 'chatgpt'); calls.push(id);
+    if (id === first) throw Object.assign(new Error('revoked'), { status: 401 });
+    return { tokens: { ...login.tokens, access_token: jwt(100, Math.floor(Date.now() / 1000) + 3600) } };
+  } });
+  for (const id of ['old-a', 'old-b']) node.pool.importCodex(expired(id));
+  const ids = node.pool.codexStatus().accounts.map(item => item.id).sort();
+  first = ids[0];
+  node.pool.setRouting({ mode: 'failover' });
+  assert.equal((await node.pool.resolveCodex('chatgpt', 'thread')).accountId, ids[1]);
+  assert.deepEqual(calls, ids);
+  assert.equal(node.pool.codexStatus().accounts.find(item => item.id === first).lastStatus, 401);
+  node.pool.pinCodex('thread', first);
+  await assert.rejects(node.pool.resolveCodex('chatgpt', 'thread'), /共享登录刷新失败/);
+  assert.equal(calls.at(-1), first);
+});

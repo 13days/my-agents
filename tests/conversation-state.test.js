@@ -12,3 +12,25 @@ test('background task and final-summary waits stay nonterminal in both Web and I
  state.apply(view,'warning',{kind:'native_summary',warning:'awaiting summary'});assert.equal(view.phase,'等待原会话汇总');assert.equal(view.done,false);
  state.apply(view,'text',{text:'Final result'});state.apply(view,'done',{});assert.equal(view.phase,'已完成');
 });
+
+test('only an actual reconnect changes the phase during live delivery and replay',()=>{
+ const view=state.create(); state.apply(view,'text',{text:'hello'});
+ for(const warning of ['Model metadata for demo not found. Defaulting to fallback metadata; using defaults.', 'other notice']) {
+   state.apply(view,'warning',{warning}); assert.equal(view.phase,'正在输出');
+ }
+ state.apply(view,'warning',{warning:'Reconnecting... 2/5 (connection reset)'}); assert.equal(view.phase,'连接重试中');
+ state.apply(view,'error',{error:'authentication failed'}); assert.equal(view.phase,'失败');
+});
+test('hide only the native attachment prefix when matching images are present',()=>{
+ const descriptor='<image name="[Image #1]" path="/tmp/test.png">\n</image>[Image #1] ';
+ assert.equal(state.messageText(descriptor+'line 1\nline 2',[{}]),'line 1\nline 2');
+ assert.equal(state.messageText(descriptor+'question',[]),descriptor+'question');
+ assert.equal(state.messageText('sample code\n'+descriptor,[{}]),'sample code\n'+descriptor);
+});
+
+test('a historical revoked grant shows one account-specific recovery action in the web conversation',()=>{
+ const raw='Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.';
+ const shown=state.codexLoginHint(state.codexLoginHint(raw),{machineLabel:'Mac',email:'demo@example.org',poolEnabled:true});
+ assert.match(shown,/Mac · 原终端登录 · demo@example.org/); assert.match(shown,/账号策略/);
+ assert.ok(!shown.includes(raw)); assert.ok(!state.codexLoginHint(raw,{machineLabel:'Box'}).includes('undefined'));
+});

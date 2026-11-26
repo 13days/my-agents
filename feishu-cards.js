@@ -9,11 +9,26 @@ const escape = value => String(value || '').replace(/([\\`*_[\]<>])/g, '\\$1').r
 const plain = value => ({ tag: 'plain_text', content: String(value || '') });
 const markdown = (content, small = false) => ({ tag: 'markdown', content: String(content || '').replace(/<at\b/gi, '&lt;at'), text_size: small ? 'notation' : 'normal' });
 const muted = content => markdown(`<font color='grey'>${content}</font>`, true);
-const button = (text, value, type = 'default') => ({ tag: 'button', text: plain(text), type, behaviors: [{ type: 'callback', value }] });
-const buttons = items => ({ tag: 'column_set', flex_mode: 'none', columns: [{ tag: 'column', width: 'weighted', weight: 1, elements: Array.from({ length: Math.ceil(items.length / 2) }, (_, i) => ({ tag: 'column_set', flex_mode: 'none', horizontal_spacing: '8px', columns: items.slice(i * 2, i * 2 + 2).map(item => ({ tag: 'column', width: 'weighted', weight: 1, elements: [{ ...item, width: 'fill' }] })) })) }] });
-const collapse = (title, elements, expanded = false, id) => ({ tag: 'collapsible_panel', ...(id ? { element_id: id } : {}), expanded, header: { title: plain(title), icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' }, icon_position: 'right', icon_expanded_angle: -180 }, border: { color: 'grey', corner_radius: '5px' }, vertical_spacing: '8px', padding: '8px 8px 8px 8px', elements });
-function card(title, elements, { subtitle = 'my-agents', template = 'grey', summary = title, showHeader = true } = {}) {
-  return { schema: '2.0', config: { width_mode: 'default', update_multi: true, summary: { content: clip(summary, 120) } }, ...(showHeader ? { header: { title: plain(clip(title, 64)), ...(subtitle ? { subtitle: plain(clip(subtitle, 100)) } : {}), template } } : {}), body: { padding: '12px 16px 12px 16px', vertical_spacing: '12px', elements } };
+const button = (text, value, type = 'default') => ({ tag: 'button', text: plain(text), type, size: 'small', behaviors: [{ type: 'callback', value }] });
+function buttons(items) {
+  const rows = [];
+  for (let start = 0; start < items.length;) {
+    const trio = items.slice(start, start + 3);
+    const count = trio.length === 3 && trio.every(item => Array.from(item.text.content).length <= 5) ? 3 : 2;
+    const columns = items.slice(start, start + count).map(item => ({ tag: 'column', width: 'auto', elements: [item] }));
+    rows.push({ tag: 'column_set', flex_mode: 'none', horizontal_spacing: '4px', columns });
+    start += count;
+  }
+  if (rows.length === 1) return rows[0];
+  return { tag: 'column_set', columns: [{ tag: 'column', width: 'weighted', weight: 1, vertical_spacing: '4px', elements: rows }] };
+}
+const collapse = (title, elements, expanded = false, id) => ({
+  tag: 'collapsible_panel', ...(id ? { element_id: id } : {}), expanded, padding: '0px 0px 0px 0px',
+  header: { title: plain(title), icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' }, icon_position: 'follow_text', icon_expanded_angle: -180 },
+  vertical_spacing: '4px', elements,
+});
+function card(title, elements, { subtitle = '', template = 'grey', summary = title, showHeader = true } = {}) {
+  return { schema: '2.0', config: { width_mode: 'default', update_multi: true, summary: { content: clip(summary, 120) } }, ...(showHeader ? { header: { title: plain(clip(title, 64)), ...(subtitle ? { subtitle: plain(clip(subtitle, 100)) } : {}), template } } : {}), body: { padding: '8px 12px 8px 12px', vertical_spacing: '4px', elements } };
 }
 const TASK_DETAILS = 'task_details';
 const RESULT_SIGNATURE = 'my_agents_reply_signature';
@@ -69,10 +84,21 @@ const catalogOf = context => context.engines || engineCatalog();
 const sessionReference = item => ({ id: item.id, machineId: item.machineId || (item.node !== 'local' ? item.node : undefined), engine: item.engine, cwd: item.cwd || item.project, workspaceId: item.workspaceId, ...(item.title || item.sessionName ? { title: clip(previewText(item.sessionName || item.title), 120) } : {}) });
 const action = (context, value) => ({ ...value, ...(context.expectedSessionId ? { expectedSessionId: context.expectedSessionId } : {}), ...(value.id && value.id === context.session?.id && (context.session.machineId || context.session.cwd) ? { session: context.session } : {}), owner: context.owner, key: context.key });
 function row(title, detail, operation) {
-  return { tag: 'column_set', flex_mode: 'stretch', horizontal_spacing: '12px', columns: [
-    { tag: 'column', width: 'weighted', weight: 1, elements: [markdown(`**${title}**`), muted(detail)] },
+  return { tag: 'column_set', flex_mode: 'stretch', horizontal_spacing: '8px', columns: [
+    { tag: 'column', width: 'weighted', weight: 1, vertical_spacing: '0px', elements: [markdown(`**${title}**`), muted(detail)] },
     ...(operation ? [{ tag: 'column', width: 'auto', vertical_align: 'center', elements: [operation] }] : []),
   ] };
+}
+function helpCard({ sections, ...context }) {
+  const elements = [markdown('直接发送问题可继续当前会话。'), buttons([
+    button('找会话', action(context, { action: 'sessions' }), 'primary'),
+    button('新建任务', action(context, { action: 'new_form' })),
+  ])];
+  for (const { title, rows } of sections) {
+    const content = rows.map(([command, hint]) => '**' + command + '**  ' + hint).join('\n');
+    elements.push(collapse(title, [markdown(content)]));
+  }
+  return card('飞书使用帮助', elements);
 }
 function sessionTime(value, timeZone) {
   if (!value) return '未记录';
@@ -85,10 +111,10 @@ function sessionList({ rows, total, page, query, selected, ...context }) {
   const timeZone = context.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
   const render = (previewSize, titleSize, previewCount) => {
     const elements = [muted(`${context.location ? context.location + ' · ' : ''}共 ${total} 个会话 · 第 ${page + 1} / ${pages} 页${query ? ' · 筛选：' + escape(clip(query, 50)) : ''}`)];
-    elements.push({ tag: 'form', name: 'session_search', elements: [
-      { tag: 'input', name: 'query', input_type: 'text', default_value: query || '', max_length: 80, placeholder: plain('搜索会话名称、项目、分支或近期问题'), width: 'fill' },
-      { ...button('查找会话', action(context, { action: 'sessions_search' }), 'primary'), name: 'search_sessions', form_action_type: 'submit' },
-    ] });
+    elements.push({ tag: 'form', name: 'session_search', elements: [{ tag: 'column_set', flex_mode: 'none', horizontal_spacing: '4px', columns: [
+      { tag: 'column', width: 'weighted', weight: 1, elements: [{ tag: 'input', name: 'query', input_type: 'text', default_value: query || '', max_length: 80, placeholder: plain('搜索名称、项目、分支或问题'), width: 'fill' }] },
+      { tag: 'column', width: 'auto', vertical_align: 'center', elements: [{ ...button('搜索', action(context, { action: 'sessions_search' })), name: 'search_sessions', form_action_type: 'submit' }] },
+    ] }] });
     if (context.unavailable?.length) elements.push(muted('部分机器暂不可读取，保留已知记录：' + context.unavailable.join('、')));
     rows.slice(0, SESSION_PAGE_SIZE).forEach((item, index) => {
       const rowContext = { ...context, session: sessionReference(item) };
@@ -100,21 +126,26 @@ function sessionList({ rows, total, page, query, selected, ...context }) {
       if (!previews.length) previews.push(!previewCount ? '点击下方按钮查看用户消息。' : item.previewUnavailable ? '暂时无法读取用户消息；远程历史可能尚未同步。' : '暂无已保存的用户消息。');
       const contents = !previewCount && (item.userMessages || []).length ? [] : [markdown(previews.join('\n\n'), true)];
       if ((item.userMessages || []).length) contents.push(button('查看全部用户消息', action(rowContext, { action: 'user_messages', id: item.id })));
-      const details = `${escape(clip(item.machineId || item.node || '机器未记录',24))} · ${catalogOf(context).label(item.engine || 'claude')} · ${escape(clip(path.basename(item.repository || item.worktree?.repository || item.project || ''), 32)) || '未指定项目'} · ${turns} · ${current ? '● 当前会话' : item.running ? '● 运行中' : '可接续'}`;
-      elements.push(markdown(`**${number}. ${escape(clip(title, titleSize))}**`), muted(details), muted(`创建 ${sessionTime(item.createdAt || item.first, timeZone)} · 最近 ${sessionTime(item.lastAt || item.last, timeZone)}`));
-      if (item.gitBranch || item.workspaceLabel) elements.push(muted('分支 / 工作区：' + escape(clip([item.gitBranch, item.workspaceLabel].filter(Boolean).join(' · '), 100))));
-      if (item.latestPrompt) elements.push(markdown('最近问题：' + escape(clip(previewText(item.latestPrompt), Math.max(60, previewSize)))));
-      contents.push(muted('目录：' + escape(clip(item.project || '', 180)) + '\n会话：' + item.id));
-      elements.push(collapse('展开用户消息', contents, false, `session_messages_${index}`));
-      elements.push(buttons([button(current ? '当前会话' : '切换到此会话', action(rowContext, { action: 'switch', id: item.id }), current ? 'primary' : 'default')]));
-
+      const project = path.basename(item.repository || item.worktree?.repository || item.project || '');
+      const last = sessionTime(item.lastAt || item.last, timeZone);
+      const meta = [escape(clip(item.machineId || item.node, 24)), catalogOf(context).label(item.engine || 'claude'), escape(clip(project, 32)), turns, item.running && '运行中', last !== '未记录' && last.replace(/^\d{4}\//, '')].filter(Boolean);
+      elements.push(row(`${number}. ${escape(clip(title, titleSize))}`, meta.join(' · '),
+        button(current ? '当前会话' : '切换', action(rowContext, { action: 'switch', id: item.id }))));
+      const latest = previewText(item.latestPrompt);
+      if (latest && latest !== title && !messages.some(message => previewText(message.text) === latest)) contents.unshift(markdown('最近问题：' + escape(clip(latest, previewSize)), true));
+      contents.push(muted([
+        '创建 ' + sessionTime(item.createdAt || item.first, timeZone) + ' · 最近 ' + last + ' (' + timeZone + ')',
+        (item.gitBranch || item.workspaceLabel) && '分支 / 工作区：' + escape(clip([item.gitBranch, item.workspaceLabel].filter(Boolean).join(' · '), 100)),
+        '目录：' + escape(clip(item.cwd || item.project, 180)), '会话：' + escape(item.id),
+      ].filter(Boolean).join('\n')));
+      elements.push(collapse('会话详情', contents, false, 'session_messages_' + index));
     });
     if (!rows.length) elements.push(markdown('没有找到匹配的会话。试试其他关键词，或新建一个会话。'));
     const navigation = [];
     if (page > 0) navigation.push(button('← 上一页', action(context, { action: 'sessions', page: page - 1, query })));
     if (page + 1 < pages) navigation.push(button('下一页 →', action(context, { action: 'sessions', page: page + 1, query })));
-    navigation.push(button('刷新', action(context, { action: 'sessions', page, query })), button('＋ 新建会话', action(context, { action: 'new_form' }), 'primary'));
-    elements.push(buttons(navigation), muted(`各机器实时汇总，运行中优先，其余按最近活动排序；点击“展开用户消息”查看近期对话。时间：${timeZone}。/sessions 关键词筛选；/switch 序号切换。`));
+    navigation.push(button('刷新', action(context, { action: 'sessions', page, query })), button('新建会话', action(context, { action: 'new_form' }), 'primary'));
+    elements.push(buttons(navigation));
     return card('最近会话', elements, { summary: `${total} 个会话 · 选择一个继续工作` });
   };
   // Collapsed content still counts toward Feishu's 30 KB limit.
@@ -161,7 +192,7 @@ function projectList({ rows, total, page, defaultProject, engine = 'claude', nod
   for (const other of engines.others(engine)) navigation.push(button(`改用 ${other.label}`, action(context, { action: 'projects', page, engine: other.id, ...at })));
   navigation.push(button('切换运行位置', action(context, { action: 'nodes' })), button('返回会话', action(context, { action: 'sessions' })));
   elements.push(buttons(navigation), muted(remote ? `使用未列出的目录：发送 /node ${node} /绝对路径（支持 ~/）。目录须已在${escape(nodeLabel)}上创建。` : `使用未列出的目录：发送 /new ${engine} /绝对路径（支持 ~/，路径有空格也可直接粘贴）。目录须已在本机创建，选用后会保留在列表中。`));
-  return card('选择工作项目', elements, { subtitle: `my-agents · ${nodeLabel}` });
+  return card('选择工作项目', elements, { subtitle: nodeLabel });
 }
 function nodePicker({ node = 'local', nodes = [], engine = 'claude', sessionId, ...context }) {
   context.expectedSessionId = sessionId;
@@ -176,7 +207,7 @@ function nodePicker({ node = 'local', nodes = [], engine = 'claude', sessionId, 
   if (nodes.length < 2) elements.push(markdown('还没有远程节点。请在「电脑与 AI 账号 → 连接电脑」添加电脑。'));
   elements.push(muted(`/node 节点名 路径 直接切到某台机器的指定目录，例如 /node ${escape(nodes[1]?.id || 'devbox')} ~/repos/项目。远程节点上的 Claude 和 Codex 都走面板的账号与抓包。`));
   if (sessionId) elements.push(buttons([button('返回会话设置', action(context, { action: 'view', id: sessionId }))]));
-  return card('切换执行机器', elements, { subtitle: `my-agents · ${current}` });
+  return card('切换执行机器', elements, { subtitle: current });
 }
 function enginePicker({ engine = 'claude', defaultEngine = 'claude', cwd, sessionId, ...context }) {
   context.expectedSessionId = sessionId;
@@ -228,9 +259,8 @@ function currentSession({ binding, item, switched = false, exists = false, runni
   if (!isCurrent) requests = [];
   const pending = !item && !exists, title = item?.title || '新会话', engines = catalogOf(context), engineId = item?.engine || binding.engine || 'claude', engine = engines.label(engineId);
   const projectName = path.posix.basename(binding.worktree?.repository || binding.cwd) || binding.cwd, project = escape(projectName), where = escape(nodeLabel);
-  const elements = pending ? [markdown(`**当前项目：${project}**`), muted(`${context.location || '当前位置'} · ${engine} · ${where} · 项目确认后，直接发送问题开始对话`)] : [markdown(`**${escape(clip(title, 100))}**`), muted(`${context.location ? context.location + ' · ' : ''}${engine} · ${where} · ${project} · ${running ? '● 正在运行' : '已就绪，直接发消息继续'}`)];
+  const elements = pending ? [markdown(`**当前项目：${where} · ${project}**`), muted(`${context.location || '当前位置'} · ${engine} · 直接发送问题开始对话`)] : [markdown(`**${escape(clip(title, 100))}**`), muted(`${context.location ? context.location + ' · ' : ''}${engine} · ${where} · ${project} · ${running ? '● 正在运行' : '已就绪，直接发消息继续'}`)];
   elements.push(muted(`请求模型：${escape(model)}（代理可能映射为其他模型）`));
-  if (nodeLabel) elements.push(muted(`执行机器：${escape(nodeLabel)}`));
   if (binding.handoff) elements.push(markdown(`**${binding.handoff.from === binding.handoff.to ? '已创建接续会话 · ' + escape(binding.handoff.to) : '执行位置已切换：' + escape(binding.handoff.from) + ' → ' + escape(binding.handoff.to)}**\n${binding.handoff.reason === 'offline' ? '原机器离线，接管机器已接续新一轮。' : '已按手动选择创建接续会话。'}${binding.handoff.context === 'checkpoint' ? '上下文来自有限的对话检查点，文件和工具状态需核对。' : '没有可恢复的对话检查点，请补充必要上下文。'}`));
   if (binding.worktree) elements.push(muted(`独立工作区 · ${escape(binding.worktree.branch)}`));
   elements.push(...permissions(context, binding, requests), collapse(pending ? '项目位置' : '会话信息', [markdown(pending ? escape(binding.cwd) : `${escape(binding.cwd)}\n\`${binding.id}\``, true)]));
@@ -245,16 +275,13 @@ function currentSession({ binding, item, switched = false, exists = false, runni
     ]));
   } else elements.push(markdown('这不是本话题当前绑定的会话。可先查看对话；切换到此会话后再修改设置。'), buttons(actions));
   elements.push(muted('直接发送消息可继续当前会话。群和话题内已授权成员共用绑定；卡片操作限发起人。'));
-  return card(switched ? '已切换到此会话' : pending ? '新会话已就绪' : '会话设置', elements, { subtitle: `${engine} · ${nodeLabel} · ${projectName}`, template: requests.length ? 'orange' : 'grey' });
+  return card(switched ? '已切换到此会话' : pending ? '新会话已就绪' : '会话设置', elements, { template: requests.length ? 'orange' : 'grey' });
 }
 const TASK_REPLY = 'task_reply';
 const TASK_STATUS = 'task_status';
 
 function taskDetails(elements, title = '详情与操作') {
-  const panel = collapse(title, elements, false, TASK_DETAILS);
-  delete panel.border;
-  panel.padding = '0px 0px 0px 0px';
-  return panel;
+  return collapse(title, elements, false, TASK_DETAILS);
 }
 
 function task({ binding, title, view, elapsed, nodeLabel = '', defaultNodeLabel = '', ...context }) {
@@ -393,4 +420,4 @@ function routes({ status, codex, pinned, sessionId, notice = '', now = Date.now(
   if (advanced.length) elements.push(collapse('连接诊断与冷却设置', [muted('清除冷却会立即重新尝试故障账号。Codex 直连将绕过本地请求记录，请仅在排查连接时调整。'), buttons(advanced)]));
   return card('账号与连接', elements, { subtitle: '账号与策略调整 · 后续请求生效', template: accounts.some(a => a.enabled && (a.cooldownUntil || 0) > now) ? 'orange' : 'grey', summary: `路由：${MODE_NAMES[mode] || mode}` });
 }
-module.exports = { withReplySignature, replySignature, shareCard, resultSnapshot, interruptedTask, PAGE_SIZE, SESSION_PAGE_SIZE, REPLY_PREVIEW, card, markdown, button, buttons, collapse, sessionRecovery, sessionList, sessionUserMessages, projectList, nodePicker, enginePicker, modelPicker, currentSession, task, routes, MODE_NAMES };
+module.exports = { helpCard, withReplySignature, replySignature, shareCard, resultSnapshot, interruptedTask, PAGE_SIZE, SESSION_PAGE_SIZE, REPLY_PREVIEW, card, markdown, button, buttons, collapse, sessionRecovery, sessionList, sessionUserMessages, projectList, nodePicker, enginePicker, modelPicker, currentSession, task, routes, MODE_NAMES };

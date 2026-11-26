@@ -1499,3 +1499,21 @@ test('shared answers refer to the original completed turn, survive restart, and 
     assert.equal(f.sent.length,count);
   } finally { await resumed.stop(); }
 });
+
+test('help offers bound shortcuts, matching text help and a smaller group command set', async t => {
+  const f = await fixture(t); await f.pair();
+  await f.gateway.receive(f.msg('/help'));
+  const sent = f.sent.at(-1), card = sent.content.card;
+  const groups = card.body.elements.filter(e => e.tag === 'collapsible_panel');
+  assert.equal(groups.length, 4);
+  const find = card.body.elements[1].columns[0].elements[0].behaviors[0].value;
+  await f.gateway.action({ chatType: 'p2p', messageId: sent.messageId, chatId: sent.chatId, operator: { openId: 'ou_owner' }, action: { value: find } });
+  assert.equal(f.sent.at(-1).content.card.header.title.content, '最近会话');
+  await f.gateway.receive(f.msg('/reply markdown'));
+  await f.gateway.receive(f.msg('/help'));
+  for (const group of groups) assert.ok(f.sent.at(-1).content.post.zh_cn.content[0][0].text.includes(group.header.title.content));
+  await f.gateway.configure({ allowAllGroups: true });
+  await f.gateway.receive(f.msg('/help', { chatType: 'group', chatId: 'oc_public', mentionedBot: true }));
+  assert.match(f.sent.at(-1).content.post.zh_cn.content[0][0].text, /\/queue/);
+  assert.doesNotMatch(f.sent.at(-1).content.post.zh_cn.content[0][0].text, /\/sessions|\/route/);
+});

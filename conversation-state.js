@@ -9,13 +9,40 @@
     return String(text || '').replace(/<\/?image\b[^>]*(?:>|$)/gi, ' ')
       .replace(/\[Image\s+#\d+\]/gi, ' ').replace(/\s+/g, ' ').trim();
   }
+  function codexNotice(message) {
+    const value = String(message || '').trim().replace(/\x60/g, '');
+    if (/^\[features\]\.[\w-]+\s+is deprecated\b/i.test(value)) return 'deprecated_config';
+    if (/^Model metadata for .+ not found\.\s+Defaulting to fallback metadata\b/i.test(value)) return 'model_metadata_fallback';
+    if (/^Configured service tier .+ is not advertised as supported for model .+ and will be omitted from requests\./i.test(value)) return 'service_tier_omitted';
+    return '';
+  }
+  function connectionRetry(message) {
+    return /^\s*(?:reconnecting|retrying connection)(?:[.\s…:]+\d+\s*\/\s*\d+|\b.*\bin \d+\s*(?:ms|s)\b)/i.test(message || '');
+  }
+  const revokedLogin = /(?:^|\n)Your access token could not be refreshed because your refresh token was revoked\b/i;
+  function codexLoginHint(error, source) {
+    if (!revokedLogin.test(error || '')) return error;
+    if (!source) return error.startsWith('Codex 登录已失效') ? error : 'Codex 登录已失效。请在执行机器运行 codex login，或在面板重新授权本轮账号。\n\n' + error;
+    return source.routed
+      ? 'Codex 账号池认证失败。请到「AI 账号 → Codex」查看本轮账号的状态。'
+      : 'Codex 登录已失效。' + [source.machineLabel, '原终端登录', source.email].filter(Boolean).join(' · ') + '。' +
+        (source.poolEnabled ? '重新发送即可按面板账号策略续接此对话。' : '请在原执行机器运行 codex login 后重试。');
+  }
+  function messageText(text, images) {
+    if (!images?.length) return text;
+    // Only strip the CLI-generated attachment prefix when its image is also rendered.
+    return String(text || '').replace(/^(?:\s*<image name="?(\[Image #(\d+)\])"? path="[^"\n]+">\s*<\/image>\s*(?:\1)?[ \t]*)+/i, prefix => {
+      const ids = [...prefix.matchAll(/<image name="?\[Image #(\d+)\]/gi)];
+      return ids.every(match => +match[1] > 0 && +match[1] <= images.length) ? '' : prefix;
+    });
+  }
   const warningPhases = { storage_error: '存储异常', native_handoff: '等待原会话接续', native_attachment: '已连接原终端', native_background: '等待后台任务', native_summary: '等待原会话汇总', native_approval: '等待原窗口确认', native_delivery_pending: '投递待确认', node_reconnecting: '等待节点重连', recovery_unknown: '结果待核对', recovery: '结果待核对' };
   function create() { return { text: '', tools: new Map(), reasoning: new Map(), permissions: new Map(), phase: '正在处理', done: false, nativeAttached: false }; }
   function apply(view, event, data = {}) {
     if (view.done && event !== 'input') return view;
     if (event === 'input') { view.done = false; view.phase = '正在处理'; }
     if (event === 'turn') { view.phase = '正在思考'; if (view.nativeAttached) view.warning = ''; }
-    if (event === 'warning') { view.nativeAttached ||= data.kind === 'native_attachment'; if (data.kind === 'native_attachment' && data.nativeSession) view.nativeSession = data.nativeSession; view.phase = warningPhases[data.kind] || '连接重试中'; view.warning = String(data.warning || '引擎正在重试，请稍候').slice(0, 500); }
+    if (event === 'warning' && !codexNotice(data.warning)) { view.nativeAttached ||= data.kind === 'native_attachment'; if (data.kind === 'native_attachment' && data.nativeSession) view.nativeSession = data.nativeSession; view.phase = warningPhases[data.kind] || (data.kind === 'connection_retry' || connectionRetry(data.warning) ? '连接重试中' : view.phase); view.warning = String(data.warning || '引擎正在重试，请稍候').slice(0, 500); }
     if (event === 'permission') { view.permissions.set(data.id, data); view.phase = '等待你的授权'; }
     if (event === 'permission_resolved') { view.permissions.delete(data.id); view.phase = data.behavior === 'allow' ? '正在处理' : '授权已结束'; }
     if (event === 'text') { view.text += data.text || ''; view.phase = '正在输出'; }
@@ -29,5 +56,5 @@
     return view;
   }
   const translations = { '等待后台任务': ['Waiting for background tasks','バックグラウンドタスク待ち'], '等待原会话汇总': ['Waiting for terminal summary','元のセッションの要約待ち'], '等待原窗口确认': ['Waiting for terminal approval','元のターミナルの承認待ち'], '投递待确认': ['Delivery awaiting confirmation','送信確認待ち'], '等待节点重连': ['Waiting for node reconnection','ノードの再接続待ち'], '结果待核对': ['Outcome needs review','結果の確認が必要'], '已连接原终端': ['Original terminal connected','元のターミナルに接続済み'], '等待原会话接续': ['Waiting to continue the original session','元のセッションの再開待ち'], '连接重试中': ['Retrying connection','接続を再試行中'] };
-  return { titleText, create, apply, labels: phase => translations[phase] || [phase, phase] };
+  return { titleText, messageText, codexNotice, codexLoginHint, connectionRetry, create, apply, labels: phase => translations[phase] || [phase, phase] };
 });

@@ -98,7 +98,7 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
     install();
   }
   function codexEntries(mode, mixed = false) {
-    return Object.values(vault.codexAccounts()).filter(row => !row.deleted && row.enabled && (mixed || row.mode === mode)).map(row => ({ key: row.id, source: row.origin, label: row.name, mode:row.mode, auth: vault.credential(row.id, row.auth) })).sort((a, b) => a.key.localeCompare(b.key));
+    return Object.values(vault.codexAccounts()).filter(row => !row.deleted && row.enabled && (mixed || row.mode === mode)).map(row => ({ key: row.id, source: row.origin, label: accountEmail(row.auth) || row.name, mode:row.mode, auth: vault.credential(row.id, row.auth) })).sort((a, b) => a.key.localeCompare(b.key));
   }
   const routing = () => vault.preference('codex-routing') || { mode: 'round-robin', selected: '' };
   function setRouting(input) {
@@ -120,10 +120,10 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
     if (explicit) candidates = candidates.filter(route => route.accountId === explicit).map(route => ({ ...route, explicit: true }));
     if (!candidates.length) return null;
     if (explicit) return candidates[0];
-    const sticky = pin && candidates.find(route => route.accountId === pin.accountId);
-    if (sticky) return sticky;
     const selected = candidates.find(route => route.accountId === config.selected);
     if (config.mode === 'manual') return selected || null;
+    const sticky = pin && candidates.find(route => route.accountId === pin.accountId);
+    if (sticky) return sticky;
     if (config.mode === 'failover') return selected || candidates[0];
     let hash = 0; for (const char of sessionId) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
     return candidates[hash % candidates.length];
@@ -172,7 +172,10 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
     vault.preference('default-model:' + engine, model || ''); return defaultModels();
   }
   function codexStatus() {
-    return { ...routing(), routes: Object.fromEntries(Object.entries(vault.preferences()).filter(([key]) => key.startsWith('codex-pin:')).map(([key, row]) => [key.slice(10), row.value?.accountId || ''])), accounts: Object.values(vault.codexAccounts()).filter(row => !row.deleted).map(row => {
+    const pins = Object.entries(vault.preferences()).filter(([key]) => key.startsWith('codex-pin:'));
+    const routes = Object.fromEntries(pins.map(([key, row]) => [key.slice(10), row.value?.accountId || '']));
+    const manualRoutes = Object.fromEntries(pins.filter(([, row]) => row.value?.manual && row.value.accountId).map(([key, row]) => [key.slice(10), row.value.accountId]));
+    return { ...routing(), routes, manualRoutes, accounts: Object.values(vault.codexAccounts()).filter(row => !row.deleted).map(row => {
       const auth = vault.credential(row.id, row.auth), health = vault.preference('codex-health:' + row.id) || {};
       let expiresAt = ''; try { const exp = JSON.parse(Buffer.from(auth.tokens.access_token.split('.')[1], 'base64url')).exp; if (exp) expiresAt = new Date(exp * 1000).toISOString(); } catch {}
       return { id: row.id, name: row.name, email:row.mode==='chatgpt'?accountEmail(auth):'', origin: row.origin, enabled: row.enabled, mode: row.mode, usage: vault.preference('codex-usage:' + row.id) || null, url:auth.base_url || (row.mode === 'api-key' ? 'https://api.openai.com/v1' : ''), available: !!codexCredentials(auth, row.mode), renewable: !!auth.tokens?.refresh_token, expiresAt, lastRefresh: auth.last_refresh || '', ...health };
@@ -283,14 +286,36 @@ function createAccountPool({ accounts, codex, claude = { read: () => null }, ren
       const rejected = codexEntries(mode).find(entry => [401, 403].includes(vault.preference('codex-health:' + entry.key)?.lastStatus) && excluded.includes(routeFor(entry, mode).id) && excluded.filter(id => id.startsWith(entry.key + ':')).length < 2);
       if (rejected?.auth.tokens.refresh_token) { try { await renewEntry(rejected, true); } catch {} }
     }
-    let selected = codexRoute(mode, sessionId, excluded, forced, options);
+    const select = () => codexRoute(mode, sessionId, excluded, forced, options);
+    const selected = select();
     if (selected && selected.authMode !== 'chatgpt') return selected;
-    const entry = selected ? codexEntries('chatgpt').find(item => item.key === selected.accountId) : codexEntries('chatgpt').find(item => (!forced || item.key === forced) && item.auth.tokens.refresh_token && !excluded.some(id => id.startsWith(item.key + ':')));
-    if (entry && (!selected || expiresSoon(entry.auth, now()))) {
-      try { await renewEntry(entry, false); selected = codexRoute(mode, sessionId, excluded, forced, options); }
-      catch (error) { if (!selected) throw error; }
+    const entries = codexEntries('chatgpt');
+    if (selected) {
+      const entry = entries.find(item => item.key === selected.accountId);
+      if (entry?.auth.tokens.refresh_token && expiresSoon(entry.auth, now())) {
+        try { await renewEntry(entry, false); return select(); } catch { /* The access token is still valid. */ }
+      }
+      return selected;
     }
-    return selected;
+    const pin = sessionId && vault.preference('codex-pin:' + sessionId), config = routing();
+    const explicit = pin?.followGlobal ? '' : pin?.manual ? pin.accountId : forced;
+    const required = explicit || (config.mode === 'manual' && config.selected);
+    const failed = [];
+    for (const entry of entries) {
+      if (!entry.auth.tokens.refresh_token || (required && required !== entry.key) || excluded.some(id => id.startsWith(entry.key + ':'))) continue;
+      if (!required && (vault.preference('codex-health:' + entry.key)?.cooldownUntil || 0) > now()) continue;
+      try { await renewEntry(entry, false); }
+      catch (error) {
+        const status = Number(error.status);
+        if ([400, 401, 403].includes(status)) rejected({ accountId: entry.key }, status === 400 ? 401 : status);
+        failed.push(entry.label || entry.key.slice(-8));
+        continue;
+      }
+      const usable = select();
+      if (usable) return usable;
+    }
+    if (failed.length) throw Object.assign(new Error('共享登录刷新失败'), { failedAccounts: failed });
+    return null;
   }
   function status() {
     const online = new Set([identity().id, ...peers().map(peer => peer.id)]);

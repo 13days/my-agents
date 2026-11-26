@@ -30,7 +30,7 @@ async function inspect(target) {
   const probe = ['node', 'my-agents', 'git', 'claude', 'codex'].map(name => `command -v ${name} >/dev/null 2>&1 && echo @@${name}=1`).join('; ');
   try { out = await ssh(target, `${probe}; echo @@nodeVersion=$(node -v 2>/dev/null); [ -f ${PANEL_SOURCE}/server.js ] && echo @@panelSource=1; [ -f ${REMOTE_DIR}/server.js ] && echo @@repo=1; echo @@hostname=$(hostname)`); }
   catch (error) {
-    if (/Permission denied|publickey|gssapi/i.test(error.message)) throw new Error(`无法免密登录 ${target}：请先在本机终端执行 ssh ${target} 确认能直接登录（不输密码），再重试`);
+    if (/Permission denied|publickey|gssapi/i.test(error.message)) throw new Error(`无法免密登录 ${target}：需要密码或验证码时，请用「在远端终端接入」。也可以配置 SSH 密钥，确认 ssh ${target} 可免密登录后再试`);
     if (/Could not resolve|No route|timed out|Connection refused/i.test(error.message)) throw new Error(`连不上 ${target}：${error.message}`);
     throw new Error(`检查 ${target} 失败：${error.message}`);
   }

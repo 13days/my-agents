@@ -22,7 +22,7 @@ function createCluster({ dir, config, network, gateway = { start: async () => {}
   const stepDown = reason => { lastStepDown = { reason, term: saved.term, at: now(), rounds: rounds.slice(-8), maxLoopStallMs: loopDelay ? Math.round(loopDelay.max / 1e6) : null }; loopDelay?.reset(); };
   const outcome = results => Object.fromEntries(results.map((r, i) => r.status === 'fulfilled' ? [r.value.id, { term: r.value.value?.term, granted: !!r.value.value?.granted, reason: r.value.value?.reason || '' }] : ['#' + i, { error: String(r.reason?.message || r.reason).slice(0, 120) }]));
   const gatewayPhase = () => gateway.status?.().phase || (gateway.active ? 'connected' : 'disabled');
-  const baseNames = ['panel-feishu.json', 'panel-feishu-state.json', 'panel-workspaces.json', 'panel-conversations.json'];
+  const baseNames = ['panel-feishu.json', 'panel-feishu-state.json', 'panel-wecom.json', 'panel-wecom-state.json', 'panel-workspaces.json', 'panel-conversations.json'];
   // Additional Feishu bots replicate with the primary one so a new leader brings all of them up.
   const botName = /^panel-feishu-bot-cli_[\w-]{4,100}(-state)?\.json$/;
   const syncable = name => baseNames.includes(name) || botName.test(name);

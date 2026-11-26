@@ -9,7 +9,7 @@ Start a conversation in Codex or Claude Code, pick it up in Feishu on your phone
 ## Continue the same conversation in the terminal, chat, or browser
 
 1. **Start in the terminal.** In your project directory, ask Codex or Claude Code, “Which product updates landed this week?” Each engine keeps its own sessions. Pick that same session when you change where you chat.
-2. **Pick it up on your phone.** Send your Feishu bot `/sessions product updates`. Find the conversation by its machine, project, and last question, then select **切换到此会话**. Ask “Expand the second update for the design team.” The agent has the list you were discussing.
+2. **Pick it up on your phone.** Send your Feishu bot `/sessions product updates`. Find the conversation by its machine, project, and last question, then select **切换** (Switch) on the row. Expand **会话详情** for the branch and prompts, or send `/help` for Find session and New task. Ask “Expand the second update for the design team.” The agent has the list you were discussing.
 3. **Continue at your desk.** Open the same session under **Conversations** in the web panel. Your follow-up from Feishu and the reply are there, and you can keep editing. You can also continue in the original terminal. If you closed it, run `codex resume <session-id>` or `claude --resume <session-id>` in the project directory on the original machine.
 
 To continue in a terminal window that is still open, the Codex daemon on that machine must have the session loaded, or the Claude Code window must allow incoming session messages. [Terminal handoff details (Chinese)](docs/user-guide.md)
@@ -52,6 +52,14 @@ Under **Chat apps → Feishu → Access**, the group and direct-message rules ap
 
 ![Feishu group access, detailed cards, and individually authorized accounts](https://raw.githubusercontent.com/13days/my-agents/main/docs/feishu-access-preview.png)
 
+### Send tasks from WeCom
+
+Create an **intelligent bot** in WeCom, select **API mode → Long connection**, and copy its Bot ID and Secret. Under **Chat apps → WeCom**, enter the credentials, select the engine and project for new conversations, then choose **Save and connect**. Only an outbound connection is required.
+
+Ask each member to message the bot privately to get their UserID. Save that ID in **Allowed member UserIDs**. They can now send a text task privately or mention the bot in a group. The answer returns to that chat and is available in the web conversation. Follow-ups reuse the same conversation per member and chat. Send `/new` on its own to start another. Feishu share cards and the assistant’s personal-history source are configured separately. [WeCom setup (Chinese)](docs/im-channels.md)
+
+![WeCom setup with bot credentials, allowed members and project defaults (Chinese UI)](docs/wecom-setup-preview.png)
+
 <details>
 <summary>Run a source checkout</summary>
 
@@ -72,7 +80,7 @@ In **Computers & AI accounts → Computers → Add computer**, enter a passwordl
 
 ![The design-kit checkout mapped to a different directory on each execution machine](https://raw.githubusercontent.com/13days/my-agents/main/docs/workspace-paths-preview.png)
 
-If SSH is unavailable but the device can reach the panel, open **Other ways to connect** and run the generated command on the device.
+The remote device does not need my-agents preinstalled. For password or MFA logins, sign in yourself, choose **Connect from the remote terminal**, run the generated command and keep the process running. The device needs to reach the panel on your trusted network. Both methods require the selected engine CLI and a usable account on the execution machine.
 
 For example, open one conversation with Claude Code on your laptop to review the frontend and another with Codex on a Linux machine to run tests. Both report progress in the same panel.
 

@@ -1681,6 +1681,10 @@ function warnUpstream(rec) {
   const run = manager.get(rec.sessionId);
   if (!run) return;
   const meta = registry.get(run.engine)?.meta || {};
+  if (run.engine === 'codex' && rec.upstreamId && rec.upstreamName) {
+    manager.warn(rec.sessionId, 'Codex 账号「' + rec.upstreamName + '」返回 HTTP ' + rec.status + '。本轮按账号路由策略处理。');
+    return;
+  }
   manager.warn(rec.sessionId, `上游返回 ${rec.status}，${meta.short || run.engine} 可能正在重试。${meta.upstreamHint || ''}。`);
 }
 function recordExchange(reqPath, status, durationMs, reqBody, resBody, isStream, reqHeaders, resEncoding, upstreamId, upstreamName, requestInfo = {}) {
@@ -1809,6 +1813,7 @@ upstreams.add({ id: 'codex-subscription-relay', engine: 'codex', match: url => u
   return subscriptionProxy.handle(req, res);
 } });
 const proxyServer = http.createServer(upstreams.handle);
+proxyServer.on('upgrade', require('./engines/codex/proxy').codexHttpUpgrade);
 // Panel-started Codex runs go through the capture proxy unless disabled.
 const codexCaptureEnabled = () => process.env.CCP_CODEX_CAPTURE !== '0' && readPanelConfig().codexCapture !== false;
 const codexTerminal = require('./core/codex-terminal').createCodexTerminal({
@@ -1840,12 +1845,11 @@ async function checkCodexPool(accountId) {
 }
 function combinedAccountSessions() {
   const claude = accountRouter.sessions(), codex = accountPool.codexStatus();
-  return { ...claude, codexRouting: { mode: codex.mode, selected: codex.selected }, accounts: [...claude.accounts.map(a => ({ ...a, engine: 'claude' })), ...codex.accounts.map(a => ({ ...a, engine: 'codex' }))], routes: { ...claude.routes, ...codex.routes }, items: [...claude.items, ...codexProxy.sessions(), ...subscriptionProxy.sessions(), ...codexBridge.sessions()] };
+  return { ...claude, codexRouting: { mode: codex.mode, selected: codex.selected, pins: codex.manualRoutes, lastAccounts: codex.routes }, accounts: [...claude.accounts.map(a => ({ ...a, engine: 'claude' })), ...codex.accounts.map(a => ({ ...a, engine: 'codex' }))], routes: { ...claude.routes, ...codex.manualRoutes }, items: [...claude.items, ...codexProxy.sessions(), ...subscriptionProxy.sessions(), ...codexBridge.sessions()] };
 }
 const codexModelCatalog = require('./core/model-catalog').createModelCatalog({ load: async accountId => (await checkCodexPool(accountId)).catalog });
 async function codexPoolModels({ accountId = '', sessionId = '', refresh = false } = {}) {
-  const state = accountPool.codexStatus();
-  const selected = accountId || state.routes[sessionId] || accountPool.codexRoute(codexAuthMode() === 'apikey' ? 'api-key' : 'chatgpt', sessionId)?.accountId || '';
+  const selected = accountId || accountPool.codexRoute(codexAuthMode() === 'apikey' ? 'api-key' : 'chatgpt', sessionId)?.accountId || '';
   return codexModelCatalog.get(selected, refresh);
 }
 function codexStatus() {
@@ -1865,8 +1869,12 @@ registry.register(createClaudeEngine({
 registry.register(createCodexEngine({
   sessions: codexSessions, accounts: true,
   nativeSessions: require('./engines/codex/native').createCodexNativeSessions({ home: CODEX_HOME }),
-  // Panel-started Codex runs go through the capture proxy unless disabled; resumed threads keep their provider.
-  capture: ({ provider, accountId }) => (provider ? provider === 'panel' : codexCaptureEnabled()) ? { config: require('./engines/codex/proxy').codexRelayConfig(`http://127.0.0.1:${PROXY_PORT}${codexAuthMode() === 'apikey' ? '/codex-openai/v1' : '/backend-api/codex'}`, { accountId }), env: { [RELAY_TOKEN_ENV]: codexRelayToken } } : null,
+  capture: ({ provider, accountId }) => {
+    if (provider !== 'panel' && (!codexCaptureEnabled() || (provider && provider !== 'openai'))) return null;
+    const base = 'http://127.0.0.1:' + PROXY_PORT + (codexAuthMode() === 'apikey' ? '/codex-openai/v1' : '/backend-api/codex');
+    const config = require('./engines/codex/proxy').codexRelayConfig(base, { accountId, provider: provider || 'panel' });
+    return { config, env: { [RELAY_TOKEN_ENV]: codexRelayToken } };
+  },
 }));
 let cluster;
 const machineId = () => clusterConfig?.nodeId || 'local';
@@ -2034,6 +2042,15 @@ heartflow?.start();
 
 const clusterLeadership = { canStart: () => !cluster || cluster.canStart() };
 const macRuntime = require('./mac-runtime').createMacRuntime({ dir: DATA_DIR, claudeDir: CLAUDE_DIR, serverPath: path.join(__dirname, 'server.js'), port: PORT, proxyPort: PROXY_PORT, claudeInfo: HISTORY_WORKER ? undefined : resolveClaude() });
+async function submitIMTurn({ gatewayContext, ...input }) {
+  input.sessionId ||= crypto.randomUUID();
+  const run = manager.get(input.sessionId), live = run && !run.job.closed;
+  // The Claude adapter queues native handovers until the original turn is idle.
+  if (!live && input.engine !== 'claude' && accountRouter.sessions().items.some(item => item.id === input.sessionId && item.running)) throw new Error('此会话正在外部 CLI 中运行，请等本轮结束后续接；可先用 /history 查看记录');
+  if (live && executionMachines().find(item => item.id === run.job.meta.machineId)?.online !== false && (run.job.meta.requestedModel ?? run.job.meta.model ?? '') === (input.model || '')) { manager.send(input.sessionId, { ...input, context: gatewayContext }); return { sessionId: run.id }; }
+  const { sessionId, run: started } = await manager.start({ ...input, context: gatewayContext });
+  return { sessionId, cwd: started.job.meta.cwd, machineId: started.job.meta.machineId, handoff: started.job.meta.handoff, workspaceId: started.job.meta.workspaceId, worktree: started.job.meta.worktree };
+}
 const feishuGateway = require('./feishu-bots').createFeishuBots({
   dir: DATA_DIR, runtime: macRuntime, replyURL: `http://127.0.0.1:${PORT}/api/feishu/reply`, leadership: clusterLeadership,
   panel: {
@@ -2056,14 +2073,7 @@ const feishuGateway = require('./feishu-bots').createFeishuBots({
     nodeProjects: id => registry.node(id)?.info.projects || [],
     cluster: { status: () => cluster?.status() || { enabled: false, nodeId: 'local', role: 'leader', leader: 'local' }, transfer: target => cluster?.transfer(target) || Promise.reject(new Error('未配置集群')) },
     running: id => manager.busy(id) || !!accountRouter.sessions().items.find(item => item.id === id)?.running,
-    submit: async ({ gatewayContext, ...input }) => {
-      const run = manager.get(input.sessionId), live = run && !run.job.closed;
-      // The Claude adapter queues native handovers until the original turn is idle.
-      if (!live && input.engine !== 'claude' && accountRouter.sessions().items.some(item => item.id === input.sessionId && item.running)) throw new Error('此会话正在外部 CLI 中运行，请等本轮结束后续接；可先用 /history 查看记录');
-      if (live && executionMachines().find(item => item.id === run.job.meta.machineId)?.online !== false && (run.job.meta.requestedModel ?? run.job.meta.model ?? '') === (input.model || '')) { manager.send(input.sessionId, { ...input, context: gatewayContext }); return { sessionId: run.id }; }
-      const { sessionId, run: started } = await manager.start({ ...input, context: gatewayContext });
-      return { sessionId, cwd: started.job.meta.cwd, machineId: started.job.meta.machineId, handoff: started.job.meta.handoff, workspaceId: started.job.meta.workspaceId, worktree: started.job.meta.worktree };
-    },
+    submit: submitIMTurn,
     engine: id => sessionEngine(id),
     engines: () => registry.list().map(engine => ({ id: engine.id, ...engine.meta, capabilities: engine.capabilities })),
     engineInfo: (engine, node = 'local') => registry.adapter(engine, node)?.detect?.() || {},
@@ -2107,17 +2117,30 @@ const feishuGateway = require('./feishu-bots').createFeishuBots({
   },
 });
 
+const wecom = require('./channels/wecom').createWecom({
+  dir: DATA_DIR, canStart: clusterLeadership.canStart,
+  panel: {
+    submit: submitIMTurn, watch: (id, listener) => manager.watch(id, listener),
+    validateWorkspace: workspaceId => workspaceStore.resolve({ workspaceId }),
+  },
+});
+const imGateways = {
+  status: () => feishuGateway.status(),
+  start() { wecom.start(); return feishuGateway.start(); },
+  stop() { wecom.stop(); return feishuGateway.stop(); },
+  reload() { wecom.reload(); return feishuGateway.reload(); },
+};
 // Scanning a new bot adds it next to the existing ones; it never replaces the primary bot.
 const larkSetup = require('./lark-setup').createLarkSetup({ dir: DATA_DIR, configure: input => feishuGateway.addOrConfigure(input),
   welcome: (openId, options) => feishuGateway.welcome(openId, options),
   currentApp: () => { const { config } = feishuGateway.status(); const appSecret = feishuGateway.revealSecret(); return config.appId && appSecret ? { appId: config.appId, appSecret, domain: config.domain } : null; } });
-async function sharedGateway(method, input) {
+async function sharedGateway(method, input, channel = 'feishu') {
   const info = cluster?.status();
   if (info?.enabled && !cluster.canStart()) {
     if (!info.leader) throw Object.assign(new Error('当前没有有效 IM 主节点，请先恢复集群连接'), { status: 409 });
-    return clusterNetwork.call(info.leader, 'gateway.invoke', { method, input }, { timeout: 20000 });
+    return clusterNetwork.call(info.leader, channel === 'wecom' ? 'wecom.invoke' : 'gateway.invoke', { method, input }, { timeout: 20000 });
   }
-  return feishuGateway[method](input);
+  return channel === 'wecom' ? wecom[method](input) : feishuGateway[method](input);
 }
 async function gatewayView() {
   const local = feishuGateway.status(), info = cluster.status();
@@ -2136,6 +2159,26 @@ function resourceUsageSnapshot() {
   }
   return resourceUsage;
 }
+function subscribeChat(run, req, res, url) {
+  const meta = run.job.meta;
+  let display = meta;
+  if (meta.engine === 'codex') {
+    const machine = meta.machineId || meta.node || 'local';
+    const local = machine === 'local' || machine === machineId();
+    const machineLabel = executionMachines().find(item => item.id === (local ? machineId() : machine))?.label || machine;
+    const source = { machineLabel, routed: !!meta.routed, poolEnabled: local && !meta.nativeAttached && codexCaptureEnabled() && codexSessions.provider(meta.sessionId) === 'openai' };
+    // For historical failures never label an old run with a login that changed after it started.
+    if (local && !meta.routed && !meta.nativeAttached && !process.env.CODEX_API_KEY) {
+      try {
+        const first = run.job.events.find(item => item.event === 'input');
+        if (fs.statSync(path.join(CODEX_HOME, 'auth.json')).mtimeMs <= Date.parse(first?.data.timestamp)) source.email = require('./core/codex-credentials').accountEmail(readCodexAuth());
+      } catch { /* The CLI may use its operating-system credential store. */ }
+    }
+    display = { ...meta, codexLogin: source };
+  }
+  const cursor = require('./core/chat-job').parseCursor(req.headers['last-event-id'] || url.searchParams.get('after'), meta.jobId);
+  return run.job.subscribe(res, cursor, display);
+}
 // ---------- server ----------
 const server = http.createServer(async (req, res) => {
   if (req.url.split('?')[0].startsWith('/codex-subscription/')) return codexBridge.handle(req, res);
@@ -2149,7 +2192,7 @@ const server = http.createServer(async (req, res) => {
   if (scope && !knownProjects().includes(scope)) scope = '';
 
   try {
-    if (req.method === 'GET' && ['/heartflow-ui.js', '/conversation-state.js', '/mermaid-ui.js', '/vendor/mermaid/mermaid.tiny.js', '/vendor/qr.js'].includes(url.pathname)) {
+    if (req.method === 'GET' && ['/heartflow-ui.js', '/feishu-help.js', '/wecom-ui.js', '/conversation-state.js', '/mermaid-ui.js', '/vendor/mermaid/mermaid.tiny.js', '/vendor/qr.js'].includes(url.pathname)) {
       res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' });
       return fs.createReadStream(path.join(__dirname, url.pathname.slice(1))).pipe(res);
     }
@@ -2228,6 +2271,16 @@ const server = http.createServer(async (req, res) => {
       } catch (error) { return sendJSON(res, error.status || 400, { error: error.message }); }
     }
 
+    if (type === 'wecom' && parts.length === 2) {
+      res.setHeader('Cache-Control', 'no-store');
+      if (req.method === 'GET') return sendJSON(res, 200, await sharedGateway('status', undefined, 'wecom'));
+      if (req.method !== 'PUT') return sendJSON(res, 405, { error: '企业微信配置仅支持 GET / PUT' });
+      if (!String(req.headers['content-type'] || '').startsWith('application/json')) return sendJSON(res, 415, { error: '需要 application/json' });
+      try {
+        const input = JSON.parse(await readBody(req, 100000));
+        return sendJSON(res, 200, await sharedGateway('configure', input, 'wecom'));
+      } catch (error) { return sendJSON(res, error.status || 400, { error: error.message }); }
+    }
     if (type === 'feishu') {
       res.setHeader('Cache-Control', 'no-store');
       if (req.method === 'GET' && parts[2] === 'messages') return sendJSON(res, 200, await sharedGateway('messages', { before: url.searchParams.has('before') ? url.searchParams.get('before') : undefined, userId: url.searchParams.get('userId'), chatId: url.searchParams.get('chatId') }));
@@ -2345,7 +2398,7 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'GET' && parts.length === 4 && parts[3] === 'events') {
         const run = manager.get(id);
         if (!run) return sendJSON(res, 404, { error: '此任务已结束，请重新打开会话查看结果' });
-        return run.job.subscribe(res, require('./core/chat-job').parseCursor(req.headers['last-event-id'] || url.searchParams.get('after'), run.job.meta.jobId));
+        return subscribeChat(run, req, res, url);
       }
       if (req.method !== 'POST') return sendJSON(res, 405, { error: 'method not allowed' });
       if (parts.length === 4 && parts[3] === 'stop') {
@@ -2364,7 +2417,7 @@ const server = http.createServer(async (req, res) => {
         if (parts.length === 4 && parts[3] === 'input') return sendJSON(res, 202, { ok: true, ...manager.send(id, input) });
         if (parts.length !== 2) return sendJSON(res, 404, { error: '接口不存在' });
         const { run } = await manager.start(input);
-        return run.job.subscribe(res, require('./core/chat-job').parseCursor(req.headers['last-event-id'] || url.searchParams.get('after'), run.job.meta.jobId));
+        return subscribeChat(run, req, res, url);
       } catch (e) {
         if (!e.status) console.warn('会话启动失败：', e.message);
         return sendJSON(res, e.status || 400, { error: e.message });
@@ -2980,7 +3033,7 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
     require('./node/agent').serveNode({ peer, runtime: executionRuntime, ownerId: id, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listSessions, messages: sessionHistoryPage, search: input => historyWorker.read('search', input), previews: items => historyWorker.read('sessionPreviews', items), userPage: input => historyWorker.read('sessionUserPage', input) }, beforeOpen: async (id, options) => { const native = id && await registry.adapter(options.engine, 'local')?.nativeSessionAvailable?.(id); if (id && manager.busy(id) && !native) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed && !manager.busy(id)) previous.session.close(); } });
     setImmediate(() => attachClusterRuntime(id, peer).catch(error => console.warn('集群执行连接：' + error.message)));
   } });
-  cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: feishuGateway, canTransfer: () => manager.running().length === 0 && executionRuntime.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });
+  cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: imGateways, canTransfer: () => manager.running().length === 0 && executionRuntime.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });
   clusterNetwork.handle('accounts.configureProxy', (_, input) => saveClaudeProxy(input));
   clusterNetwork.handle('accounts.observation', (_, { sessionId, window }) => proxyObservation.status(sessionId, null, window));
   clusterNetwork.handle('accounts.models', (_, {engine,sessionId,refresh}) => engine==='codex'?codexPoolModels({sessionId,refresh}):accountRouter.models({sessionId,refresh}));
@@ -2995,12 +3048,17 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
     if(value.coordinator!==machineId() || heartflowStore.snapshot().config.notifyUserId!==sender)throw new Error('助理确认目标或用户不匹配');
     return heartflow.review(value.id,{version:value.version,decision:value.decision,reason:'飞书卡片 check'});
   });
+  clusterNetwork.handle('wecom.invoke', async (_, { method, input }) => {
+    if (!cluster.canStart()) throw new Error('当前节点没有 IM 主节点租约');
+    if (!['status', 'configure'].includes(method)) throw new Error('未知企业微信操作');
+    return wecom[method](input);
+  });
   clusterNetwork.handle('gateway.invoke', async (_, { method, input }) => {
     if (!cluster.canStart()) throw new Error('当前节点没有 IM 主节点租约');
     if (!['status', 'configure', 'messages', 'refreshContacts', 'labelContact', 'newPairing', 'start', 'revealSecret', 'repairCard', 'removeBot', 'heartflowNotice'].includes(method)) throw new Error('未知网关操作');
     return feishuGateway[method](input);
   });
-} else cluster = require('./core/cluster').createStandalone(feishuGateway);
+} else cluster = require('./core/cluster').createStandalone(imGateways);
 // Watches every bot and the machines conversations are bound to; reports lasting problems to the owner.
 const imWatchdog = HISTORY_WORKER ? null : require('./core/im-watchdog').createImWatchdog({
   bots: feishuGateway, leadership: () => cluster.canStart(), machines: executionMachines,

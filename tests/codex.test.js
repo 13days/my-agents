@@ -256,3 +256,22 @@ test('Codex config deprecations are diagnostics, while assistant text remains un
   assert.match(events.find(([event]) => event === 'text')[1].text, /This is an explanation requested by the user/);
   assert.equal(events.find(([event]) => event === 'done')[1].isError, false);
 });
+
+test('Codex keeps fallback model metadata in diagnostics and surfaces revoked login as the failure', async () => {
+  const auth = 'Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.';
+  const { spawnImpl } = fakeSpawn(({ child }) => {
+    emitLines(child, [
+      { type: 'thread.started', thread_id: 'expired-login' },
+      { type: 'error', message: 'Configured service tier priority is not advertised as supported for model demo and will be omitted from requests.' },
+      { type: 'item.completed', item: { type: 'error', message: 'Model metadata for demo not found. Defaulting to fallback metadata; this can degrade performance and cause issues.' } },
+      { type: 'error', message: auth }, { type: 'turn.failed', error: { message:auth } },
+    ]);
+    child.stdout.end(); setImmediate(() => child.emit('close', 1, null));
+  });
+  const events = []; let finish; const idle = new Promise(resolve => finish = resolve);
+  const runner = createCodexRunner({ cli:'codex', cwd:'/work', spawnImpl, emit:(event,data) => events.push([event,data]), onIdle:finish });
+  runner.submit('expired-turn', {prompt:'hello'}); await idle;
+  assert.deepEqual(events.filter(([e])=>e==='diagnostic').map(([,d])=>d.code), ['service_tier_omitted','model_metadata_fallback']);
+  const terminal = events.find(([e])=>e==='done')[1];
+  assert.equal(terminal.isError,true); assert.ok(terminal.error.includes(auth)); assert.match(terminal.error,/codex login/);
+});

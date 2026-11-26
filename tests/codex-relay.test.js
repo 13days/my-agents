@@ -252,7 +252,11 @@ for (const provider of ['openai', 'panel', 'custom-provider']) {
       const selected = args.filter(arg => arg.startsWith('model_provider='));
       assert.equal(selected.at(-1), `model_provider=${JSON.stringify(provider)}`, 'override any global provider default');
       if (relayed) {
-        assert.ok(args.some(arg => arg.startsWith(`model_providers.${provider}=`) && arg.includes('env_key="MY_AGENTS_CODEX_TOKEN"')));
+        if (provider === 'openai') {
+          assert.ok(args.includes('openai_base_url="http://127.0.0.1:9999/backend-api/codex"'));
+          assert.ok(!args.some(arg => arg.startsWith('model_providers.openai=')));
+          assert.equal(spawned[0].env.CODEX_API_KEY,'test-token');
+        } else assert.ok(args.some(arg => arg.startsWith(`model_providers.${provider}=`) && arg.includes('env_key="MY_AGENTS_CODEX_TOKEN"')));
         assert.ok(selected.every(arg => arg === `model_provider=${JSON.stringify(provider)}`));
       }
       session.close();

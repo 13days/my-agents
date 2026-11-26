@@ -33,10 +33,11 @@ function createCodexEngine({ sessions, nativeSessions = null, capture = () => nu
     async open({ host, sessionId, nativeOnly = false, cwd, model, accountId, routeEnv, emit, onIdle, onClosed }) {
       if (sessionId && await nativeSessions?.find(sessionId)) return nativeSessions.open({ sessionId, emit, onIdle, onClosed });
       if (nativeOnly) throw new Error('原 Codex 会话已退出或切换，未另起执行进程');
-      // Resumed threads keep their original provider: terminal threads (openai) cannot move to the panel and vice versa.
+      // A resumed thread must keep the provider identifier it was created with.
       const provider = sessionId ? sessions.provider(sessionId) : '';
       const relayed = routeEnv?.MY_AGENTS_CODEX_BASE && routeEnv[RELAY_TOKEN_ENV] ? routeEnv : null;
       const proxy = relayed ? { config: codexRelayConfig(relayed.MY_AGENTS_CODEX_BASE, { accountId: relayed.MY_AGENTS_CODEX_ACCOUNT || accountId, provider: provider || 'panel' }) } : capture({ provider, accountId });
+      const relayToken = relayed?.[RELAY_TOKEN_ENV] || proxy?.env?.[RELAY_TOKEN_ENV];
       const info = resolveCodex({ env });
       let stopping = false, closed = false;
       const close = () => {
@@ -47,7 +48,7 @@ function createCodexEngine({ sessions, nativeSessions = null, capture = () => nu
       };
       const runner = createCodexRunner({
         cli: info.path, cwd, threadId: sessionId, model, config: [...(proxy?.config || []), ...(provider ? [`model_provider=${JSON.stringify(provider)}`] : [])],
-        env: codexEnvironment({ ...env, ...(proxy?.env || {}), ...(relayed ? { [RELAY_TOKEN_ENV]: relayed[RELAY_TOKEN_ENV], NO_PROXY: relayed.NO_PROXY, no_proxy: relayed.no_proxy } : {}), PWD: cwd }, info), spawnImpl: host.spawn, tmpDir: host.join(host.tmpDir(), 'my-agents-codex'),
+        env: codexEnvironment({ ...env, ...(proxy?.env || {}), ...(provider === 'openai' && relayToken ? { CODEX_API_KEY: relayToken } : {}), ...(relayed ? { [RELAY_TOKEN_ENV]: relayed[RELAY_TOKEN_ENV], NO_PROXY: relayed.NO_PROXY, no_proxy: relayed.no_proxy } : {}), PWD: cwd }, info), spawnImpl: host.spawn, tmpDir: host.join(host.tmpDir(), 'my-agents-codex'),
         emit: (event, data) => {
           emit(event, data);
           if (event === 'done' && stopping) close();

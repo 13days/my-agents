@@ -1,7 +1,7 @@
 {
   "name": "@wuchupeng/my-agents",
   "version": "0.17.1",
-  "description": "Local workspace for Claude Code and Codex: sessions, request capture, multi-account routing, resources and IM connections (Feishu/Lark)",
+  "description": "Local workspace for Claude Code and Codex: sessions, request capture, multi-account routing, resources and IM connections (Feishu/Lark and WeCom)",
   "main": "server.js",
   "bin": {
     "my-agents": "./server.js"
@@ -49,6 +49,7 @@
     "feishu-bots.js",
     "feishu-simple-reply.js",
     "feishu-ui.js",
+    "wecom-ui.js",
     "heartflow-ui.js",
     "mermaid-ui.js",
     "vendor/mermaid/",
@@ -64,6 +65,7 @@
     "feishu-inbox.js",
     "feishu-contacts.js",
     "feishu-commands.js",
+    "feishu-help.js",
     "feishu-markdown.js",
     "docs/architecture-current.md",
     "docs/migration.md",

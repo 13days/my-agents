@@ -3,9 +3,7 @@ const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 
-function isConfigurationNotice(message) {
-  return /^\s*\[features\]\.[\w-]+\s+is deprecated\b/i.test(String(message || '').replace(/`/g, ''));
-}
+const { codexNotice, codexLoginHint, connectionRetry } = require('../../conversation-state');
 const { createTurnQueue } = require('../../core/turn-queue');
 
 // Codex has no long-lived stdin protocol in `exec` mode, so each panel turn
@@ -74,6 +72,11 @@ function createCodexRunner({ cli, cwd, threadId = '', model = '', config = [], e
     let buffer = '', completed = false, failed = '';
     const tools = new Set(), summaries = new Map();
     const prefix = `${entry.id.slice(0, 8)}-`;
+    const warn = message => {
+      const code = codexNotice(message);
+      if (code) emit('diagnostic', { code, message });
+      else emit('warning', { warning: message, ...(connectionRetry(message) ? { kind: 'connection_retry' } : {}) });
+    };
     const line = text => {
       let msg; try { msg = JSON.parse(text); } catch { return; }
       if (msg.type === 'thread.started' && msg.thread_id) {
@@ -87,8 +90,7 @@ function createCodexRunner({ cli, cwd, threadId = '', model = '', config = [], e
           const text = reasoningText(item), id = prefix + item.id;
           if (text && summaries.get(id) !== text) { summaries.set(id, text); emit('reasoning', { id, text }); }
         } else if (item.type === 'error') {
-          if (isConfigurationNotice(item.message)) emit('diagnostic', { code: 'deprecated_config', message: item.message });
-          else emit('warning', { warning: item.message || 'Codex 警告' });
+          warn(item.message || 'Codex 警告');
         }
         else if (item.type !== 'reasoning') {
           const tool = toolEvent(item);
@@ -102,11 +104,9 @@ function createCodexRunner({ cli, cwd, threadId = '', model = '', config = [], e
       } else if (msg.type === 'turn.failed') {
         failed = msg.error?.message || 'Codex 本轮失败';
       } else if (msg.type === 'error' && msg.message) {
-        if (isConfigurationNotice(msg.message)) { emit('diagnostic', { code: 'deprecated_config', message: msg.message }); return; }
-        // The CLI also uses error events for recoverable transport retries.
-        // Only turn.failed (or exiting without turn.completed) is terminal.
-        failed = msg.message;
-        emit('warning', { warning: msg.message });
+        // Retain the last real failure for CLIs which exit without turn.failed.
+        if (!codexNotice(msg.message) && !completed && !connectionRetry(msg.message)) failed = msg.message;
+        warn(msg.message);
       }
     };
     proc.stdout.setEncoding('utf8');
@@ -172,6 +172,8 @@ const ERROR_HINTS = [
 ];
 function explainCodexError(error) {
   if (!error) return error;
+  const login = codexLoginHint(error);
+  if (login !== error) return login;
   const hint = ERROR_HINTS.find(([re]) => re.test(error))?.[1];
   return hint ? `${hint}\n\n${error}` : error;
 }

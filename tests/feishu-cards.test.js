@@ -176,12 +176,12 @@ test('session entries retain readable CJK previews within Feishu limits', () => 
   assert.ok(nodes(card).filter(node => node.tag).length < 200);
 });
 
-test('task action rows have at most two full-width buttons so labels remain readable', () => {
+test('long task actions use compact, content-sized buttons in rows of two', () => {
   const card = cards.task({ ...context, binding: { id: 'session', cwd: '/project' }, view: { done: false, phase: '正在思考', text: '', tools: new Map(), permissions: new Map() }, title: 'Task', elapsed: 1000 });
   const rows = nodes(card).filter(node => node.tag === 'column_set' && node.columns?.some(column => column.elements?.some(item => item.tag === 'button')));
   assert.equal(rows.length, 2);
   assert.ok(rows.every(row => row.columns.length <= 2));
-  assert.ok(rows.flatMap(row => row.columns).every(column => column.elements[0].width === 'fill'));
+  assert.ok(rows.flatMap(row => row.columns).every(column => column.width === 'auto' && column.elements[0].size === 'small'));
 });
 
 test('historical task actions carry stable ownership without relying on the gateway cache', () => {
@@ -203,12 +203,14 @@ test('session ownership and message expansion both fit the worst-case CJK card b
 });
 
 
-test('session titles and latest prompts use full-width text and callbacks retain original directories', () => {
+test('session rows pair the title with its switch and keep recent prompts inside details', () => {
  const rows=Array.from({length:cards.SESSION_PAGE_SIZE},(_,i)=>({id:'native-session-'+i,machineId:'mac',engine:'claude',project:'/work/native/worktree',title:'project-plugin-recommendations',latestPrompt:'请检查插件推荐的数据写入与查询链路，这是需要完整辨认的问题',turns:24,userMessages:[{round:24,text:'请核对真实生产调用链路，不要只看登记项',timestamp:'2026-11-10T10:18:00Z'}]}));
  const card=cards.sessionList({...context,rows,total:300,page:0});
  const text=JSON.stringify(card);
  assert.match(text,/project-plugin-recommendations/);assert.match(text,/请检查插件推荐的数据写入与查询链路/);assert.match(text,/请核对真实生产调用链路/);
- assert.ok(card.body.elements.some(e=>e.tag==='markdown'&&e.content.includes('project-plugin-recommendations')));
+ const entry = card.body.elements.find(e => e.tag === 'column_set' && e.columns[0].elements[0].content?.includes('project-plugin-recommendations'));
+ assert.equal(entry.columns[1].elements[0].behaviors[0].value.action, 'switch');
+ assert.ok(!JSON.stringify(entry).includes('请检查插件'));
  assert.ok(actions(card).filter(a=>['switch','user_messages'].includes(a.action)).every(a=>a.session?.cwd==='/work/native/worktree'&&a.session.machineId==='mac'));
  assert.ok(Buffer.byteLength(JSON.stringify({msg_type:'interactive',content:JSON.stringify(card)}))<28000);
 });
