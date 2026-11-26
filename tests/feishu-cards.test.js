@@ -34,12 +34,49 @@ test('task cards fold logs, preserve explicit permission decisions, and remove s
   const options = { ...context, binding: { id: 'session', cwd: '/project' }, title: '项目检查', view, elapsed: 3000 };
   const pending = cards.task(options);
   assert.equal(pending.header.template, 'orange');
-  assert.equal(pending.body.elements.find(node => node.element_id === 'execution_details').expanded, false);
+  assert.equal(pending.body.elements.find(node => node.element_id === 'task_details').expanded, false);
   assert.ok(actions(pending).some(value => value.action === 'permission' && value.requestId === 'p1' && value.behavior === 'allow'));
   view.done = true; view.phase = '已完成';
   const complete = cards.task(options);
-  assert.equal(complete.header.template, 'green');
+  assert.equal(complete.header, undefined);
+  assert.match(complete.config.summary.content, /^已完成/);
   assert.equal(actions(complete).some(value => ['stop', 'permission'].includes(value.action)), false);
+});
+
+test('task cards keep the answer first and put metadata and callbacks behind one footer disclosure', () => {
+  const binding = { id: 'session-uuid', cwd: '/work/repo', worktree: { branch: 'work-branch' } };
+  for (const [phase, done, text] of [['正在处理', false, ''], ['正在输出', false, '部分答复'], ['已完成', true, '完整答复'], ['已完成', true, '中'.repeat(8000)], ['失败', true, '模型连接失败'], ['已停止', true, '']]) {
+    const view = { phase, done, text, accepted: true, tools: new Map(), permissions: new Map(), modelRoute: { model: 'model-name', proxyName: 'proxy-name', state: 'success' } };
+    const card = cards.task({ ...context, title: '原始问题', binding, nodeLabel: 'node-name', view, elapsed: 3000 });
+    const [reply, details, divider, signature] = card.body.elements;
+    assert.equal(card.body.elements.length, 4);
+    assert.equal(card.header?.template, phase === '失败' ? 'red' : undefined);
+    if (text) assert.equal(reply.content, text.length > cards.REPLY_PREVIEW ? text.slice(0, cards.REPLY_PREVIEW) + '…' : text);
+    assert.equal(details.header.title.content, '详情与操作');
+    assert.equal(details.expanded, false);
+    assert.equal(details.border, undefined);
+    for (const label of ['原始问题', '/work/repo', 'session-uuid', 'work-branch', 'proxy-name', 'node-name']) {
+      assert.ok(JSON.stringify(details).includes(label));
+      assert.ok(!JSON.stringify([reply, signature]).includes(label));
+    }
+    assert.deepEqual(actions(card), actions(details));
+    assert.equal(actions(details).some(a => a.action === 'share_result'), phase === '已完成');
+    assert.equal(divider.tag, 'hr');
+    assert.equal(signature.text_size, 'notation');
+    assert.equal(JSON.stringify(card.body).split('https://github.com/13days/my-agents#readme').length, 2);
+  }
+});
+
+test('recovery moves controls from legacy cards into the footer and preserves partial output', () => {
+  const legacy = cards.card('正在处理', [cards.markdown('旧版部分答复'), cards.button('查看最近对话', { action: 'history', id: 'old' }), cards.button('旧停止', { action: 'stop', id: 'old' })], { subtitle: '旧版问题' });
+  const restored = cards.interruptedTask(legacy);
+  assert.equal(restored.body.elements[1].content, '旧版部分答复');
+  const details = restored.body.elements[2];
+  assert.equal(details.header.title.content, '详情与操作');
+  assert.deepEqual(actions(details).map(a => a.action), ['history', 'view']);
+  assert.equal(actions(restored).length, 2);
+  assert.match(JSON.stringify(details), /旧版问题/);
+  assert.match(restored.body.elements.at(-1).content, /github.com/);
 });
 
 test('large CJK output and parallel tool calls stay within message size and component budgets', () => {
@@ -185,7 +222,8 @@ test('recovery removes stale processing and permission controls from previously 
   assert.doesNotMatch(JSON.stringify(recovered), /正在处理你的请求|旧版引擎按钮|停止当前任务/);
   assert.deepEqual(actions(recovered).map(a => a.action), ['history', 'view']);
   assert.deepEqual(actions(recovered)[0].session, binding);
-  assert.equal(pending.header.title.content, '正在处理');
+  assert.equal(pending.header, undefined);
+  assert.equal(pending.body.elements[0].content, '正在处理…');
   const permission = cards.task({ ...context, binding, title: 'Task', elapsed: 2000, view: { phase: '等待你的授权', done: false, text: '已完成的部分回复', tools: new Map(), permissions: new Map([['p', { id: 'p', tool: 'Bash', input: { command: 'private-command' } }]]) } });
   const restored = cards.interruptedTask(permission);
   assert.match(JSON.stringify(restored), /已完成的部分回复/);
@@ -229,7 +267,7 @@ test('result signatures preserve the card layout and forwarding policy, escape n
   assert.equal(output.body.elements.at(-1).text_size, 'notation');
   assert.equal(card.body.elements.length, 1);
   assert.equal(output.config.enable_forward, false);
-  assert.match(sign, /\[my-agents\]\(https:\/\/github.com\/13days\/my-agents#readme\)/);
+  assert.match(sign, /\[my-agents · GitHub ↗\]\(https:\/\/github.com\/13days\/my-agents#readme\)/);
   assert.match(sign, /served \(high\)/);
   assert.doesNotMatch(sign, /alias|<at|\[点我\]\(url\)/);
   assert.doesNotMatch(cards.replySignature({state:'error',model:'wrong'}, 'ou_private'), /wrong|ou_private/);

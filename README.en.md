@@ -1,6 +1,6 @@
 # <img src="https://raw.githubusercontent.com/13days/my-agents/main/assets/my-agents.png" width="42" height="42" alt=""> my-agents
 
-Give Codex or Claude Code a task in Feishu or Lark. It runs in the project directory you choose, on your laptop or development server, and posts its answer in the same thread. Open the conversation in your browser to pick up where you left off.
+Give Codex or Claude Code a task in Feishu or Lark. It runs in the project directory you choose, on your laptop or development server, and posts its answer in the same thread. Start the panel from one terminal to manage several machines, or use its proxy to choose different models in the same coding engine.
 
 [中文](README.md) · [User guide (Chinese)](docs/user-guide.md)
 
@@ -14,7 +14,7 @@ Send your bot a task like this:
 
 > /new Read this week’s merged changes and write three updates I can share with the design team.
 
-Choose a project and an engine, then submit. The task card updates as the agent works. Reply in the thread to ask for a revision. To share the answer, click **生成分享卡** on the finished task and forward the resulting card. It contains the answer and a link back here. To resume an existing session instead, send `/sessions keyword`.
+Choose a project and an engine, then submit. The task card updates as the agent works. Reply in the thread to ask for a revision. To share the answer, open **详情与操作 → 生成分享卡** at the bottom of the finished task and forward the resulting card. It contains the answer and a link back here. To resume an existing session instead, send `/sessions keyword`.
 
 ## Start your first panel
 
@@ -52,13 +52,25 @@ Both the installer and this start command keep your terminal proxy configuration
 
 </details>
 
-## Add a development machine
+## Run tasks on several machines from one panel
 
 In **Devices & models → Machines → Add machine**, enter a passwordless SSH address or host alias. The panel prepares the runtime, installs the runner, and connects the device. Once it shows **Connected**, map the project’s path under **Projects & directories** and choose the device for your next conversation.
 
 If SSH is unavailable but the device can reach the panel, open **Other ways to connect** and run the generated command on the device.
 
-A single machine is enough to get started. To keep receiving chat messages when your laptop goes offline, configure additional persistent panels. [Cluster setup (Chinese)](docs/cluster-setup.md)
+For example, open one conversation with Claude Code on your laptop to review the frontend and another with Codex on a Linux machine to run tests. Both report progress in the same panel. To continue an existing terminal session on its original machine, send `/sessions keyword` in Feishu.
+
+In Feishu, send `/node` to list machines. If your development machine is named `devbox` and the project lives at `~/repos/web`, send `/node devbox ~/repos/web`, then ask it to run the tests in that thread. Commands run against the checkout on the selected machine.
+
+An execution node is enough to run remote tasks. To keep receiving Feishu messages when your laptop goes offline, run three persistent full panels. The other two can form a majority and elect a new receiver. [Cluster setup and failover (Chinese)](docs/cluster-setup.md)
+
+## Use different models in the same coding engine
+
+Claude Code or Codex manages the conversation, files, and tools. Your account and proxy supply the model. For example, use a fast model for a routine edit, then choose a reasoning model in the same Feishu thread for a difficult bug.
+
+1. In **Devices & models → Engines & accounts**, choose Claude Code or Codex and add a subscription or proxy account. Set **Default model for new sessions** from the available list. Each engine has its own default.
+2. Send `/model` in a Feishu thread to choose the model for its next turn. Send `/model default` to restore the default. After a reply, open **详情与操作** to inspect the observed model and proxy. A fixed model mapping on the proxy can override the selection.
+3. To use a Codex subscription from Claude Code, open the Claude Code subscription proxy configuration in the Codex account pool. Use it in a separate Claude configuration directory. Claude Code still runs tools on the selected machine, while the Codex subscription handles model requests. [Configuration and supported features (Chinese)](docs/codex-subscription-proxy.md)
 
 ## Let the assistant follow your chats
 

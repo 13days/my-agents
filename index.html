@@ -2509,7 +2509,7 @@ if(localStorage.getItem('panel-section')==='today')localStorage.setItem('panel-s
 const navTab=type=>document.querySelector(`.tab[data-type="${type}"]`);
 const makeProductTab=(type,reference)=>{const tab=navTab(reference).cloneNode(true);tab.classList.remove('active');tab.dataset.type=type;tab.querySelector('.cnt').textContent='';tab.onclick=()=>switchType(type);return tab;};
 const taskNav=makeProductTab('tasks','workflows'),settingsNav=makeProductTab('settings','config');
-const navigationGroups=[['工作',['heartflow','tasks','sessions']],['连接',['im','proxy']],['能力库',['commands','skills','agents','plugins','workflows']],['更多',['stats','voyage','inspector']]];
+const navigationGroups=[['工作',['sessions','tasks','heartflow']],['连接',['im','proxy']],['能力库',['commands','skills','agents','plugins','workflows']],['更多',['stats','voyage','inspector']]];
 const navigationNodes=new Map(Array.from(document.querySelectorAll('#tabs .tab')).map(tab=>[tab.dataset.type,tab]));navigationNodes.set('tasks',taskNav);
 const navFragment=document.createDocumentFragment();
 for(const [label,types] of navigationGroups){const heading=document.createElement('div');heading.className='nav-group-label';heading.dataset.navGroup=label;heading.textContent=label;navFragment.append(heading);for(const type of types)navFragment.append(navigationNodes.get(type));}

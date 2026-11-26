@@ -12,12 +12,12 @@ const muted = content => markdown(`<font color='grey'>${content}</font>`, true);
 const button = (text, value, type = 'default') => ({ tag: 'button', text: plain(text), type, behaviors: [{ type: 'callback', value }] });
 const buttons = items => ({ tag: 'column_set', flex_mode: 'none', columns: [{ tag: 'column', width: 'weighted', weight: 1, elements: Array.from({ length: Math.ceil(items.length / 2) }, (_, i) => ({ tag: 'column_set', flex_mode: 'none', horizontal_spacing: '8px', columns: items.slice(i * 2, i * 2 + 2).map(item => ({ tag: 'column', width: 'weighted', weight: 1, elements: [{ ...item, width: 'fill' }] })) })) }] });
 const collapse = (title, elements, expanded = false, id) => ({ tag: 'collapsible_panel', ...(id ? { element_id: id } : {}), expanded, header: { title: plain(title), icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' }, icon_position: 'right', icon_expanded_angle: -180 }, border: { color: 'grey', corner_radius: '5px' }, vertical_spacing: '8px', padding: '8px 8px 8px 8px', elements });
-function card(title, elements, { subtitle = 'my-agents', template = 'grey', summary = title } = {}) {
-  return { schema: '2.0', config: { width_mode: 'default', update_multi: true, summary: { content: clip(summary, 120) } }, header: { title: plain(clip(title, 64)), ...(subtitle ? { subtitle: plain(clip(subtitle, 100)) } : {}), template }, body: { padding: '12px 16px 12px 16px', vertical_spacing: '12px', elements } };
+function card(title, elements, { subtitle = 'my-agents', template = 'grey', summary = title, showHeader = true } = {}) {
+  return { schema: '2.0', config: { width_mode: 'default', update_multi: true, summary: { content: clip(summary, 120) } }, ...(showHeader ? { header: { title: plain(clip(title, 64)), ...(subtitle ? { subtitle: plain(clip(subtitle, 100)) } : {}), template } } : {}), body: { padding: '12px 16px 12px 16px', vertical_spacing: '12px', elements } };
 }
 const RESULT_SIGNATURE = 'my_agents_reply_signature';
 const SIGNATURE_DIVIDER = 'my_agents_reply_divider';
-const brandLink = '[my-agents](' + require('./package.json').homepage + ')';
+const brandLink = '[my-agents · GitHub ↗](' + require('./package.json').homepage + ')';
 function signatureText(value) {
   return clip(value, 80).replace(/\s+/g, ' ').trim().replace(/&/g, '&amp;')
     .replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/([\\`*_\[\]~|])/g, '\\$1');
@@ -227,91 +227,119 @@ function currentSession({ binding, item, switched = false, exists = false, runni
   elements.push(muted('直接发送消息可继续当前会话。群和话题内已授权成员共用绑定；卡片操作限发起人。'));
   return card(switched ? '已切换到此会话' : pending ? '新会话已就绪' : '会话设置', elements, { subtitle: `${engine} · ${nodeLabel} · ${projectName}`, template: requests.length ? 'orange' : 'grey' });
 }
-function task({ binding, title, view, elapsed, nodeLabel = '', model = '默认（CLI 配置）', ...context }) {
+const TASK_DETAILS = 'task_details';
+const TASK_REPLY = 'task_reply';
+const TASK_STATUS = 'task_status';
+
+function taskDetails(elements, title = '详情与操作') {
+  const panel = collapse(title, elements, false, TASK_DETAILS);
+  delete panel.border;
+  panel.padding = '0px 0px 0px 0px';
+  return panel;
+}
+
+function task({ binding, title, view, elapsed, nodeLabel = '', ...context }) {
   context.session = sessionReference(binding);
   const tools = [...view.tools.values()], requests = view.done ? [] : [...view.permissions.values()];
-  const done = tools.filter(item => item.state === '已完成').length;
+  const detailed = context.detailed !== false;
   const complete = view.done && view.phase === '已完成';
-  const signature = context.signature || replySignature(view.modelRoute);
   const failed = view.phase === '失败';
   const disconnected = ['连接已结束', '进度同步已中断', '结果待核对'].includes(view.phase);
-  const template = failed ? 'red' : disconnected || requests.length || ['等待原窗口确认', '投递待确认', '结果待核对', '等待节点重连', '等待后台任务', '等待原会话汇总'].includes(view.phase) ? 'orange' : view.done ? 'green' : 'blue';
-  if (context.detailed === false) {
-    const elements = [muted(`${Math.max(0, Math.floor(elapsed / 1000))} 秒${tools.length ? ` · 工具 ${done}/${tools.length}` : ''}`)];
-    if (tools.length) elements.push(markdown(tools.slice(-8).map(tool => `🔧 ${escape(clip(tool.name, 60))} · ${escape(tool.state)}`).join('\n')));
-    elements.push(markdown(view.done ? clip(view.text || '本轮已结束。', REPLY_PREVIEW) : requests.length ? '等待授权，请在本机 Panel 处理。' : '正在处理，完成后会显示回复。'));
-    if (view.done && view.text.length > REPLY_PREVIEW) elements.push(muted('完整回复将在下方另行发送。'));
-    const output = card(view.phase, elements, { subtitle: '工具执行状态与最终回复', template, summary: `${view.phase}${view.done ? ' · ' + clip(view.text, 90) : ''}` });
-    return complete ? withReplySignature(output, signature) : output;
+  const attention = failed || disconnected || requests.length > 0 || (!view.done && !!view.warning) ||
+    ['等待原窗口确认', '等待原会话接续', '投递待确认', '等待节点重连', '等待后台任务', '等待原会话汇总'].includes(view.phase);
+  const phase = disconnected ? '进度同步已中断' : view.phase;
+  const answer = (detailed || view.done) ? view.text : '';
+  const seconds = Math.max(0, Math.floor(elapsed / 1000));
+  const timing = `${seconds} 秒${tools.length ? ` · 工具 ${tools.filter(tool => tool.state === '已完成').length}/${tools.length}` : ''}`;
+  const elements = [], details = [];
+  if (disconnected) elements.push(markdown('执行结果尚未确认。请先查看最近对话，确认结果后再继续。'));
+  if (detailed && !view.done && (view.warning || view.waitNote)) elements.push({ ...muted([view.warning && clip(view.warning, 500), view.waitNote].filter(Boolean).join(' · ')), element_id: 'task_warning' });
+  if (detailed) elements.push(...permissions(context, binding, requests));
+  if (answer) elements.push({ ...markdown(clip(answer, REPLY_PREVIEW)), element_id: TASK_REPLY });
+  else if (!attention || (!detailed && requests.length)) {
+    const status = requests.length ? '等待授权，请在本机面板处理。' : complete ? '本轮已完成。' : phase + (view.done ? '。' : '…');
+    elements.push({ ...markdown(status), element_id: TASK_STATUS });
   }
-  const elements = [muted(`${context.location ? context.location + ' · ' : ''}${catalogOf(context).label(binding.engine || 'claude')} · ${escape(path.basename(binding.cwd) || '项目')} · ${Math.max(0, Math.floor(elapsed / 1000))} 秒${tools.length ? ` · 工具 ${done}/${tools.length}` : ''}`)];
-  const route=view.modelRoute;
-  if(route?.model){
-    elements.push(muted(`${route.state==='error'?'尝试模型':route.state==='pending'?'调用模型':'实际调用模型'}：${escape(route.responseModel || route.model)}`));
-    if(route.proxyName||route.accountName)elements.push(muted(`代理：${escape(route.proxyName||route.accountName)}`));
-  }else elements.push(muted(view.done?'实际模型：未获取到本轮路由记录':'正在选择模型…'));
-
-  if (nodeLabel) elements.push(muted(`执行机器：${escape(nodeLabel)}`));
-  if (view.nativeSession?.name) elements.push(muted(`原终端会话：${escape(clip(view.nativeSession.name, 80))} · ${escape(String(view.nativeSession.id || binding.id).slice(0, 8))}`));
-  if (binding.handoff) elements.push(markdown(`**${binding.handoff.from === binding.handoff.to ? '已创建接续会话 · ' + escape(binding.handoff.to) : '执行位置已切换：' + escape(binding.handoff.from) + ' → ' + escape(binding.handoff.to)}**\n${binding.handoff.reason === 'offline' ? '原机器离线，接管机器已接续新一轮。' : '已按手动选择创建接续会话。'}${binding.handoff.context === 'checkpoint' ? '上下文来自有限的对话检查点，文件和工具状态需核对。' : '没有可恢复的对话检查点，请补充必要上下文。'}`));
-  if (disconnected) elements.push(markdown('进度同步已中断，执行结果尚未确认。请先查看最近对话；不要直接重复提交原任务。'));
-  if (view.warning && !view.done) elements.push(muted(clip(view.warning, 500) + (view.waitNote ? '（' + view.waitNote + '）' : '')));
-  else if (view.waitNote && !view.done && !view.text) elements.push(muted(view.waitNote));
-  if (view.text) elements.push(markdown(clip(view.text, REPLY_PREVIEW)));
-  else elements.push(markdown(requests.length ? '请确认下方工具调用，授权后继续。' : disconnected ? '暂无已同步的回复。' : view.done ? '本轮已结束。' : '正在处理你的请求，进展会更新在这张卡片中。'));
-  if (view.text.length > REPLY_PREVIEW) elements.push(muted(disconnected ? '卡片保留已同步的回复摘要；完整内容请查看对话记录。' : view.done ? '卡片展示回复摘要；完整回复会另行发送。' : '卡片展示回复摘要；完成后会另发完整回复。'));
-  const reasoning = [...(view.reasoning?.values() || [])].join('\n\n');
-  if (reasoning) elements.push(collapse('思考摘要', [markdown(clip(reasoning, 3000), true)], false, 'reasoning_summary'));
-  elements.push(...permissions(context, binding, requests));
-  if (tools.length) {
-    const recent = tools.slice(-4);
-    const steps = recent.map((tool, index) => collapse(`${tools.length - recent.length + index + 1}. ${tool.name} · ${tool.state}`, [
-      ...(tool.input ? [markdown('**输入**\n```json\n' + clip(tool.input, 120) + '\n```', true)] : []),
-      ...(tool.output ? [markdown('**结果**\n```\n' + clip(tool.output, 200) + '\n```', true)] : []),
-    ], tool.state === '失败', `tool_step_${tools.length - recent.length + index}`));
-    if (tools.length > recent.length) steps.unshift(muted(`显示最近 ${recent.length} 项，完整执行记录保存在 Panel。`));
-    elements.push(collapse(`执行详情 · ${tools.length} 个工具`, steps, false, 'execution_details'));
+  if (answer?.length > REPLY_PREVIEW) details.push(muted(disconnected ? '完整回复请查看最近对话。' : '完整回复会在任务结束后另行发送。'));
+  if (detailed) {
+    const actions = [button('查看最近对话', action(context, { action: 'history', id: binding.id })), button('会话设置', action(context, { action: 'view', id: binding.id }))];
+    if (complete && answer.trim()) actions.unshift(button('生成分享卡', action(context, { action: 'share_result' }), 'primary'));
+    if (view.done) actions.push(context.replyFormat === 'wide' ? button('改用 Markdown 回复', action(context, { action: 'reply_format', format: 'markdown' })) : button('改用宽屏卡片', action(context, { action: 'reply_format', format: 'wide' })));
+    if (view.done && failed && view.accepted) actions.push(button('继续未完成任务', action(context, { action: 'continue_task', id: binding.id }), 'primary'));
+    if (!view.done && view.canFork) actions.push(button('另起会话立即处理', action(context, { action: 'fork_now', id: binding.id }), 'primary'));
+    if (!view.done) actions.push(button(view.nativeAttached ? '断开飞书同步' : '停止当前任务', action(context, { action: 'stop', id: binding.id, ...(context.taskMessageId ? { taskMessageId: context.taskMessageId } : {}) }), 'danger'));
+    details.unshift(buttons(actions));
+    if (view.nativeAttached && !view.done) details.push(muted('断开飞书同步后，原终端的任务仍会运行。'));
+    if (title) details.push(markdown('**本轮问题**\n' + escape(clip(title, 250)), true));
+    const route = view.modelRoute;
+    const model = route?.model ? `${route.state === 'error' ? '尝试模型' : route.state === 'pending' ? '调用模型' : '实际调用模型'}：${escape(route.responseModel || route.model)}` : view.done ? '实际模型：未获取到本轮路由记录' : '正在选择模型…';
+    details.push(muted([
+      ['会话信息', context.location, catalogOf(context).label(binding.engine || 'claude')].filter(Boolean).join(' · '),
+      model, (route?.proxyName || route?.accountName) && '代理：' + escape(route.proxyName || route.accountName),
+      nodeLabel && '执行机器：' + escape(nodeLabel), '目录：' + escape(binding.cwd), '会话 ID：' + escape(binding.id),
+      binding.worktree && '独立工作区 · ' + escape(binding.worktree.branch),
+      view.nativeSession?.name && '原终端会话：' + escape(clip(view.nativeSession.name, 80)) + ' · ' + escape(String(view.nativeSession.id || binding.id).slice(0, 8)),
+    ].filter(Boolean).join('\n')));
+    if (binding.handoff) details.push(markdown(`**${binding.handoff.from === binding.handoff.to ? '已创建接续会话 · ' + escape(binding.handoff.to) : '执行位置已切换：' + escape(binding.handoff.from) + ' → ' + escape(binding.handoff.to)}**\n${binding.handoff.reason === 'offline' ? '原机器离线，接管机器已接续新一轮。' : '已按手动选择创建接续会话。'}${binding.handoff.context === 'checkpoint' ? '上下文来自有限的对话检查点，文件和工具状态需核对。' : '没有可恢复的对话检查点，请补充必要上下文。'}`));
+    const reasoning = [...(view.reasoning?.values() || [])].join('\n\n');
+    if (reasoning) details.push(markdown('**思考摘要**\n' + clip(reasoning, 3000), true));
   }
-  elements.push(collapse('会话信息', [markdown(`**${escape(clip(title, 80))}**\n${escape(binding.cwd)}\n\`${binding.id}\``, true)]));
-  if (binding.worktree) elements.push(muted(`独立工作区 · ${escape(binding.worktree.branch)}`));
-  const actions = [button('查看最近对话', action(context, { action: 'history', id: binding.id })), button('会话设置', action(context, { action: 'view', id: binding.id }))];
-  if (complete && view.text.trim()) actions.unshift(button('生成分享卡', action(context, { action: 'share_result' }), 'primary'));
-  if (view.done) actions.push(context.replyFormat === 'wide' ? button('改用 Markdown 回复', action(context, { action: 'reply_format', format: 'markdown' })) : button('改用宽屏卡片', action(context, { action: 'reply_format', format: 'wide' })));
-  if (view.accepted && view.done && failed) actions.push(button('继续未完成任务', action(context, { action: 'continue_task', id: binding.id }), 'primary'));
-  if (!view.done && view.canFork) actions.push(button('另起会话立即处理', action(context, { action: 'fork_now', id: binding.id }), 'primary'));
-  if (!view.done) actions.push(button(view.nativeAttached ? '断开飞书同步' : '停止当前任务', action(context, { action: 'stop', id: binding.id, ...(context.taskMessageId ? { taskMessageId: context.taskMessageId } : {}) }), 'danger'));
-  if (view.nativeAttached && !view.done) elements.push(muted('当前正在接续原终端；断开飞书同步后，终端中的任务仍会运行。'));
-  elements.push(buttons(actions));
-  const output = card(disconnected ? '进度同步已中断' : view.phase, elements, { subtitle: clip(title, 90), template, summary: `${view.phase} · ${clip(view.text || title, 90)}` });
-  return complete ? withReplySignature(output, signature) : output;
+  details.push({ ...muted(phase + ' · ' + timing), element_id: 'task_timing' });
+  const recent = tools.slice(detailed ? -4 : -8);
+  if (recent.length < tools.length) details.push(muted(`显示最近 ${recent.length} 项，完整执行记录保存在面板。`));
+  for (const tool of recent) {
+    const lines = [`**${escape(clip(tool.name, 60))}** · ${escape(tool.state)}`];
+    if (detailed && tool.input) lines.push('**输入**\n```json\n' + clip(tool.input, 120) + '\n```');
+    if (detailed && tool.output) lines.push('**结果**\n```\n' + clip(tool.output, 200) + '\n```');
+    details.push(markdown(lines.join('\n'), true));
+  }
+  elements.push(taskDetails(details, detailed ? '详情与操作' : '执行详情'));
+  const summary = [view.phase, clip(answer || (detailed && title), 90)].filter(Boolean).join(' · ');
+  const output = card(phase, elements, { showHeader: attention, subtitle: '', template: failed ? 'red' : 'orange', summary });
+  return withReplySignature(output, context.signature || replySignature(view.modelRoute));
 }
-// Migrate persisted cards from earlier versions without reviving execution controls.
+
+// Stored progress cards may predate the compact layout. Keep the reply and
+// historical details, but only restore controls that still work after restart.
 function interruptedTask(original) {
   const output = JSON.parse(JSON.stringify(original));
-  output.header.title = plain('进度同步已中断'); output.header.template = 'orange';
-  output.config.summary = { content: '网关已重启，执行结果尚未确认，请先查看最近对话' };
+  const previous = output.body.elements;
+  const signature = previous.find(item => item.element_id === RESULT_SIGNATURE)?.content || brandLink;
   const controls = [];
   const clean = value => {
     if (!value || typeof value !== 'object') return value;
     if (Array.isArray(value)) return value.map(clean).filter(Boolean);
+    if (value.element_id === TASK_REPLY) return value;
+    if (value.element_id === 'task_timing') value.content = value.content.replace(/^(<font color='grey'>).*? · /, '$1上次同步 · ');
+    if ([TASK_STATUS, 'task_warning', RESULT_SIGNATURE, SIGNATURE_DIVIDER].includes(value.element_id)) return null;
     if (value.tag === 'button') {
       const callback = value.behaviors?.find(b => b.type === 'callback')?.value;
       if (callback && ['history', 'view'].includes(callback.action)) controls.push(callback);
       return null;
     }
-    if (value.tag === 'markdown' && /^(正在处理你的请求，进展会更新在这张卡片中。|正在处理，完成后会显示回复。|请确认下方工具调用，授权后继续。)$/.test(value.content)) return null;
+    if (value.tag === 'markdown' && /^(正在处理你的请求，进展会更新在这张卡片中。|正在处理，完成后会显示回复。|等待授权，请在本机 Panel 处理。|请确认下方工具调用，授权后继续。|\*\*需要授权|<font color='grey'>另有 \d+ 项等待授权)/.test(value.content)) return null;
     if (value.tag === 'collapsible_panel' && /查看本次调用参数/.test(value.header?.title?.content || '')) return null;
-    if (value.tag === 'markdown' && /^\*\*需要授权/.test(value.content)) return null;
-    if (value.tag === 'plain_text' && typeof value.content === 'string') value.content = value.content.replace(/· 执行中$/, '· 上次同步时执行中');
+    if (['plain_text', 'markdown'].includes(value.tag)) value.content = value.content.replace(/· 执行中(?=\n|$)/g, '· 上次同步时执行中');
     for (const key of Object.keys(value)) if (value[key] && typeof value[key] === 'object') value[key] = clean(value[key]);
     if (value.tag === 'column_set') { value.columns = value.columns.filter(c => c.elements?.length); if (!value.columns.length) return null; }
     return value;
   };
-  output.body.elements = clean(output.body.elements);
-  output.body.elements.unshift(markdown('网关已重启，这张卡片已停止同步进展；这不代表任务执行失败。请先查看最近对话，确认结果后再继续。'));
+  const details = [];
+  if (output.header?.subtitle?.content) details.push(muted(escape(output.header.subtitle.content)));
+  const elements = [markdown('网关已重启，执行结果尚未确认。请先查看最近对话，再决定是否继续。')];
+  for (const item of clean(previous)) {
+    if (item.element_id === TASK_DETAILS) details.push(...item.elements);
+    else if (item.tag === 'markdown' && item.text_size !== 'notation') elements.push(item);
+    else if (item.tag === 'collapsible_panel') details.push(muted(escape(item.header.title.content)), ...item.elements);
+    else details.push(item);
+  }
   const reference = controls.find(c => c.action === 'history') || controls.find(c => c.action === 'view');
-  if (reference) output.body.elements.push(buttons([button('查看最近对话', { ...reference, action: 'history' }), button('会话设置', { ...reference, action: 'view' })]));
-  return output;
+  if (reference) details.unshift(buttons([button('查看最近对话', { ...reference, action: 'history' }), button('会话设置', { ...reference, action: 'view' })]));
+  if (details.length) elements.push(taskDetails(details, reference ? '详情与操作' : '执行详情'));
+  output.header = { title: plain('进度同步已中断'), template: 'orange' };
+  output.config.summary = { content: '网关已重启，执行结果尚未确认，请先查看最近对话' };
+  output.body.elements = elements;
+  return withReplySignature(output, signature);
 }
 const MODE_NAMES = { manual: '手动', failover: '自动故障转移', 'round-robin': '轮询' };
 function accountState(account, selected, mode, now) {

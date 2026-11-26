@@ -29,7 +29,7 @@ function createDaemonClient({ socketPath, connect = url => new WebSocket(url), t
       });
       ws.once('open', async () => {
         try {
-          await request('initialize', { clientInfo: { name: 'my_agents', version: '0.17.0' }, capabilities: { experimentalApi: true } });
+          await request('initialize', { clientInfo: { name: 'my_agents', version: require('../../package.json').version }, capabilities: { experimentalApi: true } });
           ws.send(JSON.stringify({ method: 'initialized' })); clearTimeout(timer); resolve();
         } catch (error) { clearTimeout(timer); reject(error); ws.terminate(); }
       });

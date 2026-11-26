@@ -837,8 +837,8 @@ test('stopping immediately after completion drains the final card instead of lea
   const f = await fixture(t); await f.pair();
   await f.gateway.receive(f.msg('Finish before restart'));
   await f.gateway.stop();
-  assert.equal(f.updated.at(-1).card.header.title.content, '已完成');
-  assert.equal(f.updated.at(-1).card.header.template, 'green');
+  assert.match(f.updated.at(-1).card.config.summary.content, /^已完成/);
+  assert.equal(f.updated.at(-1).card.header, undefined);
   assert.match(JSON.stringify(f.updated.at(-1).card), /A complete response/);
   const state = JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json')));
   assert.equal(Object.keys(state.taskCards).length, 0);
@@ -862,7 +862,7 @@ test('failed final delivery is persisted and repaired after gateway restart', as
   f.channel.updateCard = update;
   const restored = createFeishuGateway(f.options); await restored.start();
   try {
-    assert.equal(f.updated.at(-1).card.header.title.content, '已完成');
+    assert.match(f.updated.at(-1).card.config.summary.content, /^已完成/);
     assert.equal(Object.keys(JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json'))).taskCards).length, 0);
   } finally { await restored.stop(); }
 });
@@ -876,7 +876,7 @@ test('terminal events cannot be overwritten by late thinking events', async t =>
     return () => {};
   };
   await f.gateway.receive(f.msg('Terminal status is final')); await f.gateway.stop();
-  assert.equal(f.updated.at(-1).card.header.title.content, '已完成');
+  assert.match(f.updated.at(-1).card.config.summary.content, /^已完成/);
   assert.doesNotMatch(JSON.stringify(f.updated.at(-1).card), /late diagnostic/);
 });
 
@@ -905,7 +905,7 @@ test('shutdown waits for an older card update before writing the terminal state'
   await began;
   listener('done', { messageId: f.calls.at(-1).messageId });
   const stopping = f.gateway.stop(); release(); await stopping;
-  assert.equal(f.updated.at(-1).card.header.title.content, '已完成');
+  assert.match(f.updated.at(-1).card.config.summary.content, /^已完成/);
 });
 
 test('a follower cannot connect the Feishu gateway through start or configure', async t => {
@@ -1133,12 +1133,13 @@ test('an accepted native handover shows waiting instead of failure and keeps the
  let input,listener;f.panel.submit=async value=>{input=value;f.calls.push(value);return{sessionId:value.sessionId}};
  f.panel.watch=(_id,fn)=>{listener=fn;fn('warning',{messageId:input.messageId,kind:'native_handoff',warning:'问题已接收，等待原机器本轮结束后接续'});return()=>{}};
  await f.gateway.receive(f.msg('前面聊了什么'));
- for(let i=0;i<100&&!f.updated.some(x=>x.card.header.title.content==='等待原会话接续');i++)await new Promise(r=>setTimeout(r,20));
- const waiting=f.updated.find(x=>x.card.header.title.content==='等待原会话接续');assert.ok(waiting);assert.match(JSON.stringify(waiting.card),/问题已接收/);
+ for(let i=0;i<100&&!f.updated.some(x=>x.card.header?.title.content==='等待原会话接续');i++)await new Promise(r=>setTimeout(r,20));
+ const waiting=f.updated.find(x=>x.card.header?.title.content==='等待原会话接续');assert.ok(waiting);assert.match(JSON.stringify(waiting.card),/问题已接收/);
  assert.equal(input.sessionId,f.rows[0].id);assert.equal(input.prompt,'前面聊了什么');assert.equal(f.calls.length,1);
+ assert.match(JSON.stringify(waiting.card.body.elements.find(e=>e.element_id==='task_details')), /前面聊了什么/);
  listener('text',{messageId:input.messageId,text:'我们前面聊的是插件推荐。'});listener('done',{messageId:input.messageId});
- for(let i=0;i<50&&f.updated.at(-1).card.header.title.content!=='已完成';i++)await new Promise(r=>setTimeout(r,10));
- assert.equal(f.updated.at(-1).card.header.title.content,'已完成');
+ for(let i=0;i<50&&!f.updated.at(-1).card.config.summary.content.startsWith('已完成');i++)await new Promise(r=>setTimeout(r,10));
+ assert.match(f.updated.at(-1).card.config.summary.content,/^已完成/);
 });
 
 test('a held original-terminal message keeps its card pending and receives the later answer',async t=>{
@@ -1146,12 +1147,12 @@ test('a held original-terminal message keeps its card pending and receives the l
  let input,listener;f.panel.submit=async value=>{input=value;f.calls.push(value);return{sessionId:value.sessionId}};
  f.panel.watch=(_id,fn)=>{listener=fn;fn('warning',{messageId:input.messageId,kind:'native_attachment',warning:'原终端已连接'});fn('warning',{messageId:input.messageId,kind:'native_approval',warning:'问题已接收，等待原窗口接收授权'});return()=>{}};
  await f.gateway.receive(f.msg('前面聊了什么'));
- for(let i=0;i<100&&!f.updated.some(x=>x.card.header.title.content==='等待原窗口确认');i++)await new Promise(r=>setTimeout(r,20));
- const waiting=f.updated.find(x=>x.card.header.title.content==='等待原窗口确认');assert.ok(waiting);assert.equal(waiting.card.header.template,'orange');assert.match(JSON.stringify(waiting.card),/问题已接收/);
+ for(let i=0;i<100&&!f.updated.some(x=>x.card.header?.title.content==='等待原窗口确认');i++)await new Promise(r=>setTimeout(r,20));
+ const waiting=f.updated.find(x=>x.card.header?.title.content==='等待原窗口确认');assert.ok(waiting);assert.equal(waiting.card.header.template,'orange');assert.match(JSON.stringify(waiting.card),/问题已接收/);
  assert.equal(input.sessionId,f.rows[0].id);assert.equal(input.prompt,'前面聊了什么');assert.equal(f.calls.length,1);
  listener('turn',{messageId:input.messageId});listener('text',{messageId:input.messageId,text:'我们前面聊的是插件推荐。'});listener('done',{messageId:input.messageId});
- for(let i=0;i<50&&f.updated.at(-1).card.header.title.content!=='已完成';i++)await new Promise(r=>setTimeout(r,10));
- assert.equal(f.updated.at(-1).card.header.title.content,'已完成');
+ for(let i=0;i<50&&!f.updated.at(-1).card.config.summary.content.startsWith('已完成');i++)await new Promise(r=>setTimeout(r,10));
+ assert.match(f.updated.at(-1).card.config.summary.content,/^已完成/);
 });
 
 test('settings opened from an old card stay read-only until explicitly switching to that conversation', async t => {
@@ -1226,7 +1227,9 @@ test('wide card chats stretch task and settings cards to the window while keepin
   for (let i = 0; i < 100 && !f.updated.some(item => item.id === task.messageId && JSON.stringify(item.card).includes('A complete response.')); i++) await new Promise(resolve => setTimeout(resolve, 10));
   const last = f.updated.filter(item => item.id === task.messageId).at(-1).card;
   assert.equal(last.config.width_mode, 'fill', 'updates stay wide');
-  assert.match(JSON.stringify(last), /执行详情/);
+  const details = last.body.elements.find(item => item.element_id === 'task_details');
+  assert.equal(details.expanded, false);
+  assert.match(JSON.stringify(details), /README contents/);
   await f.gateway.receive(f.msg('/current'));
   assert.equal(f.sent.at(-1).content.card.config.width_mode, 'fill');
   await f.gateway.receive(f.msg('/reply card'));

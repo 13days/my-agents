@@ -608,8 +608,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       } catch (e) { await reply.close(); throw e; }
       return;
     }
-    const taskModel = selectedModel(binding) || defaultLabel(engineOf(binding));
-    const progress = () => widen(msg, { card: cards.task({ signature: signatureFor(msg, view.modelRoute), replyFormat: replyFormat(msg), nodeLabel: nodeLabel(nodeOf(binding)), model: view.nativeAttached ? '沿用原终端当前模型' : selectedModel(binding) || panel.currentModel?.(binding.id) || taskModel, engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), detailed: detailed(msg), binding, title: session(binding.id)?.title || clip(prompt, 80) || '图片对话', view, taskMessageId: id, elapsed: now() - startedAt }) }).card;
+    const progress = () => widen(msg, { card: cards.task({ signature: signatureFor(msg, view.modelRoute), replyFormat: replyFormat(msg), nodeLabel: nodeLabel(nodeOf(binding)), engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), detailed: detailed(msg), binding, title: prompt || '图片对话', view, taskMessageId: id, elapsed: now() - startedAt }) }).card;
     const sent = await send(msg, { card: progress() }); rememberCard(sent, msg, binding);
     const transport = channel;
     const saveTask = card => {
@@ -657,7 +656,6 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       shuttingDown = true; clearTimeout(timer); clearInterval(heartbeat); unsub?.();
       if (!view.done) {
         view.done = true; view.phase = '进度同步已中断';
-        view.text += '\n\n网关连接已关闭，已停止同步进展。请先查看最近对话，确认结果后再继续。';
         for (const tool of view.tools.values()) if (tool.state === '执行中') tool.state = '结果未同步';
       }
       const card = progress(); saveTask(card);
