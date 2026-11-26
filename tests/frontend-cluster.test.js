@@ -86,3 +86,17 @@ test('machine ids are derived from the SSH target or host name and never collide
   assert.equal(machineId('me@box', '', ['box', 'box-2']), 'box-3');
   assert.notEqual(machineId('me@local', '', []), 'local');
 });
+
+test('concurrent and repeated SSH setup reserves the panel id and connects a host once', async () => {
+  const { createMachineProvisioner } = require('../node/provision');
+  let installs = 0;
+  const rows = [];
+  const hub = { list:() => rows, add: node => { rows.push(node); return node; }, ensure:async () => {} };
+  const addMachine = createMachineProvisioner({hub, reservedIds:() => ['mac'], provision:async () => {
+    installs++; await new Promise(resolve => setImmediate(resolve)); return {hostname:'mac', command:'runner'};
+  }});
+  const [first, second] = await Promise.all([addMachine('dev@mac',''), addMachine('dev@mac','')]);
+  assert.equal(first.node.id,'mac-2'); assert.equal(second.node, first.node);
+  assert.equal((await addMachine('dev@mac','')).existing,true);
+  assert.equal(installs,1); assert.equal(rows.length,1);
+});

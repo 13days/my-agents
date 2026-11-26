@@ -2183,6 +2183,10 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' });
       return res.end(fs.readFileSync(path.join(__dirname, 'feishu-ui.js')));
     }
+    if (url.pathname === '/assets/relay-desk.png' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-cache' });
+      return res.end(fs.readFileSync(path.join(__dirname, 'assets/relay-desk.png')));
+    }
     if (url.pathname === '/panel.css' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': 'no-cache' });
       return res.end(fs.readFileSync(path.join(__dirname, 'panel.css')));
@@ -2345,12 +2349,8 @@ const server = http.createServer(async (req, res) => {
         if (req.method === 'POST' && parts.length === 3 && parts[2] === 'provision') {
           const input = JSON.parse(await readBody(req, 64 * 1024) || '{}'), target = String(input.ssh || '').trim();
           if (!/^[\w.@:[\]-]{1,200}$/.test(target) || target.startsWith('-')) throw Object.assign(new Error('请填写 SSH 地址，例如 user@10.0.0.8 或 ~/.ssh/config 里的主机名'), { status: 400 });
-          const { provisionMachine, machineId } = require('./node/provision');
-          const result = await provisionMachine({ ssh: target });
-          const taken = [...nodeHub.list().map(node => node.id), ...(clusterConfig?.members || []).map(member => member.id), machineId()];
-          const id = String(input.label || '').trim() ? machineId(String(input.label).trim(), '', taken) : machineId(target, result.hostname, taken);
-          const node = nodeHub.add({ id, label: String(input.label || '').trim() || id, ssh: target, command: result.command });
-          return sendJSON(res, 201, { node, ...result });
+          const result = await addMachine(target, String(input.label || '').trim());
+          return sendJSON(res, result.existing ? 200 : 201, result);
         }
         const id = decodeURIComponent(parts[2] || '');
         if (req.method === 'DELETE' && parts.length === 3) { req.resume(); return sendJSON(res, nodeHub.remove(id) ? 200 : 404, { ok: true }); }
@@ -2925,6 +2925,10 @@ const runtimeRouting = {
   },
 };
 const nodeHub = require('./node/hub').createNodeHub({ registry, token: auth?.token, dir: DATA_DIR, routing: runtimeRouting });
+const addMachine = require('./node/provision').createMachineProvisioner({
+  hub: nodeHub, reservedIds: () => [machineId(), ...(clusterConfig?.members || []).map(member => member.id)],
+});
+
 
 const clusterRuntimePending = new Map();
 async function attachClusterRuntime(id, peer) {

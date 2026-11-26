@@ -16,3 +16,9 @@ test('node command includes the install token so copying it requires no manual s
   assert.equal(hint, `my-agents node --hub ws://192.168.1.20:4321 --token ${token}`);
   assert.doesNotMatch(hint, /<panel-token>|<本机地址>/);
 });
+
+test('the install-and-connect command carries a quoted hub and token into node mode', () => {
+  const data = connectionHint({port:4321,bindHost:'0.0.0.0',token:"a'b",interfaces});
+  assert.ok(data.installHint.includes("MY_AGENTS_TOKEN='a'\\''b'"));
+  assert.ok(data.installHint.endsWith("sh -s -- --connect 'ws://192.168.1.20:4321'"));
+});

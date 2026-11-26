@@ -12,8 +12,37 @@ const muted = content => markdown(`<font color='grey'>${content}</font>`, true);
 const button = (text, value, type = 'default') => ({ tag: 'button', text: plain(text), type, behaviors: [{ type: 'callback', value }] });
 const buttons = items => ({ tag: 'column_set', flex_mode: 'none', columns: [{ tag: 'column', width: 'weighted', weight: 1, elements: Array.from({ length: Math.ceil(items.length / 2) }, (_, i) => ({ tag: 'column_set', flex_mode: 'none', horizontal_spacing: '8px', columns: items.slice(i * 2, i * 2 + 2).map(item => ({ tag: 'column', width: 'weighted', weight: 1, elements: [{ ...item, width: 'fill' }] })) })) }] });
 const collapse = (title, elements, expanded = false, id) => ({ tag: 'collapsible_panel', ...(id ? { element_id: id } : {}), expanded, header: { title: plain(title), icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' }, icon_position: 'right', icon_expanded_angle: -180 }, border: { color: 'grey', corner_radius: '5px' }, vertical_spacing: '8px', padding: '8px 8px 8px 8px', elements });
-function card(title, elements, { subtitle = 'my-agents · 工作空间', template = 'grey', summary = title } = {}) {
-  return { schema: '2.0', config: { width_mode: 'default', update_multi: true, summary: { content: clip(summary, 120) } }, header: { title: plain(clip(title, 64)), subtitle: plain(clip(subtitle, 100)), template }, body: { padding: '12px 16px 12px 16px', vertical_spacing: '12px', elements } };
+function card(title, elements, { subtitle = '接力台', template = 'grey', summary = title } = {}) {
+  return { schema: '2.0', config: { width_mode: 'default', update_multi: true, summary: { content: clip(summary, 120) } }, header: { title: plain(clip(title, 64)), ...(subtitle ? { subtitle: plain(clip(subtitle, 100)) } : {}), template }, body: { padding: '12px 16px 12px 16px', vertical_spacing: '12px', elements } };
+}
+const RESULT_SIGNATURE = 'my_agents_reply_signature';
+const SIGNATURE_DIVIDER = 'my_agents_reply_divider';
+const brandLink = '[接力台](' + require('./package.json').homepage + ')';
+function signatureText(value) {
+  return clip(value, 80).replace(/\s+/g, ' ').trim().replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/([\\`*_\[\]~|])/g, '\\$1');
+}
+function replySignature(route, name) {
+  const completed = route?.state === 'success' && (!route.childState || route.childState === 'success');
+  const model = completed && signatureText(route.responseModel || route.model);
+  const effort = model && /^(none|minimal|low|medium|high|xhigh|max|ultra)$/.test(route.effort) ? ` (${route.effort})` : '';
+  const recipient = name && !/^(ou_|on_|oc_)/.test(name) && signatureText(name);
+  const details = [model && `**${model}${effort}**`, recipient && `发送给：@${recipient}`].filter(Boolean);
+  return details.length ? brandLink + " <font color='grey'>· " + details.join(' · ') + "</font>" : brandLink;
+}
+function withReplySignature(original, signature) {
+  if (!Array.isArray(original.body?.elements)) return original;
+  const elements = original.body.elements.filter(item => ![RESULT_SIGNATURE, SIGNATURE_DIVIDER].includes(item?.element_id));
+  elements.push({ tag: 'hr', element_id: SIGNATURE_DIVIDER }, { ...markdown(signature, true), element_id: RESULT_SIGNATURE });
+  return { ...original, body: { ...original.body, elements } };
+}
+function resultSnapshot(text, signature) {
+  const excerpt = clip(text, 3600);
+  return { text: excerpt, excerpt: excerpt !== text, signature };
+}
+function shareCard(result) {
+  const title = result.excerpt ? '任务结果 · 摘录' : '任务结果';
+  return withReplySignature(card(title, [markdown(result.text)], { subtitle: '', summary: result.text }), result.signature);
 }
 // Cards name engines through the catalog the gateway passes in (`context.engines`).
 const catalogOf = context => context.engines || engineCatalog();
@@ -202,6 +231,8 @@ function task({ binding, title, view, elapsed, nodeLabel = '', model = '默认�
   context.session = sessionReference(binding);
   const tools = [...view.tools.values()], requests = view.done ? [] : [...view.permissions.values()];
   const done = tools.filter(item => item.state === '已完成').length;
+  const complete = view.done && view.phase === '已完成';
+  const signature = context.signature || replySignature(view.modelRoute);
   const failed = view.phase === '失败';
   const disconnected = ['连接已结束', '进度同步已中断', '结果待核对'].includes(view.phase);
   const template = failed ? 'red' : disconnected || requests.length || ['等待原窗口确认', '投递待确认', '结果待核对', '等待节点重连', '等待后台任务', '等待原会话汇总'].includes(view.phase) ? 'orange' : view.done ? 'green' : 'blue';
@@ -210,12 +241,13 @@ function task({ binding, title, view, elapsed, nodeLabel = '', model = '默认�
     if (tools.length) elements.push(markdown(tools.slice(-8).map(tool => `🔧 ${escape(clip(tool.name, 60))} · ${escape(tool.state)}`).join('\n')));
     elements.push(markdown(view.done ? clip(view.text || '本轮已结束。', REPLY_PREVIEW) : requests.length ? '等待授权，请在本机 Panel 处理。' : '正在处理，完成后会显示回复。'));
     if (view.done && view.text.length > REPLY_PREVIEW) elements.push(muted('完整回复将在下方另行发送。'));
-    return card(view.phase, elements, { subtitle: '工具执行状态与最终回复', template, summary: `${view.phase}${view.done ? ' · ' + clip(view.text, 90) : ''}` });
+    const output = card(view.phase, elements, { subtitle: '工具执行状态与最终回复', template, summary: `${view.phase}${view.done ? ' · ' + clip(view.text, 90) : ''}` });
+    return complete ? withReplySignature(output, signature) : output;
   }
   const elements = [muted(`${context.location ? context.location + ' · ' : ''}${catalogOf(context).label(binding.engine || 'claude')} · ${escape(path.basename(binding.cwd) || '项目')} · ${Math.max(0, Math.floor(elapsed / 1000))} 秒${tools.length ? ` · 工具 ${done}/${tools.length}` : ''}`)];
   const route=view.modelRoute;
   if(route?.model){
-    elements.push(muted(`${route.state==='error'?'尝试模型':route.state==='pending'?'调用模型':'实际调用模型'}：${escape(route.model)}`));
+    elements.push(muted(`${route.state==='error'?'尝试模型':route.state==='pending'?'调用模型':'实际调用模型'}：${escape(route.responseModel || route.model)}`));
     if(route.proxyName||route.accountName)elements.push(muted(`代理：${escape(route.proxyName||route.accountName)}`));
   }else elements.push(muted(view.done?'实际模型：未获取到本轮路由记录':'正在选择模型…'));
 
@@ -243,13 +275,15 @@ function task({ binding, title, view, elapsed, nodeLabel = '', model = '默认�
   elements.push(collapse('会话信息', [markdown(`**${escape(clip(title, 80))}**\n${escape(binding.cwd)}\n\`${binding.id}\``, true)]));
   if (binding.worktree) elements.push(muted(`独立工作区 · ${escape(binding.worktree.branch)}`));
   const actions = [button('查看最近对话', action(context, { action: 'history', id: binding.id })), button('会话设置', action(context, { action: 'view', id: binding.id }))];
+  if (complete && view.text.trim()) actions.unshift(button('生成分享卡', action(context, { action: 'share_result' }), 'primary'));
   if (view.done) actions.push(context.replyFormat === 'wide' ? button('改用 Markdown 回复', action(context, { action: 'reply_format', format: 'markdown' })) : button('改用宽屏卡片', action(context, { action: 'reply_format', format: 'wide' })));
   if (view.accepted && view.done && failed) actions.push(button('继续未完成任务', action(context, { action: 'continue_task', id: binding.id }), 'primary'));
   if (!view.done && view.canFork) actions.push(button('另起会话立即处理', action(context, { action: 'fork_now', id: binding.id }), 'primary'));
   if (!view.done) actions.push(button(view.nativeAttached ? '断开飞书同步' : '停止当前任务', action(context, { action: 'stop', id: binding.id, ...(context.taskMessageId ? { taskMessageId: context.taskMessageId } : {}) }), 'danger'));
   if (view.nativeAttached && !view.done) elements.push(muted('当前正在接续原终端；断开飞书同步后，终端中的任务仍会运行。'));
   elements.push(buttons(actions));
-  return card(disconnected ? '进度同步已中断' : view.phase, elements, { subtitle: clip(title, 90), template, summary: `${view.phase} · ${clip(view.text || title, 90)}` });
+  const output = card(disconnected ? '进度同步已中断' : view.phase, elements, { subtitle: clip(title, 90), template, summary: `${view.phase} · ${clip(view.text || title, 90)}` });
+  return complete ? withReplySignature(output, signature) : output;
 }
 // Migrate persisted cards from earlier versions without reviving execution controls.
 function interruptedTask(original) {
@@ -309,4 +343,4 @@ function routes({ status, codex, pinned, sessionId, notice = '', now = Date.now(
   if (advanced.length) elements.push(collapse('连接诊断与冷却设置', [muted('清除冷却会立即重新尝试故障账号。Codex 直连将绕过本地请求记录，请仅在排查连接时调整。'), buttons(advanced)]));
   return card('账号与连接', elements, { subtitle: '账号与策略调整 · 后续请求生效', template: accounts.some(a => a.enabled && (a.cooldownUntil || 0) > now) ? 'orange' : 'grey', summary: `路由：${MODE_NAMES[mode] || mode}` });
 }
-module.exports = { interruptedTask, PAGE_SIZE, SESSION_PAGE_SIZE, REPLY_PREVIEW, card, markdown, button, buttons, collapse, sessionRecovery, sessionList, sessionUserMessages, projectList, nodePicker, enginePicker, modelPicker, currentSession, task, routes, MODE_NAMES };
+module.exports = { withReplySignature, replySignature, shareCard, resultSnapshot, interruptedTask, PAGE_SIZE, SESSION_PAGE_SIZE, REPLY_PREVIEW, card, markdown, button, buttons, collapse, sessionRecovery, sessionList, sessionUserMessages, projectList, nodePicker, enginePicker, modelPicker, currentSession, task, routes, MODE_NAMES };

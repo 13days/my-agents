@@ -1,3 +1,3 @@
-# my-agents
+# 接力台
 
-中文说明请参阅 [README.md](README.md)。English: [README.en.md](README.en.md)。
+[中文使用说明](README.md) · [English](README.en.md)

@@ -218,3 +218,23 @@ test('task cards show observed upstream model, never the requested alias as actu
  const text=JSON.stringify(cards.task(input));assert.match(text,/实际调用模型：gpt-6.1-sol/);assert.match(text,/Codex · Mac/);assert.doesNotMatch(text,/auto\/claude-opus/);
  delete input.view.modelRoute;input.view.done=true;assert.match(JSON.stringify(cards.task(input)),/未获取到本轮路由记录/);
 });
+
+test('result signatures preserve the card layout and forwarding policy, escape names and omit unobserved models', () => {
+  const card = cards.card('周会更新', [cards.markdown('正文')]);
+  card.config.enable_forward = false;
+  const sign = cards.replySignature({ state: 'success', model: 'alias', responseModel: 'served', effort: 'high' }, '同事[点我](url)<at id=all>');
+  const output = cards.withReplySignature(cards.withReplySignature(card, sign), sign);
+  assert.equal(output.body.elements.length, 3);
+  assert.equal(output.body.elements.at(-2).tag, 'hr');
+  assert.equal(output.body.elements.at(-1).text_size, 'notation');
+  assert.equal(card.body.elements.length, 1);
+  assert.equal(output.config.enable_forward, false);
+  assert.match(sign, /\[接力台\]\(https:\/\/github.com\/13days\/my-agents#readme\)/);
+  assert.match(sign, /served \(high\)/);
+  assert.doesNotMatch(sign, /alias|<at|\[点我\]\(url\)/);
+  assert.doesNotMatch(cards.replySignature({state:'error',model:'wrong'}, 'ou_private'), /wrong|ou_private/);
+  assert.doesNotMatch(cards.replySignature({state:'success',childState:'pending',model:'wrong'}), /wrong/);
+  const long = cards.shareCard(cards.resultSnapshot('😄'.repeat(10000), sign));
+  assert.match(long.header.title.content, /摘录/);
+  assert.ok(Buffer.byteLength(JSON.stringify(long)) < 28000);
+});

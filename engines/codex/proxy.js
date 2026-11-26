@@ -1,7 +1,7 @@
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
-const { TRACE_HEADER } = require('../../core/proxy-observation');
+const { reasoningEffort, TRACE_HEADER } = require('../../core/proxy-observation');
 const { retryableStatus } = require('../../core/route-policy');
 const { upstreamNetwork } = require('../../upstream-network');
 
@@ -152,7 +152,7 @@ function createCodexProxy({ record = () => {}, reserveCapture = () => ({}), requ
     req.on('end', () => {
       if (res.destroyed) return;
       const body = Buffer.concat(chunks), started = Date.now();
-      try { const model = JSON.parse(body.toString()).model; if (typeof model === 'string') info.routing.requestedModel = info.routing.actualModel = model; } catch {}
+      try { const payload = JSON.parse(body.toString()); info.routing.effort = reasoningEffort(payload); const model = payload.model; if (typeof model === 'string') info.routing.requestedModel = info.routing.actualModel = model; } catch {}
       const turn = req.method === 'POST' && /\/responses(\?|$)/.test(req.url);
       if (turn && sessionId) { const e = live.get(sessionId) || { inflight: 0 }; e.inflight++; e.lastAt = Date.now(); live.set(sessionId, e); res.on('close', () => { e.inflight = Math.max(0, e.inflight - 1); e.lastAt = Date.now(); }); }
       const headers = {};

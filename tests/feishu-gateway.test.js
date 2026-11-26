@@ -1402,3 +1402,33 @@ test('DM cards and markdown replies target the incoming message thread and keep 
   await new Promise(r=>setTimeout(r,30));
   assert.ok(f.sent.some(s=>s.content.post && s.options.replyTo===next.messageId && s.options.replyInThread));
 });
+
+test('shared answers refer to the original completed turn, survive restart, and never include task controls', async t => {
+  const f = await fixture(t); await f.pair();
+  f.panel.routeObservation = async ({sessionId,since}) => ({ request: {sessionId, startedAt:new Date(since).toISOString(), model:'actual-model', effort:'high', state:'success'} });
+  await f.gateway.receive(f.msg('original', { senderName: '林舟' }));
+  await new Promise(r => setTimeout(r, 50));
+  const {id, card} = f.updated.at(-1);
+  const {owner,key} = JSON.parse(JSON.stringify(card).match(/\{"action":"share_result"[^}]*\}/)[0]);
+  const click = { messageId:id, chatId:'oc_private', operator:{openId:owner}, action:{value:{owner,key,action:'share_result',text:'untrusted'}} };
+  const token = f.calls.at(-1).gatewayContext.match(/"token":"([a-f0-9]+)"/)[1];
+  await f.gateway.sendReply({token, card:{ schema:'2.0', body:{elements:[{tag:'markdown',content:'业务数据'}]} }});
+  const signature = f.sent.at(-1).content.card.body.elements.at(-1).content;
+  assert.match(signature, /actual-model \(high\).*@林舟/);
+  assert.equal(card.body.elements.at(-1).content,signature);
+  await f.gateway.stop();
+  const resumed = createFeishuGateway(f.options); await resumed.start();
+  try {
+    await resumed.action({...click, messageId:'forwarded-copy'});
+    assert.doesNotMatch(JSON.stringify(f.sent.at(-1).content), /A complete response/);
+    await resumed.action(click);
+    const shared = f.sent.at(-1);
+    assert.equal(shared.options.replyTo,id);
+    assert.equal(shared.content.card.body.elements[0].content,'A complete response.');
+    assert.equal(shared.content.card.body.elements.at(-1).content,signature);
+    assert.doesNotMatch(JSON.stringify(shared.content.card), /untrusted|behaviors|README contents|执行机器|会话信息/);
+    const count = f.sent.length;
+    await resumed.action(click);
+    assert.equal(f.sent.length,count);
+  } finally { await resumed.stop(); }
+});

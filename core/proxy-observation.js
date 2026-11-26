@@ -16,6 +16,10 @@ function compareRoutes(a, b) {
   for (let i = 0; i < left.length; i++) if (left[i] !== right[i]) return left[i] - right[i];
   return 0;
 }
+function reasoningEffort(body) {
+  const value = body?.reasoning?.effort || body?.reasoning_effort || body?.output_config?.effort;
+  return typeof value === 'string' && /^(none|minimal|low|medium|high|xhigh|max|ultra)$/.test(value) ? value : '';
+}
 function routeRecord(rec) {
   const trace = rec.observation || {};
   const sessionId = sessionIdOf(trace.sessionId || rec.sessionId);
@@ -32,7 +36,7 @@ function routeRecord(rec) {
     proxyName: trace.proxyName || rec.upstreamName || '', accountName: rec.upstreamName || '',
     accountId: rec.upstreamId || '', model: rec.routing?.actualModel || rec.model || '',
     requestedModel: trace.requestedModel || rec.routing?.requestedModel || rec.model || '',
-    state, status: Number(rec.status) || null, responseModel: rec.responseModel || '',
+    effort: rec.routing?.effort || '', state, status: Number(rec.status) || null, responseModel: rec.responseModel || '',
   };
 }
 function updateRoutes(map, row) {
@@ -104,9 +108,9 @@ function createProxyObservation({ lastCapture = () => null, now = Date.now } = {
     // the last subscription request from another turn/window or another retry.
     if (!outer || !inner || inner.requestOrder !== outer.requestOrder || inner.parentAttempt !== outer.parentAttempt) inner = null;
     const request = outer ? { ...outer, ...(inner ? { accountName: inner.accountName, accountId: inner.accountId, model: inner.model,
-      responseModel: inner.responseModel, childState: inner.state, childAttempt: inner.childAttempt } : {}) } : null;
+      responseModel: inner.responseModel, effort: inner.effort, childState: inner.state, childAttempt: inner.childAttempt } : {}) } : null;
     return { sessionId: id, request, target, modelMeaning: 'sent-to-upstream' };
   }
   return { begin, complete, associate, resolve, status };
 }
-module.exports = { TRACE_HEADER, sessionIdOf, findTurnObservation, withinTurn, compareRoutes, routeRecord, updateRoutes, streamOutcome, createProxyObservation };
+module.exports = { reasoningEffort, TRACE_HEADER, sessionIdOf, findTurnObservation, withinTurn, compareRoutes, routeRecord, updateRoutes, streamOutcome, createProxyObservation };

@@ -136,11 +136,21 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     const meta = catalog().get(engine);
     return meta?.cliEnv ? `${meta.short || meta.label} 的工具环境提供 ${meta.cliEnv}；必要时运行 "$${meta.cliEnv}" --version 验证。` : '';
   }
-  function deliveryContext(msg) {
+  const signatureFor = (msg, route) => cards.replySignature(route, inbox.userName(config.appId, msg.senderId) || msg.senderName);
+  async function observedRoute(turn) {
+    if (turn.since == null || !panel.routeObservation) return null;
+    try {
+      const request = (await panel.routeObservation(turn))?.request;
+      const at = Date.parse(request?.startedAt);
+      if (request?.sessionId === turn.sessionId && request.model && at >= turn.since && at <= (turn.until ?? Infinity)) return request;
+    } catch {}
+    return null;
+  }
+  function deliveryContext(msg, turn) {
     if (!replyURL) return '';
     for (const [token, target] of replyTargets) if (target.expires <= now()) replyTargets.delete(token);
     const token = crypto.randomBytes(24).toString('hex');
-    replyTargets.set(token, { appId: config.appId, msg: { messageId: msg.messageId, senderId: msg.senderId, chatId: msg.chatId, chatType: msg.chatType, threadId: threadOf(msg), rootId: msg.rootId }, expires: now() + 2 * 60 * 60 * 1000 });
+    replyTargets.set(token, { turn, appId: config.appId, msg: { senderName: msg.senderName, messageId: msg.messageId, senderId: msg.senderId, chatId: msg.chatId, chatType: msg.chatType, threadId: threadOf(msg), rootId: msg.rootId }, expires: now() + 2 * 60 * 60 * 1000 });
     const binding = state.bindings[scope(msg)], engine = binding ? engineOf(binding) : defaultEngine(), node = binding ? nodeOf(binding) : 'local';
     const cli = panel.engineInfo?.(engine, node);
     const where = node === 'local' ? '本机' : `远程节点「${nodeLabel(node)}」上的`;
@@ -155,7 +165,9 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (!!input.card === (typeof input.text === 'string')) throw new Error('请提供 card 或 text 中的一项');
     if (input.card && (typeof input.card !== 'object' || Array.isArray(input.card) || input.card.schema !== '2.0')) throw new Error('请提供飞书 JSON 2.0 卡片对象');
     if (Buffer.byteLength(JSON.stringify(input.card || input.text)) > 28000) throw new Error('单条内容过大，请拆分发送');
-    const result = await send(target.msg, input.card ? { card: input.card } : { text: input.text });
+    const card = input.card && cards.withReplySignature(input.card, signatureFor(target.msg, await observedRoute(target.turn)));
+    if (card && (target.appId !== config.appId || !allowed(target.msg) || !channel || !config.enabled || target.expires <= now())) throw new Error('原对话当前未获准发送');
+    const result = await send(target.msg, card ? { card } : { text: input.text });
     return { ok: true, messageId: result?.messageId, chatId: target.msg.chatId, threadId: threadOf(target.msg) };
   }
   async function sendLong(msg, text) {
@@ -570,29 +582,48 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     }
     if (!prompt && !images.length) throw new Error('请发送文字或图片');
     const id = msg.turnId || messageUUID(msg.messageId), view = { text: '', tools: new Map(), reasoning: new Map(), permissions: new Map(), phase: mode === 'queue' ? '已排队' : '正在处理', done: false, accepted: false };
+    const startedAt = now();
+    const turn = { sessionId: binding.id, node: nodeOf(binding), since: mode === 'queue' ? null : startedAt };
+    const watchTurn = listener => panel.watch(binding.id, (event, data = {}) => {
+      if (event === 'turn' && data.id === id) {
+        turn.since = Math.max(startedAt, Date.parse(data.timestamp) || startedAt);
+        turn.sessionId = binding.id; turn.node = nodeOf(binding);
+      }
+      if (data.messageId === id) {
+        if (data.kind === 'model_session' && data.routeSessionId) turn.sessionId = data.routeSessionId;
+        if (event === 'done' && data.sessionId) turn.sessionId = data.sessionId;
+        if (event === 'done' || event === 'error') turn.until ??= Date.parse(data.timestamp) || now();
+      }
+      if (event === 'end' || event === 'stopped') turn.until ??= now();
+      listener(event, data);
+    });
     if (!detailed(msg) || replyFormat(msg) === 'markdown') {
-      const reply = createSimpleReply({ channel, msg: { ...msg, threadId: threadOf(msg) }, messageId: id, footer: () => `${nodeLabel(nodeOf(binding))} · ${catalog().label(engineOf(binding))} · ${catalog().switchHint(engineOf(binding))} 切换引擎 · 模型：${modelLabel(binding)} · /model 切换模型${detailed(msg) ? ' · /reply wide 改用宽屏卡片（可看思考过程）' : ''}`, onError: rememberError, onClose: () => monitors.delete(reply.close) });
+      const reply = createSimpleReply({ channel, msg: { ...msg, threadId: threadOf(msg) }, messageId: id, footer: () => `${nodeLabel(nodeOf(binding))} · ${catalog().label(engineOf(binding))} · ${catalog().switchHint(engineOf(binding))} 切换引擎 · 模型：${modelLabel(binding)} · /model 切换模型${detailed(msg) ? ' · /reply wide 改用宽屏卡片（可看思考过程）' : ''}`, onError: rememberError, onClose: () => { turn.until ??= now(); monitors.delete(reply.close); } });
       monitors.add(reply.close);
       try {
         await reply.start();
         if (reply.closed) return;
-        await submit(binding, { prompt, images, messageId: id, mode, gatewayContext: deliveryContext(msg), ...(proposed ? { allowFailover: false } : {}) });
-        reply.attach(listener => panel.watch(binding.id, listener));
+        await submit(binding, { prompt, images, messageId: id, mode, gatewayContext: deliveryContext(msg, turn), ...(proposed ? { allowFailover: false } : {}) });
+        reply.attach(watchTurn);
       } catch (e) { await reply.close(); throw e; }
       return;
     }
-    const startedAt = now(), taskModel = selectedModel(binding) || defaultLabel(engineOf(binding));
-    const progress = () => widen(msg, { card: cards.task({ replyFormat: replyFormat(msg), nodeLabel: nodeLabel(nodeOf(binding)), model: view.nativeAttached ? '沿用原终端当前模型' : selectedModel(binding) || panel.currentModel?.(binding.id) || taskModel, engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), detailed: detailed(msg), binding, title: session(binding.id)?.title || clip(prompt, 80) || '图片对话', view, taskMessageId: id, elapsed: now() - startedAt }) }).card;
+    const taskModel = selectedModel(binding) || defaultLabel(engineOf(binding));
+    const progress = () => widen(msg, { card: cards.task({ signature: signatureFor(msg, view.modelRoute), replyFormat: replyFormat(msg), nodeLabel: nodeLabel(nodeOf(binding)), model: view.nativeAttached ? '沿用原终端当前模型' : selectedModel(binding) || panel.currentModel?.(binding.id) || taskModel, engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), detailed: detailed(msg), binding, title: session(binding.id)?.title || clip(prompt, 80) || '图片对话', view, taskMessageId: id, elapsed: now() - startedAt }) }).card;
     const sent = await send(msg, { card: progress() }); rememberCard(sent, msg, binding);
     const transport = channel;
     const saveTask = card => {
-      if (state.cards[sent.messageId]) state.cards[sent.messageId].canContinue = view.accepted && view.done && view.phase === '失败';
+      const origin = state.cards[sent.messageId];
+      if (origin) {
+        origin.canContinue = view.accepted && view.done && view.phase === '失败';
+        if (view.done && view.phase === '已完成' && view.text.trim()) origin.result = cards.resultSnapshot(view.text, signatureFor(msg, view.modelRoute));
+      }
       state.taskCards[sent.messageId] = { appId: config.appId, sessionId: binding.id, done: view.done, card, updatedAt: now(), owner: msg.senderId, chatId: msg.chatId, chatType: msg.chatType };
       persist();
     };
     saveTask(progress());
-    try { await submit(binding, { prompt, images, messageId: id, mode, gatewayContext: deliveryContext(msg), ...(proposed ? { allowFailover: false } : {}) }); }
-    catch (e) { view.phase = '失败'; view.text = errorText(e); view.done = true; saveTask(progress()); if (await transport.updateCard(sent.messageId, progress()).then(() => true, () => false)) { delete state.taskCards[sent.messageId]; persist(); e.reported = true; } throw e; }
+    try { await submit(binding, { prompt, images, messageId: id, mode, gatewayContext: deliveryContext(msg, turn), ...(proposed ? { allowFailover: false } : {}) }); }
+    catch (e) { turn.until ??= now(); view.phase = '失败'; view.text = errorText(e); view.done = true; saveTask(progress()); if (await transport.updateCard(sent.messageId, progress()).then(() => true, () => false)) { delete state.taskCards[sent.messageId]; persist(); e.reported = true; } throw e; }
     view.accepted = true;
     let timer, heartbeat, unsub, updating, shuttingDown = false, dirty = false, busy = false, closed = false, updateFailures = 0;
     const finish = () => { if (closed) return; closed = true; if (waiting.get(binding.id)?.taskMessageId === id) waiting.delete(binding.id); clearTimeout(timer); clearInterval(heartbeat); unsub?.(); monitors.delete(shutdownMonitor); };
@@ -601,18 +632,8 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       busy = true; dirty = false;
       try {
         const terminal = view.done;
-        if(panel.routeObservation){
-          try{
-            const routeSessionId=view.routeSessionId||binding.id;
-            const since = view.turnStartedAt || startedAt;
-            const until = view.finishedAt;
-            const observation = await panel.routeObservation({ sessionId: routeSessionId, node: nodeOf(binding), since, until });
-            const request=observation?.request;
-            // A prior turn or a configured target is not execution evidence.
-            const at = Date.parse(request?.startedAt);
-            if (request?.sessionId === routeSessionId && at >= since && at <= (until ?? Infinity) && request.model) view.modelRoute = request;
-          }catch{}
-        }
+        const observation = await observedRoute(turn);
+        if (observation) view.modelRoute = observation;
         const card = progress(); saveTask(card);
         updating = transport.updateCard(sent.messageId, card);
         await updating; updateFailures = 0;
@@ -632,6 +653,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     const schedule = immediate => { clearTimeout(timer); if (busy) { dirty = true; return; } timer = setTimeout(flush, immediate ? 0 : 1200); };
     const shutdownMonitor = async () => {
       if (closed) return;
+      turn.until ??= now();
       shuttingDown = true; clearTimeout(timer); clearInterval(heartbeat); unsub?.();
       if (!view.done) {
         view.done = true; view.phase = '进度同步已中断';
@@ -663,20 +685,13 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     }, 15000);
     heartbeat.unref?.();
     monitors.add(shutdownMonitor);
-    unsub = panel.watch(binding.id, (event, data = {}) => {
+    unsub = watchTurn((event, data = {}) => {
       if (closed || shuttingDown || view.done) return;
       if (event === 'stopped') { view.phase = '已停止'; view.done = true; schedule(true); return; }
       if (event === 'end' && !view.done) { view.phase = data.state === 'unknown' || view.phase === '结果待核对' ? '结果待核对' : '连接已结束'; view.done = true; if (!view.text) view.text = '本轮未完成，可用 /history 查看已保存内容后继续发送。'; schedule(true); return; }
-      if (event === 'turn' && data.id === id) {
-        view.turnStartedAt = Math.max(startedAt, Date.parse(data.timestamp) || startedAt);
-        delete view.modelRoute;
-      }
       if (data.messageId !== id) return;
-      if(data.kind==='model_session'&&typeof data.routeSessionId==='string')view.routeSessionId=data.routeSessionId;
-      if(event==='done'&&typeof data.sessionId==='string')view.routeSessionId=data.sessionId;
       conversationState.apply(view, event, data);
       if (view.done) {
-        view.finishedAt = Date.parse(data.timestamp) || now();
         saveTask(progress());
       }
       schedule(view.done || ['native_handoff','native_attachment','native_approval','native_delivery_pending'].includes(data.kind));
@@ -844,6 +859,20 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     try {
       if (value.node === panel.machineId?.()) value = { ...value, node: 'local' };
       const origin = state.cards[msg.messageId];
+      if (value.action === 'share_result') {
+        if (!origin?.result || origin.owner !== msg.senderId || origin.chatId !== msg.chatId || origin.key !== key) throw new Error('请在原任务卡片上生成分享卡');
+        if (origin.shareMessageId) return;
+        const content = { card: cards.shareCard(origin.result) };
+        const api = channel.rawClient?.im?.v1?.message;
+        if (api?.reply) {
+          const result = await api.reply({ path: { message_id: msg.messageId }, data: { msg_type: 'interactive',
+            content: JSON.stringify(widen(msg, content).card), reply_in_thread: msg.chatType === 'p2p' || !!threadOf(msg),
+            uuid: messageUUID('share-result:' + msg.messageId) } });
+          origin.shareMessageId = result?.data?.message_id;
+        } else origin.shareMessageId = (await send(msg, content))?.messageId;
+        if (!origin.shareMessageId) throw new Error('分享卡未确认送达，请重试');
+        persist(); return;
+      }
       if (['models','engine','nodes','route','use_node','use_engine','set_model','set_default_model','stop','permission','continue_task'].includes(value.action) && origin?.sessionId && state.bindings[key]?.id !== origin.sessionId) throw new Error('会话已切换，请发送 /current 获取最新操作卡片');
       if (['models','engine','nodes','route'].includes(value.action) && value.id && referenceId(state.bindings[key]?.id) !== referenceId(value.id)) throw new Error('此卡片不是当前会话，请先切换到该会话再修改设置');
       if (['models','engine','nodes','route','use_node','use_engine','set_model','stop','permission','continue_task'].includes(value.action) && value.expectedSessionId && referenceId(state.bindings[key]?.id) !== referenceId(value.expectedSessionId)) throw new Error('会话已切换，请发送 /current 获取最新操作卡片');

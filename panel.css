@@ -93,9 +93,7 @@ button, a, input, select, textarea, summary { outline-offset: 3px; }
 @media(max-width:760px) { .machine-grid,.workspace-paths { grid-template-columns:1fr; } .infrastructure-tabs { width:100%; } .infrastructure-tabs button { flex:1; padding:8px; font-size:12px; } .panel-layers { flex-direction:column; align-items:stretch; gap:10px; } .panel-layers .layer-arrow { display:none; } .cluster-summary { padding:18px; } .cluster-summary h2 { font-size:18px; } }
 #navrail { display: flex; flex-direction: column; width: 212px; min-width: 212px; background: #16181b; border-right: 1px solid var(--border); }
 #logo { display: flex; align-items: center; gap: 10px; height: 82px; padding: 0 22px; font-size: 15px; font-weight: 650; letter-spacing: -.35px; white-space: nowrap; }
-#logo .brand-mark { display: grid; place-items: center; width: 30px; height: 30px; color: #17191d; background: var(--accent); border-radius: 9px; }
-#logo .brand-mark .svg-icon { width: 18px; height: 18px; }
-#logo .brand-name span { color: var(--muted); font-weight: 450; }
+#logo .brand-mark { display: block; width: 30px; height: 30px; flex: none; }
 #tabs { display: flex; flex-direction: column; gap: 4px; padding: 6px 12px 18px; overflow-y: auto; }
 .nav-group-label { margin: 18px 12px 5px; font-size: 10px; font-weight: 650; color: #737a86; letter-spacing: 1.4px; text-transform: uppercase; }
 .nav-group-label:first-child { margin-top: 0; }
@@ -1078,7 +1076,6 @@ h1, h2, h3, .view-heading h1, .view-heading h2 { letter-spacing: -.015em; }
 /* Navigation rail */
 #navrail { background: linear-gradient(180deg, #111215, #0e0f11); border-right: 1px solid var(--border); }
 #logo { letter-spacing: -.02em; }
-#logo .brand-mark { background: linear-gradient(140deg, #a9aaff, #5b5ce6); color: var(--accent-ink); box-shadow: 0 0 0 1px #ffffff1a inset, 0 6px 18px -6px var(--accent-glow); }
 .nav-group-label { color: var(--faint); letter-spacing: .14em; }
 .tab { position: relative; min-height: 36px; padding: 8px 12px; border: 0; border-radius: var(--radius-sm); transition: background .15s var(--ease), color .15s var(--ease); }
 .tab:hover { background: var(--hover); }

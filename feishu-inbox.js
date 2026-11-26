@@ -82,6 +82,6 @@ function createFeishuInbox(dir) {
     fs.mkdirSync(dir, { recursive: true });
     const temp = labelsFile + '.tmp'; fs.writeFileSync(temp, JSON.stringify(labels), { mode: 0o600 }); fs.renameSync(temp, labelsFile);
   }
-  return { ready, record, contacts, messages, setName, setAlias, groupsForUser: (appId, id) => [...new Set(rows.filter(row => row.appId === appId && row.senderId === id && chats.get(key(appId, row.chatId))?.type === 'group').map(row => row.chatId))], chatType: (appId, id) => chats.get(key(appId, id))?.type };
+  return { ready, record, contacts, userName: (appId, id) => users.get(key(appId, id))?.name || names[key(appId, id)], messages, setName, setAlias, groupsForUser: (appId, id) => [...new Set(rows.filter(row => row.appId === appId && row.senderId === id && chats.get(key(appId, row.chatId))?.type === 'group').map(row => row.chatId))], chatType: (appId, id) => chats.get(key(appId, id))?.type };
 }
 module.exports = { createFeishuInbox };

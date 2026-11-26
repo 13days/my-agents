@@ -10,6 +10,9 @@ function connectionHint({ port, bindHost, token, interfaces = os.networkInterfac
   const loopback = ['127.0.0.1', '::1', 'localhost'].includes(bindHost);
   const address = !loopback && !['0.0.0.0', '::'].includes(bindHost) ? bindHost : addresses[0]?.address || '127.0.0.1';
   const host = net.isIP(address) === 6 ? `[${address}]` : address;
-  return { hint: `my-agents node --hub ws://${host}:${port} --token ${token || '<panel-token>'}`, address, loopback };
+  const hub = `ws://${host}:${port}`;
+  const quote = value => "'" + String(value).replace(/'/g, "'\\''") + "'";
+  const installHint = `curl -fsSL https://raw.githubusercontent.com/13days/my-agents/main/install.sh | MY_AGENTS_TOKEN=${quote(token || '<panel-token>')} sh -s -- --connect ${quote(hub)}`;
+  return { hint: `my-agents node --hub ${hub} --token ${token || '<panel-token>'}`, installHint, address, loopback };
 }
 module.exports = { connectionHint };

@@ -1,119 +1,63 @@
-<div align="center">
+# <img src="assets/relay-desk.png" width="42" height="42" alt=""> 接力台
 
-# my-agents
+在飞书里把任务交给 Codex 或 Claude Code。它在你选的机器和项目目录里工作，把结果回到原话题。回到电脑，打开浏览器就能接着同一个会话聊。
 
-**一个工作空间，连接你的 Claude Code、Codex 和开发机。**
+[English](README.en.md) · [使用手册](docs/user-guide.md)
 
-在浏览器或 IM 中使用外部 Agent，统一管理会话、账号、项目和执行机器。
+## 从飞书里用一次
 
-[English](README.en.md) · [使用手册](docs/user-guide.md) · [集群搭建](docs/cluster-setup.md) · [交给 Agent 安装](docs/agent-install.md)
+比如你要准备周会。在和机器人的私聊里发：
 
-![Node.js 18+](https://img.shields.io/badge/Node.js-18%2B-43853d?logo=node.js&logoColor=white)
-![MIT](https://img.shields.io/badge/license-MIT-blue)
+> /new 帮我看一下这个项目本周合入的改动，整理三条给团队看的更新。
 
-</div>
+选好项目和引擎，提交任务。回复卡会显示它读了什么、运行了哪些工具，以及最后写好的三条更新。想改口吻，直接在话题里说「改成发给设计同学的版本」。想发到周会群，点 **生成分享卡**，预览正文，再用飞书转发。卡片底部的「接力台」链接会带收件人回到这里。
 
-my-agents 让你在 Mac 上打开面板，在开发机运行任务，在飞书里查看结果。它负责连接和管理外部 Agent；实际的代码理解、工具执行和模型能力来自 Claude Code / Codex。
+已经在终端里做了一半？发 `/sessions 关键词`，选中原来的会话再继续。
 
-适合同时使用多个订阅账号、在多台机器开发，或希望离开电脑后仍能通过 IM 继续工作的人。
+## 启动第一台
 
-## 能做什么
+在 macOS 或 Linux 上准备好 Git 和 curl。复制这条命令，安装程序会优先使用已有的 Node.js 18+ 和 npm。缺少运行环境时，会在用户目录安装经 SHA-256 校验的 Node.js 24 LTS（Intel / ARM 64 位）。
 
-| 场景 | 使用方式 |
-| --- | --- |
-| 统一会话 | 查看原生 CLI 历史，在网页继续对话，查看时间、耗时、工具执行和引擎公开的推理摘要 |
-| 随时发起任务 | 飞书 / Lark 中用 `/new 问题` 打开表单，一次选择机器、项目、引擎、模型和独立工作区 |
-| 多机协作 | 远程执行节点通过 SSH 或 WebSocket 接入；项目在每台机器上分别配置真实路径 |
-| 账号池 | Claude Code 与 Codex 各自一个账号池，均支持订阅与代理；正常登录后自动收录，支持轮询、故障切换与跨机共享 |
-| 并发开发 | 用 Git worktree 为任务创建独立分支与目录，避免多个 Agent 同时修改同一个工作区 |
-| 请求排障 | 查看请求与响应、耗时、用量和失败记录，区分账号、网络和模型问题 |
-| IM 接管 | 多个常驻面板组成多数派集群，选举 IM 主节点；Mac 关闭后，在线成员仍可接收消息 |
-| 资源管理 | 管理命令、技能、Agent 配置、插件和 MCP 等本机资源，回顾项目活动 |
+```sh
+curl -fsSL https://raw.githubusercontent.com/13days/my-agents/main/install.sh | sh
+```
 
-已有会话绑定自己的执行机器、目录和引擎。新建任务选择另一台机器，不会把旧会话一起改过去。
+打开 **[localhost:4321](http://localhost:4321)**。首次安装的源码放在 `~/.local/share/my-agents/source`，面板在当前终端运行。下次可以重用同一条命令。
 
-## 五分钟启动
+1. **先跑通本机。** 在要执行任务的机器上安装并登录 [Codex](https://developers.openai.com/codex/cli/) 或 [Claude Code](https://code.claude.com/docs/en/quickstart)。在「对话 → ＋ 新对话」选项目，试试「这个项目怎么启动？」。
+2. **接上飞书。** 打开「聊天软件」，点「扫码创建机器人」。如果已有机器人，也可以填入应用凭证。跟随页面完成配对和卡片按钮授权。
+3. **发第一条任务。** 私聊机器人，发送上面的 `/new` 示例。执行进度和结果都会回到飞书。 [飞书卡片与命令](docs/feishu-interaction.md)
 
-需要 Git、Node.js ≥ 18，以及可用的 Claude Code 或 Codex。**npm 包尚未发布，当前从源码安装。**
+<details>
+<summary>已经有开发环境，想从源码运行</summary>
 
-```bash
+```sh
 git clone https://github.com/13days/my-agents.git
 cd my-agents
 npm install
-npm start
+MY_AGENTS_NO_PROXY_SETUP=1 npm start
 ```
 
-打开 **http://localhost:4321**，然后：
+安装脚本和这条启动命令都保留现有终端代理配置。要让服务在登录后常驻，可在 macOS 面板里启用登录自启，Linux 使用用户服务。 [安装与常驻](docs/agent-install.md)
 
-1. 在「机器与引擎」检查 CLI 与账号接入。
-2. 在「项目与目录」设置本机项目路径。
-3. 从「会话 → 新对话」发送第一条任务。
-4. 需要 IM 时，在「IM 接入」配置机器人并完成配对。
+</details>
 
-源码无需前端构建。`npm install` 仍然必需：WebSocket 使用 `ws`，飞书 / Lark 还需要可选的官方 SDK；若安装时跳过了可选依赖，请在启用 IM 前补齐。
+## 把任务放到开发机
 
-首次启动可能为终端配置 Claude 请求代理。希望手动管理接入时，可用 `MY_AGENTS_NO_PROXY_SETUP=1 npm start`。配置和数据目录详见[使用手册](docs/user-guide.md)。
+在「设备与模型 → 机器 → 添加机器」填入平时使用的免密 SSH 地址，例如 `devbox`。面板会检查环境、准备运行时、安装执行程序并建立连接。设备显示「已连接」后，在「项目与目录」填写项目在那台机器上的真实路径。下一次新建对话就能选它。
 
-## 选择适合你的部署
+SSH 连不进去，但开发机能访问面板时，展开「其他接入方式」，复制接入命令到开发机运行即可。
 
-| 部署方式 | 适合 | 能否接管 IM |
-| --- | --- | --- |
-| 单机面板 | 本机浏览与执行 | 该机器在线时可用 |
-| 面板 + 执行节点 | 将任务放到远程开发机 | 执行节点不参与选举 |
-| 三台完整集群面板 | Mac 离线后仍可从 IM 工作 | 保持多数派时可选举新主节点 |
+只想用一台电脑，直接在本机工作即可。如果希望笔记本关机后仍有人接收飞书消息，需要让其他常驻面板接管机器人。 [集群部署指南](docs/cluster-setup.md)
 
-```mermaid
-flowchart LR
-  Browser[浏览器] --> Panel[任一在线面板]
-  IM[飞书 / Lark] --> Leader[有效 IM 主节点]
-  Panel --> Session[会话绑定的执行机器]
-  Leader --> Session
-  Session --> CLI[Claude Code / Codex]
-  Leader <--> Peers[其他集群面板]
-```
+## 让助理替你留意消息
 
-浏览器访问哪台机器、哪台机器接收 IM、任务在哪台机器执行，是三个不同的选择。普通 `node --hub` 命令只加入执行通道；要参与主节点接管，需按[集群搭建手册](docs/cluster-setup.md)部署完整面板。
+在「助理」里连接个人飞书账号，选择读取范围，开启同步。助理会汇总相关私聊和群聊，结合发送人、后续回复和已有任务，建议哪些消息适合一起交给哪个会话。你可以调整归属、忽略或确认执行。确认记录能给下次判断作参考。
 
-## 让 Agent 帮你安装
+消息同步和模型分析分别有开关，模型分析可以设置每日预算。 [助理设置与审批](docs/heartflow.md)
 
-把下面这段交给你正在使用的编码 Agent，并补上机器信息：
+## 项目
 
-```text
-请安装并配置 my-agents。
-先读取 https://raw.githubusercontent.com/13days/my-agents/main/docs/agent-install.md，按其中的安装协议执行。
-部署模式：单机 / 三台完整面板集群（选择一种）。
-机器：填写机器名称、SSH 目标、其他成员可访问的地址；单机可直接探测本机。
-已有数据和项目必须保留；确认实际运行来源、Git 提交、CLI 版本、节点连通和会话绑定。
-完成可执行的安装工作，列出仍需我完成的浏览器登录或机器人授权。
-```
+仓库和命令行沿用 `my-agents`。卡片署名和首次安装流程的设计参考了 [botmux](https://github.com/deepcoldy/botmux)。
 
-也可以直接复制[完整 Agent 安装手册](docs/agent-install.md)全文。手册包含探测、安装、集群分发、常驻服务、验收和回滚步骤；账号首次授权仍可能需要你在浏览器操作。
-
-## 使用与维护
-
-- [完整使用手册](docs/user-guide.md)：账号池、模型、IM、目录映射、worktree、备份与排障。
-- [飞书卡片与操作说明](docs/feishu-interaction.md)：任务状态、查看对话、会话设置与各类切换的区别。
-- [集群搭建与升级](docs/cluster-setup.md)：三节点部署、成员配置、常驻运行和接管验证。
-- [Agent 安装协议](docs/agent-install.md)：可直接交给 Agent 执行的完整说明。
-- [执行位置与工作区](docs/execution-workspaces.md)、[数据迁移](docs/migration.md)、[IM 扩展设计](docs/im-channels.md)、[当前架构与可靠性边界](docs/architecture-current.md)、[架构设计历史](docs/architecture-v2.md)。
-
-页面左下角的「使用指南」也可以离线阅读。
-
-## 使用边界
-
-当前内置 IM 实现为飞书 / Lark；企业微信等渠道尚需适配。账号共享适用于你有权使用的账号与可信机器，受上游订阅权限、模型可用性和限流约束。账号池不会扩大订阅配额。
-
-集群同步会话绑定、有限对话检查点及相应配置与受保护的账号凭证；**不会自动同步整个原生 CLI 历史、仓库文件或 worktree，也不会迁移正在运行的进程**。执行机器离线后，后续轮次可按已配置的项目映射接续；存在未同步工作区时需要明确处理。两台机器无法同时实现严格多数派和任意单机离线后的自动接管。
-
-面板、节点接入令牌、账号库和抓包记录都应只交给可信用户。抓包可能包含任务内容与工具结果。跨机器访问优先使用可信内网、VPN 或受保护的 TLS 通道，不直接暴露公网端口。
-
-## 参与开发
-
-```bash
-npm install
-npm test
-```
-
-欢迎提交 [Issue](https://github.com/13days/my-agents/issues) 或 Pull Request。报告问题时附上 Git 提交、运行机器、引擎版本与脱敏错误；不要上传令牌、账号凭证或完整私人抓包。
-
-[MIT License](LICENSE)
+[报告问题](https://github.com/13days/my-agents/issues) · [MIT 许可证](LICENSE)

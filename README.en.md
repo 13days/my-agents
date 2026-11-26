@@ -1,103 +1,57 @@
-<div align="center">
+# <img src="assets/relay-desk.png" width="42" height="42" alt=""> Relay Desk
 
-# my-agents
+Give Codex or Claude Code a task in Feishu or Lark. It runs in the project directory you choose, on your laptop or development server, and posts its answer in the same thread. Open the conversation in your browser to pick up where you left off.
 
-**One workspace for your Claude Code, Codex, accounts and development machines.**
+[中文](README.md) · [User guide (Chinese)](docs/user-guide.md)
 
-Use external coding agents from a browser or IM, with shared account routing and explicit session ownership.
+## Try it in a chat
 
-[中文](README.md) · [User guide (中文)](docs/user-guide.md) · [Cluster setup (中文)](docs/cluster-setup.md) · [Agent installation protocol (中文)](docs/agent-install.md)
+Send your bot a task like this:
 
-![Node.js 18+](https://img.shields.io/badge/Node.js-18%2B-43853d?logo=node.js&logoColor=white)
-![MIT](https://img.shields.io/badge/license-MIT-blue)
+> /new Read this week’s merged changes and write three updates I can share with the design team.
 
-</div>
+Choose a project and an engine, then submit. The task card updates as the agent works. Reply in the thread to ask for a revision. To share the answer, click **生成分享卡** on the finished task and forward the resulting card. It contains the answer and a link back here. To resume an existing session instead, send `/sessions keyword`.
 
-Open the panel on your laptop, run tasks on a development server, and check the results in Feishu or Lark. my-agents manages access to external agents; Claude Code and Codex provide the actual reasoning and tool execution.
+## Start your first panel
 
-## What you get
+On macOS or Linux with Git and curl, run:
 
-| Capability | How it helps |
-| --- | --- |
-| Unified sessions | Browse native CLI history, continue conversations, inspect timestamps, durations, tool calls and reasoning summaries exposed by the CLI |
-| IM task forms | `/new your question` opens one form for machine, project, engine, model, isolated workspace and first prompt |
-| Remote execution | Connect development machines over SSH or WebSocket; map a project's actual path separately on each machine |
-| Shared account pools | Separate Claude Code and Codex pools for subscriptions and proxies, with automatic sign-in discovery, shared routing and failover |
-| Concurrent development | Give tasks separate Git worktrees and branches |
-| Request inspection | Inspect requests, responses, usage and failures to distinguish account, model and network issues |
-| IM availability | Keep a majority of persistent cluster panels online so another member can take over IM reception |
-| Resource management | Manage local commands, skills, agents, plugins, configuration and project activity |
+```sh
+curl -fsSL https://raw.githubusercontent.com/13days/my-agents/main/install.sh | sh
+```
 
-A session keeps its own machine, directory and engine. Choosing another executor for a new task does not move existing conversations.
+The installer uses your existing Node.js 18+ and npm when available. On Intel and ARM 64-bit systems it can download a checksum-verified Node.js 24 LTS runtime into your home directory. The source lives in `~/.local/share/my-agents/source`. The panel runs in the foreground. Use the same command to start it again.
 
-## Quick start
+1. Open **[localhost:4321](http://localhost:4321)**. Install and sign in to [Codex](https://developers.openai.com/codex/cli/) or [Claude Code](https://code.claude.com/docs/en/quickstart) on the machine that will run your task. Choose **Conversations → New chat**, pick a project, and ask how to run it.
+2. Under **Chat apps**, scan the setup QR code or enter an existing bot’s credentials. Follow the pairing and card-button authorization prompts.
+3. Send the bot the `/new` example above. You can follow its progress in the thread. [Feishu cards and commands (Chinese)](docs/feishu-interaction.md)
 
-You need Git, Node.js ≥ 18, and a usable Claude Code or Codex installation. **The npm package is not published yet; install from source.**
+<details>
+<summary>Run a source checkout</summary>
 
-```bash
+```sh
 git clone https://github.com/13days/my-agents.git
 cd my-agents
 npm install
-npm start
+MY_AGENTS_NO_PROXY_SETUP=1 npm start
 ```
 
-Open **http://localhost:4321**. Check Machines & engines, configure your project directory, and start a new conversation. Configure and pair a bot under IM connections when you need messaging access.
+Both the installer and this start command keep your terminal proxy configuration intact. For a persistent install, enable login startup in the macOS panel or install a Linux user service. [Installation and services (Chinese)](docs/agent-install.md)
 
-There is no frontend build step. Dependency installation is still required: WebSockets use `ws`; Feishu/Lark also needs the optional official SDK. Starting the panel may configure a terminal Claude proxy wrapper. Use `MY_AGENTS_NO_PROXY_SETUP=1 npm start` for manual integration.
+</details>
 
-## Deployment choices
+## Add a development machine
 
-| Setup | Purpose | IM takeover |
-| --- | --- | --- |
-| Single panel | Local browsing and execution | Requires this machine to stay online |
-| Panel + execution nodes | Run tasks on remote machines | Runtime nodes do not vote |
-| Three full cluster panels | Continue receiving IM when a laptop goes offline | Available while a majority remains connected |
+In **Devices & models → Machines → Add machine**, enter a passwordless SSH address or host alias. The panel prepares the runtime, installs the runner, and connects the device. Once it shows **Connected**, map the project’s path under **Projects & directories** and choose the device for your next conversation.
 
-```mermaid
-flowchart LR
-  Browser --> Panel[Any online panel]
-  IM[Feishu / Lark] --> Leader[Valid IM leader]
-  Panel --> Executor[Session-bound machine]
-  Leader --> Executor
-  Executor --> CLI[Claude Code / Codex]
-  Leader <--> Peers[Other cluster panels]
-```
+If SSH is unavailable but the device can reach the panel, open **Other ways to connect** and run the generated command on the device.
 
-The panel you open, the IM leader, and the executor are separate roles. `node --hub` connects execution only. Follow the [cluster guide](docs/cluster-setup.md) to configure voting panels, consistent membership, persistent services and machine-specific project paths. Two full panels plus a witness is an alternative for election quorum; a witness does not replicate account state or run tasks.
+A single machine is enough to get started. To keep receiving chat messages when your laptop goes offline, configure additional persistent panels. [Cluster setup (Chinese)](docs/cluster-setup.md)
 
-## Let an Agent install it
+## Let the assistant follow your chats
 
-Copy this into your coding Agent and provide the machine inventory:
+Connect your personal Feishu account under **Assistant**, choose which chats to read, and turn on sync. Review suggested actions based on senders, follow-up replies, and work already in progress. You can change the target conversations, approve an action, or dismiss it. Past reviews can inform future suggestions. Model analysis has its own switch and daily budget. [Assistant settings (Chinese)](docs/heartflow.md)
 
-```text
-Install my-agents using the installation protocol at:
-https://raw.githubusercontent.com/13days/my-agents/main/docs/agent-install.md
-Mode: single machine / three full cluster panels.
-Machines: names, SSH targets and addresses reachable by other members.
-Preserve existing data and projects. Verify the running source, Git revision,
-CLI versions, connectivity and session ownership. Complete automated setup
-and identify any browser sign-in or bot authorization I must perform.
-```
+The repository and CLI use the name `my-agents`. The card signature and first-run experience draw on [botmux](https://github.com/deepcoldy/botmux).
 
-The [full installation protocol](docs/agent-install.md) can also be copied directly. It covers discovery, installation, membership distribution, services, verification and recovery. First-time account authorization may require human interaction.
-
-## Data and limits
-
-The panel stores its own data separately from source code. Existing installations may still use the legacy Claude directory; inspect the active service before changing data paths. See the [migration guide](docs/migration.md).
-
-Cluster panels synchronize session bindings, bounded conversation checkpoints, relevant configuration and protected account credentials. They do not automatically copy full native histories, repositories or worktrees, or migrate running CLI processes. Subsequent turns can use a mapped project on an eligible takeover machine; unsynchronized worktrees require explicit handling.
-
-Feishu/Lark is the implemented IM channel. Other channels require adapters. Shared accounts remain subject to upstream subscription permissions, model availability and rate limits. Use only trusted machines: access tokens, account stores and captures are sensitive, and captures can include prompts and tool results. Prefer private networks, VPNs or protected TLS connections.
-
-## Documentation and contributions
-
-The full manuals are currently in Chinese: [usage](docs/user-guide.md), [cluster setup](docs/cluster-setup.md), [Agent installation](docs/agent-install.md). An offline usage guide is available from the panel's lower-left navigation.
-
-```bash
-npm install
-npm test
-```
-
-[Issues](https://github.com/13days/my-agents/issues) and pull requests are welcome. Include the Git revision, machine role, CLI versions and a redacted error. Never attach credentials or private captures.
-
-[MIT License](LICENSE)
+[Issues](https://github.com/13days/my-agents/issues) · [MIT license](LICENSE)

@@ -8,7 +8,7 @@ const { upstreamNetwork } = require('./upstream-network');
 const crypto = require('crypto');
 const { modelDefaults } = require('./model-defaults');
 const { captureMetadata } = require('./capture-store');
-const { TRACE_HEADER } = require('./core/proxy-observation');
+const { reasoningEffort, TRACE_HEADER } = require('./core/proxy-observation');
 const HOP = new Set(['host', 'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade', 'content-length']);
 const ROUTED_ENV = new Set(['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL']);
 function parseEnvInput(input) {
@@ -303,6 +303,7 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
         let data = body;
         try {
           const parsed = JSON.parse(body.toString());
+          attemptInfo.routing.effort = reasoningEffort(parsed);
           if (typeof parsed.model === 'string') {
             const map = account.modelMap;
             const key = Object.keys(map).find(k => k !== '*' && parsed.model.toLowerCase().includes(k.toLowerCase()));
