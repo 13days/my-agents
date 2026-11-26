@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { updateJsonLines } = require('../../core/incremental-jsonl');
 const { reasoningText } = require('./runner');
 const { messageTimestamp, annotateMessageTimings } = require('../../message-timing');
 
@@ -40,62 +41,32 @@ function toolOutput(output) {
   if (Array.isArray(output)) return output.map(b => b?.text || '').join('');
   return output;
 }
+function codexRecord(row) {
+  if (!row || typeof row !== 'object') return null;
+  return row.payload && typeof row.payload === 'object' ? { ts: row.timestamp, kind: row.type, p: row.payload }
+    : typeof row.type === 'string' ? { ts: row.timestamp, kind: row.type === 'message' || row.type.endsWith('call') || row.type.endsWith('output') || row.type === 'reasoning' ? 'response_item' : row.type, p: row }
+    : row.id && 'instructions' in row ? { ts: row.timestamp, kind: 'session_meta', p: row } : null;
+}
+function codexAssistantText(content) {
+  return (Array.isArray(content) ? content : []).filter(b => b?.type === 'output_text' || b?.type === 'text').map(b => b.text || '').join('');
+}
 function records(fp) {
   let text; try { text = fs.readFileSync(fp, 'utf8'); } catch { return []; }
   const out = [];
   for (const line of text.split('\n')) {
     if (!line) continue;
     let d; try { d = JSON.parse(line); } catch { continue; }
-    if (d.payload && typeof d.payload === 'object') out.push({ ts: d.timestamp, kind: d.type, p: d.payload });
-    else if (d.type) out.push({ ts: d.timestamp, kind: d.type === 'message' || d.type.endsWith('call') || d.type.endsWith('output') || d.type === 'reasoning' ? 'response_item' : d.type, p: d });
-    else if (d.id && 'instructions' in d) out.push({ ts: d.timestamp, kind: 'session_meta', p: d });
+    const record = codexRecord(d);
+    if (record) out.push(record);
   }
   return out;
 }
 
-// Each reader retains parsed state, not raw rollout records. Re-read only the
-// appended bytes; preserve an incomplete UTF-8/JSON line until the next append.
 function updateRecords(fp, cached, initialize, consume) {
-  let fd;
-  try { fd = fs.openSync(fp, 'r'); } catch { return null; }
-  try {
-    const stat = fs.fstatSync(fd);
-    let extendedEof = false;
-    if (cached?.eof && stat.size > cached.offset) {
-      const first = Buffer.alloc(1); fs.readSync(fd, first, 0, 1, cached.offset); extendedEof = first[0] !== 10;
-    }
-    if (!cached || extendedEof || cached.ino !== stat.ino || cached.dev !== stat.dev || stat.size < cached.offset || (stat.size === cached.offset && stat.mtimeMs !== cached.mtime)) {
-      cached = { ...initialize(), ino: stat.ino, dev: stat.dev, offset: 0, mtime: stat.mtimeMs, pending: '', decoder: new (require('string_decoder').StringDecoder)('utf8') };
-    }
-    const consumeLine = line => {
-      let row; try { row = JSON.parse(line); } catch { return false; }
-      if (!row || typeof row !== 'object') return true;
-      const record = row.payload && typeof row.payload === 'object' ? { ts: row.timestamp, kind: row.type, p: row.payload }
-        : typeof row.type === 'string' ? { ts: row.timestamp, kind: row.type === 'message' || row.type.endsWith('call') || row.type.endsWith('output') || row.type === 'reasoning' ? 'response_item' : row.type, p: row }
-        : row.id && 'instructions' in row ? { ts: row.timestamp, kind: 'session_meta', p: row } : null;
-      if (record) consume(cached, record);
-      return true;
-    };
-    const buffer = Buffer.alloc(Math.min(1024 * 1024, stat.size - cached.offset));
-    if (stat.size > cached.offset) cached.eof = false;
-    while (cached.offset < stat.size) {
-      const n = fs.readSync(fd, buffer, 0, Math.min(buffer.length, stat.size - cached.offset), cached.offset);
-      if (!n) break;
-      cached.offset += n;
-      const text = cached.pending + cached.decoder.write(buffer.subarray(0, n));
-      let start = 0, end;
-      while ((end = text.indexOf('\n', start)) >= 0) {
-        const line = text.slice(start, end); start = end + 1;
-        consumeLine(line);
-      }
-      cached.pending = text.slice(start);
-    }
-    // Historical exports may omit the final newline. Consume a complete JSON
-    // record once, but rebuild if a later write extends that same line.
-    if (cached.pending && consumeLine(cached.pending)) { cached.pending = ''; cached.eof = true; }
-    cached.mtime = stat.mtimeMs;
-    return cached;
-  } finally { fs.closeSync(fd); }
+  return updateJsonLines(fp, cached, initialize, (state, row) => {
+    const record = codexRecord(row);
+    if (record) consume(state, record);
+  });
 }
 
 function createCodexSessions({ home } = {}) {
@@ -186,7 +157,7 @@ function createCodexSessions({ home } = {}) {
         const text = codexUserText(p.content), images = codexImages(p.content);
         if (text || images.length) out.push({ role: 'user', text, images, ...(timestamp ? { timestamp } : {}) });
       } else if (p.type === 'message' && p.role === 'assistant') {
-        const text = (p.content || []).filter(b => b?.type === 'output_text').map(b => b.text || '').join('');
+        const text = codexAssistantText(p.content);
         if (!text) return;
         const msg = assistant(); msg.text += (msg.text ? '\n\n' : '') + text; if (timestamp) msg.timestamp = timestamp;
         if (!state.explicitDuration.has(msg)) delete msg.durationMs;
@@ -270,4 +241,4 @@ function createCodexSessions({ home } = {}) {
   }
   return { list, messages, pathFor, provider, stats, files };
 }
-module.exports = { createCodexSessions, codexUserText, stripGatewayContext };
+module.exports = { createCodexSessions, codexRecord, codexUserText, codexAssistantText, stripGatewayContext };

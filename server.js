@@ -1131,41 +1131,15 @@ function extractText(content) {
   return '';
 }
 
-function searchTranscripts(q) {
-  const ql = q.toLowerCase();
-  const out = [];
-  const { files, sessionFiles } = transcriptFiles();
-  for (const fp of files) {
-    if (!sessionFiles.has(fp)) continue; // 只搜主会话，跳过 subagent 记录
-    let content;
-    try { content = fs.readFileSync(fp, 'utf8'); } catch { continue; }
-    if (!content.toLowerCase().includes(ql)) continue;
-    const sid = path.basename(fp, '.jsonl');
-    for (const line of content.split('\n')) {
-      if (!line.toLowerCase().includes(ql)) continue;
-      const isU = line.includes('"type":"user"');
-      const isA = !isU && line.includes('"type":"assistant"');
-      if (!isU && !isA) continue;
-      let d;
-      try { d = JSON.parse(line); } catch { continue; }
-      if (d.isSidechain) continue;
-      const text = extractText(d.message && d.message.content);
-      const idx = text.toLowerCase().indexOf(ql);
-      if (idx < 0) continue;
-      out.push({
-        session: sid,
-        role: isU ? 'user' : 'assistant',
-        ts: d.timestamp || '',
-        project: d.cwd || '',
-        snippet: text.slice(Math.max(0, idx - 60), idx + q.length + 120).replace(/\s+/g, ' ').trim(),
-      });
-      if (out.length >= 200) break;
-    }
-    if (out.length >= 200) break;
-  }
-  out.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''));
-  return out.slice(0, 80);
-}
+const { createTranscriptSearch, searchMachines } = require('./core/transcript-search');
+const searchTranscripts = createTranscriptSearch({
+  files: () => [
+    ...Array.from(transcriptFiles().sessionFiles, fp => ({ session: path.basename(fp, '.jsonl'), engine: 'claude', path: fp })),
+    ...Array.from(codexSessions.files(), ([session, fp]) => ({ session, engine: 'codex', path: fp })),
+  ],
+  claudeUserText: transcriptUserText,
+  metadata: () => sessionStore.read(),
+});
 
 // ---------- 会话回放 ----------
 function sessionReplay(id) {
@@ -2578,9 +2552,16 @@ const server = http.createServer(async (req, res) => {
 
     // ---- 全局搜索 ----
     if (type === 'search' && req.method === 'GET') {
+      res.setHeader('Cache-Control', 'no-store');
       const q = (url.searchParams.get('q') || '').trim();
-      if (q.length < 2) return sendJSON(res, 400, { error: T(lang, 'errQueryShort') });
-      return sendJSON(res, 200, { q, results: await historyWorker.read('search', q) });
+      const engine = url.searchParams.get('engine') || 'all', before = url.searchParams.get('before') || '';
+      if (!q || q.length > 512 || before.length > 256 || !['all', 'claude', 'codex'].includes(engine)) return sendJSON(res, 400, { error: 'Invalid search query' });
+      const sources = executionMachines().filter(machine => !clusterConfig?.members?.find(member => member.id === machine.id)?.witness).map(machine => ({
+        ...machine,
+        search: input => machine.id === machineId() ? historyWorker.read('search', input)
+          : (clusterNetwork?.peer(machine.id) || registry.node(machine.id)?.peer).call('history.search', input, { timeout: 60000 }),
+      }));
+      return sendJSON(res, 200, { q, ...await searchMachines(sources, { q, engine, before }) });
     }
 
     // ---- Statusline：终端状态栏一行文本 ----
@@ -2995,7 +2976,7 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
     const self = clusterConfig.members.find(item => item.id === clusterConfig.nodeId);
     if (self?.witness) return;
     const oldRuntime = registry.node(id); if (oldRuntime?.info.transport === 'cluster' && oldRuntime.peer !== peer) { registry.removeNode(id); clusterRuntimePending.delete(id); }
-    require('./node/agent').serveNode({ peer, runtime: executionRuntime, ownerId: id, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listSessions, messages: sessionHistoryPage, previews: items => historyWorker.read('sessionPreviews', items), userPage: input => historyWorker.read('sessionUserPage', input) }, beforeOpen: async (id, options) => { const native = id && await registry.adapter(options.engine, 'local')?.nativeSessionAvailable?.(id); if (id && manager.busy(id) && !native) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed && !manager.busy(id)) previous.session.close(); } });
+    require('./node/agent').serveNode({ peer, runtime: executionRuntime, ownerId: id, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listSessions, messages: sessionHistoryPage, search: input => historyWorker.read('search', input), previews: items => historyWorker.read('sessionPreviews', items), userPage: input => historyWorker.read('sessionUserPage', input) }, beforeOpen: async (id, options) => { const native = id && await registry.adapter(options.engine, 'local')?.nativeSessionAvailable?.(id); if (id && manager.busy(id) && !native) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed && !manager.busy(id)) previous.session.close(); } });
     setImmediate(() => attachClusterRuntime(id, peer).catch(error => console.warn('集群执行连接：' + error.message)));
   } });
   cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: feishuGateway, canTransfer: () => manager.running().length === 0 && executionRuntime.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });

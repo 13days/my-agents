@@ -48,3 +48,50 @@ test('session previews count transcript sends for both engines without relying o
   fs.appendFileSync(fp, JSON.stringify({ type: 'user', timestamp: '2026-11-03T01:00:00Z', message: { content: 'Third question' } }) + '\n');
   assert.equal((await worker.read('sessionPreviews', [{ ...items[0], last: 2 }]))[0].turns, 3);
 });
+
+test('search finds visible Claude and Codex questions and answers, including later appends', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'panel-search-'));
+  const claude = path.join(dir, 'projects', 'sample'), codex = path.join(dir, 'codex'), panel = path.join(dir, 'panel');
+  fs.mkdirSync(claude, { recursive: true }); fs.mkdirSync(path.join(codex, 'sessions'), { recursive: true });
+  fs.mkdirSync(panel);
+  const claudeId = '11111111-1111-4111-8111-111111111111', codexId = '22222222-2222-4222-8222-222222222222';
+  const append = (file, row) => fs.appendFileSync(file, JSON.stringify(row) + '\n');
+  const claudeFile = path.join(claude, claudeId + '.jsonl'), rollout = path.join(codex, 'sessions', 'rollout-' + codexId + '.jsonl');
+  append(claudeFile, { type: 'user', message: { content: 'Blue：需要更新吗？' } });
+  append(claudeFile, { type: 'assistant', message: { content: [{ type: 'text', text: '已经更新 BLUE 版本' }] } });
+  append(claudeFile, { type: 'user', message: { content: [{ type: 'tool_result', content: 'blue' }] } });
+  append(claudeFile, { type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text: 'blue' }] } });
+  const codexRow = (role, text) => ({ type: 'message', role, content: [{ type: role === 'user' ? 'input_text' : 'output_text', text }] });
+  append(rollout, { type: 'session_meta', payload: { cwd: '/project' } });
+  append(rollout, codexRow('user', 'Blue 旧格式提问'));
+  append(rollout, { type: 'response_item', payload: codexRow('assistant', 'Blue 的\n完整回答') });
+  append(rollout, codexRow('user', '# AGENTS.md instructions\nBlue'));
+  append(rollout, { type: 'event_msg', payload: { type: 'agent_message', message: 'Blue 的完整回答' } });
+  const worker = createHistoryWorker(path.join(__dirname, '../server.js'), { env: { ...process.env, CLAUDE_DIR: dir, CODEX_HOME: codex, MY_AGENTS_HOME: panel } });
+  t.after(async () => { await worker.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const search = (q, engine = 'all') => worker.read('search', { q, engine });
+  assert.deepEqual((await search('blue')).map(hit => [hit.engine, hit.role]), [
+    ['codex', 'assistant'], ['codex', 'user'], ['claude', 'assistant'], ['claude', 'user'],
+  ]);
+  const [reply] = await search('完整 blue', 'codex');
+  assert.equal(reply.session, codexId); assert.equal(reply.project, '/project'); assert.match(reply.snippet, /完整回答/);
+  append(rollout, codexRow('user', '新增的后续问题'));
+  assert.equal((await search('续'))[0].session, codexId);
+  fs.writeFileSync(path.join(panel, 'panel-sessions.json'), JSON.stringify({ [claudeId]: { deleted: true } }));
+  assert.equal((await search('更新', 'claude')).length, 0);
+});
+
+test('global search merges peers by message time, deduplicates replicas and pages past the first 80 hits', async () => {
+  const { searchMachines } = require('../core/transcript-search');
+  const hit = n => ({ key: String(n).padStart(5, '0'), session: 'session', role: 'assistant' });
+  const source = (id, rows) => ({ id, search: async ({ before }) => rows.filter(r => !before || r.key < before).slice(0, 81) });
+  const rows = Array.from({ length: 170 }, (_, i) => hit(170 - i));
+  const sources = [source('a', rows.filter((_, i) => i % 2 === 0)), source('b', rows.slice(1)), { id: 'offline', search: () => Promise.reject(Error()) }];
+  let next, results = [];
+  do {
+    const page = await searchMachines(sources, { q: '示例', before: next });
+    assert.deepEqual(page.unavailable, ['offline']);
+    results.push(...page.results); next = page.next;
+  } while (next);
+  assert.deepEqual(results.map(row => row.key), rows.map(row => row.key));
+});

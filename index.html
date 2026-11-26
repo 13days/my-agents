@@ -5,6 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>my-agents</title>
 <link rel="icon" type="image/png" sizes="256x256" href="/assets/my-agents.png?v=b892636c45">
+<script>
+const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
+let themePreference;
+function applyTheme(preference) {
+  themePreference = preference === 'dark' || preference === 'light' ? preference : null;
+  document.documentElement.dataset.theme = themePreference || (systemTheme.matches ? 'dark' : 'light');
+}
+try { themePreference = localStorage.getItem('panel-theme'); } catch {}
+applyTheme(themePreference);
+</script>
 <link rel="stylesheet" href="/panel.css">
 </head>
 <body>
@@ -40,6 +50,12 @@
     <button class="btn primary" id="saveBtn" style="display:none">保存</button>
     <button class="btn" id="cancelBtn" style="display:none">取消</button>
     <button class="btn danger" id="delBtn" disabled>删除</button>
+    <button type="button" id="themeToggle" class="panel-toggle" aria-label="切换主题">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <g class="theme-sun"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></g>
+        <path class="theme-moon" d="M20.5 14a8.5 8.5 0 0 1-10.6-10.5A8.6 8.6 0 1 0 20.5 14Z"/>
+      </svg>
+    </button>
     <select id="langSel" title="Language"></select>
   </div>
   <div id="content">
@@ -324,7 +340,7 @@ function resourceEngines() { return enginesWith('resources'); }
 function defaultResourceEngine() { return can(ENGINE_DEFAULT, 'resources') ? ENGINE_DEFAULT : (resourceEngines()[0]?.id || ENGINE_DEFAULT); }
 function isResourceType(type) { return SCOPED.includes(type) || type === 'plugins'; }
 function firstResourceType(engine = state.resourceEngine) { const types = engineMeta(engine).capabilities.resources || []; return [...SCOPED, 'plugins'].find(type => types.includes(type)) || 'skills'; }
-// Transcript-indexed engines feed /api/stats, /api/usage and full-text search.
+// Claude's usage endpoint predates the engine-specific stats routes.
 function statsRoute(id) { return id === LEGACY_ENGINE ? 'stats' : encodeURIComponent(id) + '/stats'; }
 
 // ---------- network errors ----------
@@ -463,7 +479,7 @@ const I18N = {
     wDays: '活跃天数', wTopCmd: '最常用命令', wTopModel: '本命模型', wPeak: '高能时段', wStreak: '最长连续',
     wDaysUnit: '天', wDownload: '下载 PNG', wR7: '过去 7 天', wR30: '过去 30 天',
     bNight: '🦉 深夜码农', bBurner: '🔥 Token 燃烧机', bStreak: '⚡ 连肝选手', bShip: '🚀 稳定输出',
-    searchSessionsPh: '搜标题；回车全文搜索会话内容…', srNone: '没有找到匹配的会话内容',
+    searchSessionsPh: '搜索标题、提问和回答…', srNone: '没有找到匹配的会话内容',
         voyageHero: '🚢 你的方舟已航行 {days} 天,停靠 {projects} 个项目港,{active} 天在掌舵,留下 {sessions} 段航迹。', voyageRiver: '时间之河（每列一天,色块=会话,高度=对话轮数,点击进入）', voyageLegs: '航段 · 你的每一程连续作业', voyageLegMeta: '{s} 会话 / {d} 天', voyageSessUnit: '会话', voyageEmpty: '还没有航迹',
     replayBtn: '▶ 完整回放 · 系统提示词 · 思考 · 工具轨迹', replayBack: '← 返回会话详情', replayTruncated: '（会话过长，仅显示前 400 轮）',
     replayThinking: '💭 思考过程', replayInput: '输入', replayResult: '返回结果', replayTurnMeta: '本轮耗时 {s} 秒 · {n} 条消息',
@@ -517,7 +533,7 @@ const I18N = {
     wDays: 'active days', wTopCmd: 'Top command', wTopModel: 'Favorite model', wPeak: 'Peak hours', wStreak: 'Longest streak',
     wDaysUnit: 'days', wDownload: 'Download PNG', wR7: 'Last 7 days', wR30: 'Last 30 days',
     bNight: '🦉 Night Owl', bBurner: '🔥 Token Burner', bStreak: '⚡ On a Streak', bShip: '🚀 Steady Shipper',
-    searchSessionsPh: 'Filter titles; press Enter for full-text search…', srNone: 'No matching session content',
+    searchSessionsPh: 'Search titles and messages…', srNone: 'No matching session content',
         voyageHero: '🚢 Your ark has sailed {days} days across {projects} project ports, {active} days at the helm, leaving {sessions} tracks.', voyageRiver: 'River of time (one column per day, blocks = sessions, height = turns, click to open)', voyageLegs: 'Legs · each continuous stretch of work', voyageLegMeta: '{s} sessions / {d} days', voyageSessUnit: 'sessions', voyageEmpty: 'No voyage yet',
     replayBtn: '▶ Full replay · system prompt · thinking · tools', replayBack: '← Back to session', replayTruncated: '(long session, first 400 turns shown)',
     replayThinking: '💭 Thinking', replayInput: 'Input', replayResult: 'Result', replayTurnMeta: 'Turn took {s}s · {n} messages',
@@ -571,7 +587,7 @@ const I18N = {
     wDays: 'アクティブ日数', wTopCmd: '最頻コマンド', wTopModel: '推しモデル', wPeak: 'ピーク時間帯', wStreak: '最長連続',
     wDaysUnit: '日', wDownload: 'PNG をダウンロード', wR7: '過去7日間', wR30: '過去30日間',
     bNight: '🦉 夜型エンジニア', bBurner: '🔥 トークンバーナー', bStreak: '⚡ 連続作業の達人', bShip: '🚀 安定稼働',
-    searchSessionsPh: 'タイトル検索；Enter で全文検索…', srNone: '一致するセッション内容がありません',
+    searchSessionsPh: 'タイトル・質問・回答を検索…', srNone: '一致するセッション内容がありません',
         voyageHero: '🚢 あなたの方舟は {days} 日間航海し、{projects} のプロジェクト港に寄港、{active} 日操舵し、{sessions} の航跡を残しました。', voyageRiver: '時の川（1列=1日、ブロック=セッション、高さ=ターン数、クリックで開く）', voyageLegs: '航路区間 · 連続作業ごと', voyageLegMeta: '{s} セッション / {d} 日', voyageSessUnit: 'セッション', voyageEmpty: 'まだ航海がありません',
     replayBtn: '▶ フル再生 · システムプロンプト · 思考 · ツール', replayBack: '← セッション詳細に戻る', replayTruncated: '（長いセッションのため先頭400ターンのみ表示）',
     replayThinking: '💭 思考プロセス', replayInput: '入力', replayResult: '結果', replayTurnMeta: 'このターン {s} 秒 · {n} メッセージ',
@@ -850,6 +866,8 @@ async function switchType(type, updateRoute = true) {
   renderCaptureFilters();
   $('#search').value = '';
   $('#search').placeholder = type === 'sessions' ? t('searchSessionsPh') : t('search');
+  $('#search').setAttribute('aria-label', $('#search').placeholder);
+  $('#search').maxLength = type === 'sessions' ? 512 : 524288;
   $('#footerBtns').style.display = type === 'config' && resourceCopy('bundle') !== false && state.resourceEngine === defaultResourceEngine() ? 'flex' : 'none';
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.type === productNavParent(type)));
   $('#newbtn').style.display = CAPS[type].new ? 'block' : 'none';
@@ -868,6 +886,8 @@ async function switchType(type, updateRoute = true) {
   if (type === 'inspector') startInspectorPoll(); else stopInspectorPoll();
   if (type === 'sessions') {
     if(sessionNavigation){state.items=sessionNavigation.items;state.keyword=sessionNavigation.keyword;$('#search').value=state.keyword;listPage={...sessionNavigation.page};renderList();$('#list').scrollTop=sessionNavigation.scroll;
+      const search = currentTranscriptSearch();
+      if (state.keyword && (!search || (search.pending && !search.loading))) scheduleTranscriptSearch();
       if(updateRoute&&sessionNavigation.current){if(sessionNavigation.current==='__draft__'){state.current=null;restoreChatPage('__draft__');}else openSessionChat(sessionNavigation.current);}
       startRoutePoll();return;
     }
@@ -893,12 +913,18 @@ function selectedSessionEngine() { return sessionEngineKnown(sessionEngine) ? se
 function matchesSessionEngine(item) { const selected = selectedSessionEngine(); return selected === 'all' || (item.engine || 'claude') === selected; }
 function renderSessionEngines() {
   const host = $('#session-engines'); host.hidden = state.type !== 'sessions';
-  if (host.hidden) return;
-  const selected = selectedSessionEngine(), searchable = enginesWith('search').map(engine => engine.label).join(' / ');
-  const filters = ENGINES.length > 1 ? '<div class="engine-filter">' + [['all', ui('全部', 'All', 'すべて')], ...ENGINES.map(engine => [engine.id, engine.short])].map(([id, label]) => `<button type="button" data-session-engine="${esc(id)}" aria-pressed="${selected === id}">${esc(label)}</button>`).join('') + '</div>' : '';
-  host.innerHTML = filters + '<p class="session-search-hint">' + esc(searchable ? ui(`按名称筛选 · 回车全文搜索仅支持 ${searchable}`, `Filter by name · Enter searches ${searchable} transcripts`) : ui('按名称筛选', 'Filter by name')) + '</p>';
+  const create = $('#newbtn'), header = $('.library-header');
+  if (host.hidden) {
+    if (create.parentElement === header) $('#list').before(create);
+    create.removeAttribute('title');
+    return;
+  }
+  header.insertBefore(create, $('#libraryCollapse'));
+  create.title = newBtnLabel('sessions');
+  const selected = selectedSessionEngine();
+  host.innerHTML = ENGINES.length > 1 ? '<div class="engine-filter">' + [['all', ui('全部', 'All', 'すべて')], ...ENGINES.map(engine => [engine.id, engine.short])].map(([id, label]) => `<button type="button" data-session-engine="${esc(id)}" aria-pressed="${selected === id}">${esc(label)}</button>`).join('') + '</div>' : '';
   host.querySelectorAll('button').forEach(button => button.onclick = () => {
-    sessionEngine = button.dataset.sessionEngine; localStorage.setItem('panel-session-engine', sessionEngine); renderSessionEngines(); renderList();
+    sessionEngine = button.dataset.sessionEngine; localStorage.setItem('panel-session-engine', sessionEngine); renderSessionEngines(); scheduleTranscriptSearch(true);
   });
 }
 let listPage = { key: '', index: 0 };
@@ -924,7 +950,9 @@ function renderList({ revealCurrent = false } = {}) {
   }
   listPage.index = Math.max(0, Math.min(listPage.index, Math.ceil(visibleItems.length / LIST_PAGE_SIZE) - 1));
   const start = listPage.index * LIST_PAGE_SIZE, end = Math.min(visibleItems.length, start + LIST_PAGE_SIZE);
-  if (!visibleItems.length) { const note = document.createElement('p'); note.className = 'list-empty'; note.textContent = kw ? ui('没有找到匹配的内容', 'No matching results') : ui('这里还没有内容', 'Nothing here yet'); fragment.append(note); }
+  const transcript = currentTranscriptSearch();
+  if (transcript) appendSearchResults(fragment, transcript, visibleItems.length);
+  if (!visibleItems.length && !transcript) { const note = document.createElement('p'); note.className = 'list-empty'; note.textContent = kw ? ui('没有找到匹配的内容', 'No matching results') : ui('这里还没有内容', 'Nothing here yet'); fragment.append(note); }
   visibleItems.slice(start, end).forEach(it => {
       const key = it.key || it.name;
       const div = document.createElement('button');
@@ -985,7 +1013,7 @@ function renderList({ revealCurrent = false } = {}) {
       } else fragment.appendChild(div);
     });
   list.replaceChildren(fragment);
-  $('#libraryCount').textContent = visibleItems.length + ui(' 项', ' items', ' 件');
+  $('#libraryCount').textContent = transcript ? (transcript.pending ? '…' : String(visibleItems.length + transcript.results.length) + (transcript.next ? '+' : '')) : visibleItems.length + ui(' 项', ' items', ' 件');
   let pager = $('#list-pager');
   if (!pager) { pager = document.createElement('div'); pager.id = 'list-pager'; pager.className = 'list-pager'; pager.setAttribute('aria-label', ui('列表分页', 'List pagination')); list.after(pager); }
   pager.replaceChildren(); pager.hidden = visibleItems.length <= LIST_PAGE_SIZE;
@@ -1203,46 +1231,117 @@ async function createItem() {
 }
 $('#newName').addEventListener('keydown', e => { if (e.key === 'Enter') createItem(); });
 
-$('#search').addEventListener('input', e => { state.keyword = e.target.value; renderList(); });
-$('#search').addEventListener('keydown', async e => {
-  if (e.key !== 'Enter' || state.type !== 'sessions') return;
-  const q = e.target.value.trim();
-  if (q.length < 2) return;
-  const filtered = selectedSessionEngine(), searchable = enginesWith('search').map(engine => engine.label).join(' / ');
-  if (filtered !== 'all' && !can(filtered, 'search')) { toast(ui(`${engineLabel(filtered)} 当前支持按名称筛选；全文搜索暂仅支持 ${searchable || '—'}`, `${engineLabel(filtered)} supports name filtering. Transcript search currently supports ${searchable || 'no engine'}.`), false); return; }
-  if (!searchable) return;
-  const searchEpoch = sessionListEpoch;
-  try {
-    const { results } = await api('GET', 'search?q=' + encodeURIComponent(q));
-    if (state.type !== 'sessions' || searchEpoch !== sessionListEpoch || $('#search').value.trim() !== q) return;
-    renderSearchResults(results);
-  } catch (err) { toast(t('loadFail') + err.message, false); }
-});
-
-function renderSearchResults(results) {
-  const list = $('#list');
-  list.innerHTML = '';
-  if (!results.length) {
-    list.innerHTML = `<div style="color:var(--muted);padding:12px;font-size:12.5px">${esc(t('srNone'))}</div>`;
-    return;
+let transcriptQuery = null, searchTimer, hitNavigation = 0;
+function scheduleTranscriptSearch(immediate = false) {
+  clearTimeout(searchTimer);
+  const q = state.keyword.trim(), engine = selectedSessionEngine();
+  if (state.type !== 'sessions' || !q) { transcriptQuery = null; renderList(); return; }
+  if (transcriptQuery?.q !== q || transcriptQuery.engine !== engine) {
+    transcriptQuery = { q, engine, results: [], pending: true, unavailable: [] };
   }
-  for (const r of results) {
-    const div = document.createElement('div');
-    div.className = 'item';
-    const nm = document.createElement('div'); nm.className = 'nm';
-    const role = document.createElement('span'); role.className = 'sr-role';
-    role.textContent = r.role === 'user' ? 'Q' : 'A';
-    nm.appendChild(role);
-    nm.appendChild(document.createTextNode(
-      (r.ts || '').slice(0, 10) + (r.project ? ' · ' + r.project.split('/').pop() : '')));
-    const ds = document.createElement('div'); ds.className = 'ds';
-    ds.textContent = r.snippet;
-    div.append(nm, ds);
-    nm.appendChild(engineTag(r.engine || enginesWith('search')[0]?.id || LEGACY_ENGINE));
-    div.onclick = () => openItem(r.session);
-    list.appendChild(div);
+  const search = transcriptQuery;
+  renderList();
+  if (immediate) fetchSearchPage(search);
+  else searchTimer = setTimeout(() => fetchSearchPage(search), 350);
+}
+async function fetchSearchPage(search) {
+  if (search.loading || search !== currentTranscriptSearch()) return;
+  search.pending = search.loading = true;
+  search.error = '';
+  if (state.type === 'sessions') renderList();
+  const params = new URLSearchParams({ q: search.q, engine: search.engine });
+  if (search.next) params.set('before', search.next);
+  try {
+    const page = await api('GET', 'search?' + params);
+    if (search !== transcriptQuery) return;
+    if (search.next) search.results.push(...page.results);
+    else search.results = page.results;
+    search.next = page.next;
+    search.unavailable = page.unavailable || [];
+  } catch (err) { search.error = err.message; }
+  finally {
+    search.pending = search.loading = false;
+    if (state.type === 'sessions' && search === transcriptQuery) renderList();
   }
 }
+function currentTranscriptSearch() {
+  if (!transcriptQuery || state.type !== 'sessions') return null;
+  return transcriptQuery.q === state.keyword.trim() && transcriptQuery.engine === selectedSessionEngine() ? transcriptQuery : null;
+}
+function appendSearchResults(fragment, search, titleCount) {
+  const titles = new Map(state.items.map(item => [item.key, item.name]));
+  const note = text => {
+    const line = document.createElement('p'); line.className = 'search-status'; line.textContent = text; fragment.append(line);
+  };
+  for (const hit of search.results) {
+    const row = document.createElement('button'); row.type = 'button'; row.className = 'item search-result';
+    const heading = document.createElement('div'); heading.className = 'nm';
+    heading.textContent = titles.get(hit.session) || hit.project?.split('/').pop() || hit.session;
+    const excerpt = document.createElement('div'); excerpt.className = 'search-excerpt';
+    const word = search.q.split(/\s+/)[0], pos = hit.snippet.toLowerCase().indexOf(word.toLowerCase());
+    if (pos < 0) excerpt.textContent = hit.snippet;
+    else {
+      const mark = document.createElement('mark'); mark.textContent = hit.snippet.slice(pos, pos + word.length);
+      excerpt.append(hit.snippet.slice(0, pos), mark, hit.snippet.slice(pos + word.length));
+    }
+    const meta = document.createElement('small');
+    meta.textContent = [hit.role === 'user' ? ui('提问','Question','質問') : ui('回答','Answer','回答'), engineLabel(hit.engine, true), hit.machineId, hit.ts?.slice(0,10)].filter(Boolean).join(' · ');
+    row.append(heading, excerpt, meta); row.onclick = () => openSearchHit(hit); fragment.append(row);
+  }
+  if (search.pending) note(ui('正在搜索问答…', 'Searching messages…', 'メッセージを検索中…'));
+  else if (search.error) note(search.error);
+  if (search.unavailable.length) note(ui('未能搜索的设备', 'Devices unavailable', '検索できないデバイス') + ' · ' + search.unavailable.join('、'));
+  if (!search.results.length && !titleCount && !search.pending && !search.error && !search.unavailable.length) note(t('srNone'));
+  if (!search.pending && (search.next || search.error || search.unavailable.length)) {
+    const more = document.createElement('button'); more.type = 'button'; more.className = 'btn search-more';
+    more.textContent = search.next && !search.error ? ui('更多匹配', 'More matches', 'もっと見る') : ui('重新搜索', 'Search again', '再検索');
+    more.onclick = () => {
+      if (!search.next && !search.error) { transcriptQuery = null; scheduleTranscriptSearch(true); }
+      else fetchSearchPage(search);
+    };
+    fragment.append(more);
+  }
+  if (titleCount && search.results.length) note(ui('匹配的会话', 'Matching sessions', '一致するセッション'));
+}
+
+async function openSearchHit(hit) {
+  const navigation = ++hitNavigation;
+  await openItem(hit.session);
+  const view = chatView;
+  const current = () => navigation === hitNavigation && state.type === 'sessions' && state.current === hit.session && view === chatView && view.sessionId === hit.session;
+  while (current()) {
+    const matches = m => m.role === hit.role && m.text?.replace(/\s+/g, ' ').includes(hit.snippet);
+    let index = hit.ts ? view.messages.findLastIndex(m => m.timestamp === hit.ts && matches(m)) : -1;
+    // Adjacent assistant chunks are combined in the conversation. Their final
+    // timestamp can be later than the matching chunk, so use its turn interval.
+    if (index < 0) index = view.messages.findLastIndex((m, i) => matches(m) && (!hit.ts || !m.timestamp ||
+      (m.timestamp >= hit.ts && (!i || !view.messages[i - 1].timestamp || view.messages[i - 1].timestamp <= hit.ts))));
+    if (index >= 0) {
+      const target = $('#chat-messages')?.querySelectorAll('article.chat-message')[index];
+      target?.scrollIntoView({ block: 'center' });
+      if (target) { target.classList.add('search-hit'); setTimeout(() => target.classList.remove('search-hit'), 3000); }
+      return;
+    }
+    const before = view.historyBefore;
+    if (!view.truncated || !before) break;
+    await loadOlderChat(view);
+    if (view.historyBefore === before) break;
+  }
+  if (current()) toast(ui('已打开会话，当前记录中未能定位这条消息', 'Session opened. This message could not be located.', 'セッションを開きましたが、該当メッセージは見つかりません。'), false);
+}
+
+$('#search').addEventListener('input', e => {
+  state.keyword = e.target.value;
+  if (state.type === 'sessions' && !e.isComposing) scheduleTranscriptSearch();
+  else renderList();
+});
+$('#search').addEventListener('compositionend', () => {
+  state.keyword = $('#search').value;
+  if (state.type === 'sessions') scheduleTranscriptSearch();
+});
+$('#search').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && state.type === 'sessions') scheduleTranscriptSearch(true);
+});
 
 // ---------- 会话回放 ----------
 async function loadReplay(id) {
@@ -1263,7 +1362,7 @@ async function loadReplay(id) {
     // 抓包关联：系统提示词 + 客户端版本（transcript 没有，来自 Inspector 代理）
     if (r.captured) {
       const banner = document.createElement('div');
-      banner.style.cssText = 'margin-bottom:14px;padding:10px 14px;border:1px solid rgba(144,133,233,.4);border-radius:10px;background:rgba(144,133,233,.08);font-size:12px;color:#a99ff0';
+      banner.style.cssText = 'margin-bottom:14px;padding:10px 14px;border:1px solid rgba(144,133,233,.4);border-radius:10px;background:rgba(144,133,233,.08);font-size:12px;color:var(--accent2)';
       banner.textContent = engineCopy(r.engine, 'replayCaptured') || '🕵️ ' + fmt(t('replayCaptured'), { v: r.clientVersion || '?' });
       wrap.appendChild(banner);
     } else {
@@ -1744,7 +1843,7 @@ function renderCaptureDetail(wrap, r) {
       const row = document.createElement('div');
       row.style.cssText = 'border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--code-bg)';
       const rh = document.createElement('div');
-      rh.style.cssText = 'font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;color:' + (m.role === 'user' ? 'var(--accent2)' : '#7fa3d9');
+      rh.style.cssText = 'font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;color:' + (m.role === 'user' ? 'var(--accent2)' : 'var(--annotation, #7fa3d9)');
       rh.textContent = m.role;
       row.appendChild(rh);
       for (const part of (m.parts || [])) {
@@ -2518,7 +2617,28 @@ const legacyConfig=navigationNodes.get('config');legacyConfig.classList.add('pro
 $('#tabs').replaceChildren(navFragment);
 navTab('guide').before(settingsNav);
 // ---------- 语言切换 ----------
+function syncThemeControl() {
+  const button = $('#themeToggle');
+  button.title = document.documentElement.dataset.theme === 'dark'
+    ? ui('切换到浅色模式', 'Switch to light mode', 'ライトモードに切り替え')
+    : ui('切换到暗黑模式', 'Switch to dark mode', 'ダークモードに切り替え');
+  button.setAttribute('aria-label', button.title);
+}
+$('#themeToggle').onclick = () => {
+  applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+  try { localStorage.setItem('panel-theme', themePreference); } catch {}
+  syncThemeControl();
+};
+systemTheme.addEventListener('change', () => {
+  if (!themePreference) { applyTheme(null); syncThemeControl(); }
+});
+window.addEventListener('storage', event => {
+  if (event.storageArea === localStorage && (event.key === 'panel-theme' || event.key === null)) {
+    applyTheme(event.newValue); syncThemeControl();
+  }
+});
 function applyLang() {
+  syncThemeControl();
   document.documentElement.lang = lang;
   const sel = $('#langSel');
   if (!sel.options.length) LANGS.forEach(l => sel.add(new Option(l.label, l.code)));
@@ -2527,7 +2647,7 @@ function applyLang() {
   document.querySelectorAll('[data-nav-group]').forEach(el => { el.textContent = ({工作:ui('工作','Work','仕事'),连接:ui('连接','Connections','接続'),能力库:ui('能力库','Library','ライブラリ'),更多:ui('更多','More','その他')})[el.dataset.navGroup]||el.dataset.navGroup; });
   $('#localLabel').textContent = ui('本地工作区', 'Local workspace', 'ローカル環境');
   $('#libraryToggle').setAttribute('aria-label', ui('打开资源列表', 'Open resource list', 'リソース一覧を開く'));
-  $('#search').setAttribute('aria-label', t('search'));
+  $('#search').setAttribute('aria-label', state.type === 'sessions' ? t('searchSessionsPh') : t('search'));
   $('#projSel').setAttribute('aria-label', ui('项目作用域', 'Project scope', 'プロジェクト'));
   updateWorkspaceChrome();
   $('#search').placeholder = t('search');
@@ -2965,6 +3085,7 @@ async function openNewChat() {
   chatAbort?.abort();
   state.current = null; routeView = ''; writeRoute(); renderList();
   sessionEngine = 'all'; localStorage.setItem('panel-session-engine', 'all'); renderSessionEngines();
+  if (state.keyword) scheduleTranscriptSearch(true);
   chatView = { sessionId: '', cwd, messages: [], worktreeEnabled: true, engine: knownEngine(localStorage.getItem('panel-chat-engine')) };
   chatChrome(ui('新对话', 'New chat', '新しいチャット'), '');
   renderChat();

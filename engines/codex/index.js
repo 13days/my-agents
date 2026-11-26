@@ -22,7 +22,7 @@ function createCodexEngine({ sessions, nativeSessions = null, capture = () => nu
     capabilities: {
       sessionId: 'discovered', steer: 'restart', streamingText: false, reasoning: true, permissions: 'none',
       accounts: !!accounts, images: true, resources: ['skills', 'config'],
-      usage: { cost: false }, search: false, wrapped: false, capture: true,
+      usage: { cost: false }, search: true, wrapped: false, capture: true,
     },
     detect: () => resolveCodex({ env }),
     validModel: model => MODEL.test(model) && !isClaudeModel(model),
