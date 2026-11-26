@@ -206,3 +206,20 @@ test('a window waiting for input while its own background shells run still recei
  await until(()=>f.frames.some(x=>x.type==='user'));
  assert.match(f.frames.find(x=>x.type==='user').message.content,/tell me when done/);
 });
+
+test('a fresh terminal idle transition completes a native reply without turn_duration', async t => {
+  const f = await observedRequest(t);
+  const endedAt = Date.now();
+  f.row.statusUpdatedAt = endedAt - 1000;
+  f.status('idle');
+  f.append({ type: 'assistant', uuid: 'final-answer', timestamp: new Date(endedAt).toISOString(),
+    message: { content: [{ type: 'text', text: 'Complete reply' }], stop_reason: 'end_turn' } });
+  await until(() => f.events.some(e => e.event === 'text'));
+  await sleep(25);
+  assert.ok(f.session.busy, 'idle metadata from before the reply cannot end this turn');
+  f.row.statusUpdatedAt = Date.now();
+  f.status('idle');
+  await until(() => f.events.some(e => e.event === 'done'));
+  assert.equal(f.session.busy, false);
+  assert.equal(f.events.filter(e => e.event === 'done').length, 1);
+});

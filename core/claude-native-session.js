@@ -114,6 +114,7 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
         active.confirmed = true; emit('turn', { id: active.id, messageId: active.id });
       }
       if (!active.confirmed) return;
+      if (row.type === 'user' || row.type === 'api-request') active.answerEndedAt = null;
       // A task notification belongs to this request only when the CLI identifies
       // its system origin and its task ID was launched by a tool we observed.
       const notification = row.type === 'user' && (row.origin?.kind === 'task-notification' || row.turnOrigin === 'task_notification');
@@ -139,7 +140,11 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
             active.tools.add(block.id); emit('tool', { messageId: active.id, id: block.id, name: block.name, input: block.input });
           }
         }
-        if (['end_turn', 'stop_sequence'].includes(message.stop_reason)) { active.endCandidate = true; if (active.background.size) backgroundState(); }
+        if (['end_turn', 'stop_sequence'].includes(message.stop_reason)) {
+          active.endCandidate = true;
+          active.answerEndedAt = Date.parse(row.timestamp);
+          if (active.background.size) backgroundState();
+        }
       } else if (row.type === 'user' && Array.isArray(message.content)) {
         for (const block of message.content) if (block.type === 'tool_result' && active.tools.has(block.tool_use_id) && !active.results.has(block.tool_use_id)) {
           active.results.add(block.tool_use_id);
@@ -169,7 +174,16 @@ function createClaudeNativeSessions({ home, transcriptPath, pollMs = 400, sendTi
         // or async agents, so wait for its terminal record and drain the transcript.
         // "shell" = prompt waiting while the window's own background shells run: still ready for input.
         const waiting = current.status === 'idle' || current.status === 'shell' && !nativeTurnBusy(file);
-        if (active?.confirmed && active.endCandidate && active.turnEnded && !active.background.size && waiting && offset >= size && !fragments) finishTurn();
+        if (active?.confirmed && active.endCandidate && !active.background.size && waiting && offset >= size && !fragments) {
+          // Some CLI versions omit turn_duration. The same terminal publishes a timestamped
+          // transition to idle after its final reply. An idle entry from before delivery is stale.
+          const idleAt = current.statusUpdatedAt;
+          const terminalIdle = current.status === 'idle' && Number.isFinite(idleAt)
+            && Number.isFinite(active.answerEndedAt) && active.answerEndedAt >= active.sentAt
+            && idleAt >= active.answerEndedAt && now() - idleAt >= 2 * pollMs
+            && active.results.size === active.tools.size;
+          if (active.turnEnded || terminalIdle) finishTurn();
+        }
         if (active && !active.confirmed && !active.held && !active.deliveryPending
             && offset >= size && now() - active.sentAt > deliveryTimeoutMs) {
           active.deliveryPending = true;
