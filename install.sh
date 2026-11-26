@@ -32,6 +32,7 @@ install_panel() {
     fetch("http://127.0.0.1:" + (process.env.PORT || 4321) + "/api/health", {signal: AbortSignal.timeout(1500)})
       .then(r => r.json()).then(h => process.exit(h.ready && h.build?.protocolVersion && h.tasks ? 0 : 1)).catch(() => process.exit(1))'; then
     echo "面板已经在运行，打开 http://localhost:${PORT:-4321} 即可。"
+    node core/im-clis.js
     return
   fi
   npm install --no-package-lock --no-audit --no-fund

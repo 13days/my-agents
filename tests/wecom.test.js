@@ -23,7 +23,7 @@ test('WeCom long connection authenticates, fences membership and resumes only th
   await once(peer, 'listening');
   const url = 'ws://127.0.0.1:' + peer.address().port;
   const replies = [], turns = [], sessions = new Map();
-  let ws, subscriptions = 0, rejectAuth = false, isLeader = true;
+  let ws, subscriptions = 0, rejectAuth = false, isLeader = true, rejectStream = '';
   peer.on('connection', connection => {
     ws = connection;
     connection.on('message', raw => {
@@ -31,8 +31,8 @@ test('WeCom long connection authenticates, fences membership and resumes only th
       if (frame.cmd === 'aibot_subscribe') {
         subscriptions++;
         assert.deepEqual(frame.body, { bot_id:'bot-1', secret:'fixture-secret' });
-      } else if (frame.cmd === 'aibot_respond_msg') replies.push(frame);
-      connection.send(JSON.stringify({ headers:frame.headers, errcode:rejectAuth ? 40013 : 0 }));
+      } else replies.push(frame);
+      connection.send(JSON.stringify({ headers:frame.headers, errcode:rejectAuth ? 40013 : (frame.cmd === 'aibot_respond_msg' && frame.headers.req_id === rejectStream ? 40099 : 0) }));
     });
   });
   const gateway = createWecom({
@@ -70,15 +70,21 @@ test('WeCom long connection authenticates, fences membership and resumes only th
   gateway.start();
   assert.equal(gateway.status().phase, 'disabled');
   assert.throws(() => gateway.configure({allowedUsers:[' * ']}));
-  gateway.configure({enabled:true, botId:'bot-1', secret:'fixture-secret', engine:'claude', allowedUsers:['owner','teammate'], workspaceId:'design'});
+  gateway.configure({enabled:true, botId:'bot-1', secret:'fixture-secret', engine:'claude', allowedUsers:['teammate'], workspaceId:'design'});
   await until(() => gateway.status().phase === 'connected');
   assert.equal(gateway.status().config.hasSecret, true);
   assert.ok(!JSON.stringify(gateway.status()).includes('fixture-secret'));
   assert.equal(fs.statSync(path.join(dir,'panel-wecom.json')).mode & 0o777, 0o600);
   send('invalid', 'wrong-bot', {aibotid:'another'});
+  ws.send(JSON.stringify({cmd:'aibot_event_callback', headers:{req_id:'welcome'},body:{aibotid:'bot-1',from:{userid:'visitor'},event:{eventtype:'enter_chat'}}}));
+  await until(() => frames('welcome').some(f=>f.cmd==='aibot_respond_welcome_msg'));
+  assert.equal(gateway.status().ownerUserId,'');
+  send('claim','/whoami');
   send('group-stranger','unauthorized',{chattype:'group',chatid:'group1',from:{userid:'stranger'}});
   send('private-stranger','identity',{from:{userid:'stranger'}});
   assert.match((await final('private-stranger')).body.stream.content, /UserID 是 stranger/);
+  assert.equal(gateway.status().ownerUserId,'owner');
+  assert.match((await final('claim')).body.stream.content,/Owner/);
   send('unsupported','',{msgtype:'voice'});
   assert.match((await final('unsupported')).body.stream.content, /文字/);
   assert.equal(turns.length,0);
@@ -102,7 +108,7 @@ test('WeCom long connection authenticates, fences membership and resumes only th
   finish(group,'答'.repeat(9000));
   const clipped = (await final('c')).body.stream.content;
   assert.ok(Buffer.byteLength(clipped)<=20480); assert.match(clipped,/完整结果/);
-  gateway.configure({allowedUsers:['owner']}); finish(other,'private answer');
+  gateway.configure({allowedUsers:[]}); finish(other,'private answer');
   send('new','/new'); await final('new'); send('e','fresh');
   const fresh = await waitTurn('fresh'); assert.notEqual(fresh.sessionId,one.sessionId);
   assert.ok(!frames('d').some(f=>f.body.stream.finish));
@@ -114,6 +120,12 @@ test('WeCom long connection authenticates, fences membership and resumes only th
   const recovered=await waitTurn('after restart');
   assert.equal(recovered.sessionId,fresh.sessionId); assert.equal(turns.filter(t=>t.prompt==='fresh').length,1);
   finish(recovered,'ready'); await final('after');
+  await until(()=>gateway.status().activity.stage==='replied');
+  rejectStream='rejected';
+  send('rejected','rejected stream');
+  finish(await waitTurn('rejected stream'),'原聊天的回复');
+  await until(()=>replies.some(f=>f.cmd==='aibot_send_msg' && f.body.chatid==='owner' && f.body.markdown.content==='原聊天的回复'));
+  await until(()=>gateway.status().activity.stage==='replied');
   const before = subscriptions; ws.terminate();
   await until(()=>subscriptions>before && gateway.status().phase==='connected');
   ws.send(JSON.stringify({cmd:'aibot_event_callback',headers:{req_id:'kick'},body:{event:{eventtype:'disconnected_event'}}}));
@@ -121,4 +133,32 @@ test('WeCom long connection authenticates, fences membership and resumes only th
   rejectAuth=true; gateway.configure({enabled:true});
   await until(()=>gateway.status().phase==='error' && gateway.status().lastError.includes('40013'));
   gateway.configure({enabled:false}); assert.equal(gateway.status().phase,'disabled');
+});
+
+test('owner survives restart, is scoped to the bot, and migrates a single historical sender', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wecom-owner-'));
+  t.after(()=>fs.rmSync(dir, {recursive:true, force:true}));
+  const legacy = {bindings:{[JSON.stringify(['old',null,'past'])]:{id:'sample'}}, seen:[], lastMessageAt:0};
+  fs.writeFileSync(path.join(dir,'panel-wecom-state.json'), JSON.stringify(legacy));
+  let connection, leader=true;
+  const gateway=createWecom({dir, panel:{}, canStart:()=>leader, connect: opts=>{ connection=opts; return {close(){}}; }});
+  const use=botId=>gateway.configure({enabled:true,botId,secret:'test-secret'});
+  use('old');
+  assert.equal(gateway.status().ownerUserId,'past');
+  use('__proto__');
+  const message={aibotid:'__proto__',msgid:'one',from:{userid:'new-owner'},chattype:'single',msgtype:'text',text:{content:'/whoami'}};
+  const replies=[];
+  const reply=async (...args)=>{replies.push(args);};
+  leader=false;
+  connection.onMessage(message,reply);
+  assert.equal(gateway.status().ownerUserId,'');
+  leader=true;
+  connection.onMessage(message,reply);
+  connection.onMessage({...message,msgid:'two',from:{userid:'another'}},reply);
+  await until(()=>replies.length===2);
+  assert.equal(gateway.status().ownerUserId,'new-owner');
+  use('old'); gateway.stop(); gateway.reload(); gateway.start();
+  assert.equal(gateway.status().ownerUserId,'past');
+  use('__proto__'); assert.equal(gateway.status().ownerUserId,'new-owner');
+  gateway.stop();
 });

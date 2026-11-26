@@ -136,7 +136,7 @@ function userGuideSections() {
     ], target: 'sessions', action: copy('查看会话', 'View sessions') },
     { id: 'im', title: copy('飞书与 Lark', 'Feishu and Lark'), lead: copy('发送 /help 可打开「找会话」和「新建任务」。简洁群仅显示该群可用的文字命令。', 'Send /help for Find session and New task. Basic groups receive commands for their access level.'), groups: feishuHelp(ENGINES.map(engine => engine.id), { copy }), note: copy('首次连接时在面板生成配对码，再私聊机器人发送 /pair 配对码。权限和回复格式按聊天生效。', 'For first-time pairing, generate a code in the panel and DM /pair CODE to the bot. Chat access and reply format apply per chat.'), target: 'im', channel: 'feishu', action: copy('打开聊天软件', 'Open chat apps') },
     { id: 'wecom', title: copy('企业微信', 'WeCom'), lead: copy('在「聊天软件 → 企业微信」填写智能机器人的 Bot ID 和 Secret，保存并连接。成员可以私聊，或在群里 @机器人。', 'Enter the intelligent bot’s Bot ID and Secret in Chat apps → WeCom, then save and connect. Members can DM the bot or mention it in a group.'), rows: [
-      ['/whoami', copy('查看自己的 UserID，将它加入面板的允许成员后即可执行任务。', 'Get your UserID and add it to the panel’s allowed members to run tasks.')],
+      ['/whoami', copy('查看自己的 UserID 和身份。首位发消息的成员自动成为 Owner，其他成员可由管理员添加。', 'Get your UserID and role. The first sender becomes the owner. An administrator can add other members.')],
       ['/new', copy('下一条文字开始新对话。直接发文字会继续当前对话。', 'Start a new session on the next message. Ordinary text continues the current conversation.')],
       ['/help', copy('查看企业微信文字命令。完整执行记录和授权在网页对话中。', 'Show WeCom text commands. Open the web conversation for full output and approvals.')],
     ], target: 'im', channel: 'wecom', action: copy('打开聊天软件', 'Open chat apps') },

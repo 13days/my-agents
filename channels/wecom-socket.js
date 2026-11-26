@@ -2,7 +2,7 @@
 const WebSocket = require('ws');
 const { randomUUID } = require('crypto');
 
-function connectWecom({ botId, secret, onMessage, onStatus, url = 'wss://openws.work.weixin.qq.com' }) {
+function connectWecom({ botId, secret, onMessage, onEnter, onStatus, url = 'wss://openws.work.weixin.qq.com' }) {
   let socket, retry, interval, attempts = 0, stopped = false;
   const pending = new Map();
   function request(cmd, body, reqId = cmd + '_' + randomUUID()) {
@@ -39,9 +39,13 @@ function connectWecom({ botId, secret, onMessage, onStatus, url = 'wss://openws.
       const id = frame?.headers?.req_id;
       if (!id || stopped) return;
       if (frame.cmd === 'aibot_msg_callback') {
-        if (ready) onMessage(frame.body, (stream, content, finish) => request('aibot_respond_msg', { msgtype: 'stream', stream: { id: stream, content, finish } }, id));
+        if (ready) onMessage(frame.body,
+          (stream, content, finish) => request('aibot_respond_msg', { msgtype: 'stream', stream: { id: stream, content, finish } }, id),
+          (chatid, content) => request('aibot_send_msg', { chatid, msgtype: 'markdown', markdown: { content } }));
       } else if (frame.cmd === 'aibot_event_callback') {
-        if (frame.body?.event?.eventtype === 'disconnected_event') {
+        if (ready && frame.body?.event?.eventtype === 'enter_chat') {
+          onEnter?.(frame.body, content => request('aibot_respond_welcome_msg', { msgtype: 'text', text: { content } }, id));
+        } else if (frame.body?.event?.eventtype === 'disconnected_event') {
           stopped = true; onStatus('error', '同一个机器人已在别处连接。关闭重复连接后，再点重新连接。'); ws.terminate();
         }
       } else if (typeof frame.errcode === 'number') {

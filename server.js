@@ -9,6 +9,7 @@
  *   - Agent ~/.claude/agents/<name>.md
  */
 // New names take precedence; legacy environment variables remain supported.
+require('./core/im-clis').addIMToolsPath();
 for (const suffix of ['NO_PROXY_SETUP', 'RC_FILE', 'CODEX_CAPTURE', 'CHAT_TIMEOUT_MS', 'BACKGROUND_SERVICE']) {
   const value = process.env['MY_AGENTS_' + suffix];
   if (value !== undefined) process.env['CCP_' + suffix] = value;

@@ -21,8 +21,8 @@ async function renderWecom(revision) {
         <div class="channel-fields"><label>Bot ID<input name="botId" required maxlength="256" autocomplete="off" spellcheck="false" value="${esc(config.botId)}"></label>
         <label>Secret<input name="secret" type="password" maxlength="2048" autocomplete="new-password" placeholder="${config.hasSecret ? t('已保存，留空沿用', 'Saved · leave blank to keep') : ''}" ${config.hasSecret ? '' : 'required'}></label></div></fieldset>
         <fieldset><legend>${t('谁可以运行任务', 'Who can run tasks')}</legend>
-        <label>${t('允许的成员 UserID', 'Allowed member UserIDs')}<textarea rows="2" name="allowedUsers" spellcheck="false" placeholder="${t('每行一个 UserID', 'One UserID per line')}">${esc(config.allowedUsers.join('\n'))}</textarea></label>
-        <p>${t('先连接，再让成员私聊机器人获取自己的 UserID。添加并保存后，该成员就能私聊或在群里 @机器人执行文字任务。名单为空时无人能运行任务。', 'Connect first. Each member can message the bot privately to get their UserID. Once saved here, they can send tasks privately or mention the bot in a group. An empty list allows nobody to run tasks.')}</p></fieldset>
+        <p data-owner></p><label>${t('其他可运行任务的成员 UserID', 'Additional member UserIDs')}<textarea rows="2" name="allowedUsers" spellcheck="false" placeholder="${t('每行一个 UserID', 'One UserID per line')}">${esc(config.allowedUsers.join('\n'))}</textarea></label>
+        <p>${t('首位发消息的人自动成为 Owner，可以直接私聊或在群里 @机器人执行任务。其他成员可私聊获取 UserID，再添加到这里。', 'The first sender becomes the owner and can DM the bot or mention it in a group. Other members can DM for their UserID and be added here.')}</p></fieldset>
         <fieldset><legend>${t('新对话使用', 'New conversation defaults')}</legend><div class="channel-fields">
         <label>${t('引擎', 'Engine')}<select name="engine"><option value="codex">Codex</option><option value="claude">Claude Code</option></select></label>
         <label>${t('项目文件夹', 'Project folder')}<select name="workspaceId"><option value="">${t('默认目录', 'Default folder')}</option>${workspaces.config.projects.map(item => '<option value="'+esc(item.id)+'">'+esc(item.name)+'</option>').join('')}</select></label></div>
@@ -39,9 +39,17 @@ async function renderWecom(revision) {
       section.querySelector('[data-phase]').dataset.online = String(status.phase === 'connected');
       const badge = document.querySelector('[data-im-channel="wecom"] .im-channel-state');
       if (badge) badge.textContent = phase;
-      section.querySelector('[data-activity]').textContent = status.lastMessageAt
-        ? rt('最近收信', 'Last received') + ' · ' + new Date(status.lastMessageAt).toLocaleString()
-        : rt('尚无获授权成员的消息', 'No messages from authorized members yet');
+      section.querySelector('[data-owner]').textContent = status.ownerUserId ? 'Owner · ' + status.ownerUserId : rt('等待首位发消息的成员', 'Waiting for the first sender');
+      const stages = { received: ['已收信', 'Received'], restricted: ['成员无执行权限', 'Member access restricted'],
+        submitted: ['已提交任务，等待回复', 'Task submitted, awaiting reply'], replied: ['企微已确认回复', 'Reply accepted by WeCom'],
+        reply_failed: ['回复投递失败', 'Reply delivery failed'] };
+      const activity = status.activity;
+      section.querySelector('[data-activity]').textContent = activity
+        ? [new Date(activity.receivedAt).toLocaleString(), activity.chatType === 'group' ? rt('群聊', 'Group') : rt('私聊', 'DM'),
+           rt(...(stages[activity.stage] || stages.received)), activity.errorCode].filter(Boolean).join(' · ')
+        : status.lastMessageAt
+        ? rt('最近收信（旧版未记录回复回执）', 'Last received (reply receipt unavailable)') + ' · ' + new Date(status.lastMessageAt).toLocaleString()
+        : rt('尚未收到消息。私聊发送 /whoami 测试连接。', 'No messages yet. DM /whoami to test.');
       section.querySelector('[data-connection-error]').textContent = status.lastError || '';
       if (status.phase === 'error') form.querySelector('[type=submit]').textContent = rt('保存并重新连接', 'Save and reconnect');
     }

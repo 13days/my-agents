@@ -58,7 +58,7 @@ Under **Chat apps → Feishu → Access**, the group and direct-message rules ap
 
 Create an **intelligent bot** in WeCom, select **API mode → Long connection**, and copy its Bot ID and Secret. Under **Chat apps → WeCom**, enter the credentials, select the engine and project for new conversations, then choose **Save and connect**. Only an outbound connection is required.
 
-Ask each member to message the bot privately to get their UserID. Save that ID in **Allowed member UserIDs**. They can now send a text task privately or mention the bot in a group. The answer returns to that chat and is available in the web conversation. Follow-ups reuse the same conversation per member and chat. Send `/new` on its own to start another. Feishu share cards and the assistant’s personal-history source are configured separately. [WeCom setup (Chinese)](docs/im-channels.md)
+The first sender becomes the bot owner automatically. Other members can DM for their UserID and be added under **Additional member UserIDs**. Installation includes `lark-cli` and `wecom-cli`. Authorized members can send a text task privately or mention the bot in a group. The answer returns to that chat and is available in the web conversation. Follow-ups reuse the same conversation per member and chat. Send `/new` on its own to start another. Feishu share cards and the assistant’s personal-history source are configured separately. [WeCom setup (Chinese)](docs/im-channels.md)
 
 ![WeCom setup with bot credentials, allowed members and project defaults (Chinese UI)](docs/wecom-setup-preview.png)
 

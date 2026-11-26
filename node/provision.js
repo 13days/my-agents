@@ -87,6 +87,8 @@ async function provisionMachine({ ssh: target, repoDir = path.resolve(__dirname,
     const repair = existingCommand ? '' : `cd ${source}; node -e 'if (!["my-agents","@wuchupeng/my-agents"].includes(require("./package.json").name)) process.exit(1)';
       node -e 'require("ws")' 2>/dev/null || npm install --omit=dev --no-package-lock --no-audit --no-fund;`;
     await ssh(target, `set -e; ${runtimePath}; ${repair} ${server} node --help`, { timeout: 600000 });
+    step('检查飞书和企业微信 CLI');
+    await ssh(target, `${runtimePath}; sh -c ${quote('set -eu; tmp=$(mktemp -d); trap \'rm -rf "$tmp"\' EXIT; cat > "$tmp/install.cjs"; node "$tmp/install.cjs"')}`, { input: fs.createReadStream(path.join(__dirname, '../core/im-clis.js')), timeout: 600000 });
   }
   const engines = [found.claude && 'Claude Code', found.codex && 'Codex'].filter(Boolean);
   return { command: `${runtimePath}; exec ${server} node --stdio`, installed, hostname: found.hostname, engines,
