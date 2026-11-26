@@ -2183,9 +2183,9 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' });
       return res.end(fs.readFileSync(path.join(__dirname, 'feishu-ui.js')));
     }
-    if (url.pathname === '/assets/relay-desk.png' && req.method === 'GET') {
+    if (url.pathname === '/assets/my-agents.png' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-cache' });
-      return res.end(fs.readFileSync(path.join(__dirname, 'assets/relay-desk.png')));
+      return res.end(fs.readFileSync(path.join(__dirname, 'assets/my-agents.png')));
     }
     if (url.pathname === '/panel.css' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': 'no-cache' });

@@ -229,7 +229,7 @@ test('result signatures preserve the card layout and forwarding policy, escape n
   assert.equal(output.body.elements.at(-1).text_size, 'notation');
   assert.equal(card.body.elements.length, 1);
   assert.equal(output.config.enable_forward, false);
-  assert.match(sign, /\[接力台\]\(https:\/\/github.com\/13days\/my-agents#readme\)/);
+  assert.match(sign, /\[my-agents\]\(https:\/\/github.com\/13days\/my-agents#readme\)/);
   assert.match(sign, /served \(high\)/);
   assert.doesNotMatch(sign, /alias|<at|\[点我\]\(url\)/);
   assert.doesNotMatch(cards.replySignature({state:'error',model:'wrong'}, 'ou_private'), /wrong|ou_private/);

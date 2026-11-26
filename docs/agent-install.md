@@ -48,7 +48,7 @@ im: optional               # Feishu / Lark，凭证从私密输入或已有配�
 
 ## 三、安装源码与外部 CLI
 
-当前 npm 包尚未发布。新环境从源码安装：
+要按指定 Git 提交安装，可使用源码：
 
 ```bash
 git clone https://github.com/13days/my-agents.git <选定的源码目录>
@@ -59,7 +59,7 @@ npm test
 
 首台解析请求的 ref，记录确定 Git SHA。其余机器检出同一 SHA，执行依赖安装和适当检查。仓库没有前端构建步骤，但 `ws` 是必需依赖，不能省略 `npm install`。飞书 / Lark 使用可选官方 SDK，启用 IM 时确保未跳过该依赖。现有锁文件可能与元数据不一致，采用 `npm install` 并检查结果，不把 `npm ci` 当作无条件可行的替代。
 
-统一使用 `node /源码绝对路径/server.js` 调用 CLI，避免依赖尚未配置的全局 `my-agents` 命令。无须为了部署先发布 npm 包。
+统一使用 `node /源码绝对路径/server.js` 调用 CLI，避免依赖尚未配置的全局 `my-agents` 命令。
 
 在每台要执行任务的机器，检查现有安装来源，按可写 npm 前缀更新或安装：
 

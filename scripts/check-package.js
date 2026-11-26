@@ -14,6 +14,9 @@ async function freePort() {
     const packed = JSON.parse(execFileSync('npm', ['pack', '--json', '--pack-destination', temp], { encoding: 'utf8' }))[0];
     execFileSync('tar', ['-xzf', path.join(temp, packed.filename), '-C', temp]);
     const cwd = path.join(temp, 'package');
+    for (const asset of ['assets/my-agents.png', 'vendor/qr.js', 'scripts/ensure-node.sh']) {
+      if (!fs.statSync(path.join(cwd, asset)).size) throw Error('Missing packaged asset: ' + asset);
+    }
     execFileSync('npm', ['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd, stdio: 'pipe', timeout: 180000 });
     const port = await freePort(), proxy = await freePort();
     const isolated = path.join(temp, 'home'); fs.mkdirSync(isolated);
