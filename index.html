@@ -2865,7 +2865,8 @@ async function refreshOpenChat() {
     // v.run above is the live-connection guard; lastReplayJobId is only identity.
     if (v.readingImages || v.loadingOlder || document.querySelector('.panel-select-menu:popover-open')) return;
     v.revision = d.revision;
-    if (!v.needsReconcile && !d.liveReplay && JSON.stringify(v.messages) === JSON.stringify(d.messages)) return;
+    if (!v.needsReconcile && !d.liveReplay && v.lastLoginFailure?.hint === d.lastLoginFailure?.hint && JSON.stringify(v.messages) === JSON.stringify(d.messages)) return;
+    v.lastLoginFailure = d.lastLoginFailure;
     const box = $('#chat-messages'), prompt = $('#chat-prompt');
     const view = { top: box.scrollTop, follow: box.scrollHeight - box.scrollTop - box.clientHeight < 60, draft: prompt.value, start: prompt.selectionStart, end: prompt.selectionEnd, focus: document.activeElement?.id, model: $('#chat-model').value };
     const key = article => article.querySelector('.chat-tool')?.dataset.toolId || article.querySelector('.chat-message-body')?.textContent.slice(0, 120);
@@ -3103,7 +3104,7 @@ async function openSessionChat(id, { fresh=false } = {}) {
     const d = await api('GET', `sessions/${encodeURIComponent(id)}/messages`);
     if (state.type !== 'sessions' || state.current !== id || revision !== detailRevision) return;
     if (!Array.isArray(d.messages)) throw new Error(rt('会话数据暂未就绪，请稍后重试', 'Session data is not ready. Please try again.'));
-    chatView = { sessionId: id, cwd: d.project || '', worktree: d.worktree, messages: d.messages, truncated: d.truncated, historyBefore: d.historyBefore, revision: d.revision, machineId: d.machineId, engine: d.engine || LEGACY_ENGINE };
+    chatView = { sessionId: id, cwd: d.project || '', worktree: d.worktree, lastLoginFailure: d.lastLoginFailure, messages: d.messages, truncated: d.truncated, historyBefore: d.historyBefore, revision: d.revision, machineId: d.machineId, engine: d.engine || LEGACY_ENGINE };
     const first = d.messages.find(m => m.role === 'user');
     chatChrome(state.items.find(item => item.key === id)?.name || (first ? ConversationState.titleText(first.text).slice(0, 60) || rt('图片对话','Image conversation') : id.slice(0, 8)), (d.project || '').replace(/^\/Users\/[^/]+/, '~'));
     renderChat();
@@ -3160,7 +3161,7 @@ function renderChat() {
       <div class="chat-field chat-route"${can(v.engine, 'accounts') ? '' : ' hidden'}><span>${esc(rt('代理账号', 'Proxy account'))}</span><select id="chat-route" aria-label="${esc(rt('代理账号', 'Proxy account'))}" title="${esc(rt('只影响这个会话；其他会话可以走不同账号', 'Only affects this session; other sessions can use other accounts'))}">${routeOptions(existing ? ((routeInfo && routeInfo.routes[v.sessionId.toLowerCase()]) || '') : (v.accountId || ''))}</select></div>
     </div></header>
     <div class="chat-conversation"><div class="chat-messages" id="chat-messages"></div><div class="chat-scroll-controls" hidden><button type="button" id="chat-scroll-top" title="${esc(rt('会话顶部', 'Top of conversation'))}" aria-label="${esc(rt('会话顶部', 'Top of conversation'))}">↑</button><button type="button" id="chat-scroll-bottom" title="${esc(rt('会话底部', 'Bottom of conversation'))}" aria-label="${esc(rt('会话底部', 'Bottom of conversation'))}">↓</button></div></div>
-    <form class="chat-compose" id="chat-form"><div id="chat-attachments" class="chat-attachments" hidden></div><textarea autocomplete="off" autocorrect="off" spellcheck="false" id="chat-prompt" rows="3" placeholder="${esc(existing ? rt('在这个会话里继续… 可粘贴图片', 'Continue this session… Paste images here') : rt(`问 ${engineName} 关于这个项目的问题… 可粘贴图片`, `Ask ${engineName} about this project… Paste images here`))}"></textarea>
+    <form class="chat-compose" id="chat-form">${v.lastLoginFailure ? `<p class="chat-warning" id="chat-login-failure" role="status">${esc(v.lastLoginFailure.hint)}</p>` : ''}<div id="chat-attachments" class="chat-attachments" hidden></div><textarea autocomplete="off" autocorrect="off" spellcheck="false" id="chat-prompt" rows="3" placeholder="${esc(existing ? rt('在这个会话里继续… 可粘贴图片', 'Continue this session… Paste images here') : rt(`问 ${engineName} 关于这个项目的问题… 可粘贴图片`, `Ask ${engineName} about this project… Paste images here`))}"></textarea>
       <div class="chat-compose-footer"><button type="button" class="btn chat-attach" id="chat-attach"${can(v.engine, 'images') ? '' : ' hidden'}>${esc(rt('＋ 图片', '+ Image'))}</button><input type="file" id="chat-image-file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden><span id="chat-status">${esc(rt('回车发送 · Shift + 回车换行', 'Enter to send · Shift + Enter for a new line'))}</span><button class="btn" type="submit" data-mode="queue" id="chat-queue" title="${esc(rt('等当前轮完成后处理', 'Process after the current turn'))}" hidden>${esc(rt('排队', 'Queue'))}</button><button class="btn primary" type="submit" id="chat-send">${esc(rt('发送', 'Send'))}</button><button class="btn" type="button" id="chat-stop" hidden>${esc(rt('停止', 'Stop'))}</button></div>
     </form>
   </section>`;
@@ -3286,6 +3287,10 @@ function startChatHistoryFollow(v) {
         const expected = pending.transcriptText ?? pending.answer.text;
         if (!newerTurn && (at < 0 || (expected && !data.messages.slice(at + 1).some(message => message.role === 'assistant' && message.text.includes(expected))))) return;
         v.historyPendingTurn = null;
+      }
+      if (v.lastLoginFailure && data.messages.some(message => Date.parse(message.timestamp) > Date.parse(v.lastLoginFailure.at))) {
+        v.lastLoginFailure = null;
+        $('#chat-login-failure')?.remove();
       }
       const messages = mergeFollowedMessages(v.messages, data.messages);
       v.followRevision = data.revision || '';
@@ -3431,6 +3436,10 @@ async function sendChat(mode = 'steer') {
     finally { v.changingModel = false; }
   }
   document.querySelectorAll('.chat-engine button').forEach(button => { button.disabled = true; });
+  if (v.lastLoginFailure) {
+    v.lastLoginFailure = null;
+    $('#chat-login-failure')?.remove();
+  }
   registerChatInSidebar(v, prompt);
   const turn = createChatTurn(v, prompt, images);
   v.attachments = []; paintChatAttachments(v); $('#chat-prompt').value = '';

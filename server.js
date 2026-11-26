@@ -2159,23 +2159,23 @@ function resourceUsageSnapshot() {
   }
   return resourceUsage;
 }
+function codexLoginSource(run) {
+  const meta = run.job.meta, machine = meta.machineId || meta.node || 'local';
+  const local = machine === 'local' || machine === machineId();
+  const machineLabel = executionMachines().find(item => item.id === (local ? machineId() : machine))?.label || machine;
+  const source = { machineLabel, routed: !!meta.routed, poolEnabled: local && !meta.nativeAttached && codexCaptureEnabled() && codexSessions.provider(meta.sessionId) === 'openai' };
+  // A login replaced since that turn cannot identify the account it used.
+  if (local && !meta.routed && !meta.nativeAttached && !process.env.CODEX_API_KEY) {
+    try {
+      const first = run.job.events.find(item => item.event === 'input');
+      if (fs.statSync(path.join(CODEX_HOME, 'auth.json')).mtimeMs <= Date.parse(first?.data.timestamp)) source.email = require('./core/codex-credentials').accountEmail(readCodexAuth());
+    } catch { /* The CLI can also use OS credential storage. */ }
+  }
+  return source;
+}
 function subscribeChat(run, req, res, url) {
   const meta = run.job.meta;
-  let display = meta;
-  if (meta.engine === 'codex') {
-    const machine = meta.machineId || meta.node || 'local';
-    const local = machine === 'local' || machine === machineId();
-    const machineLabel = executionMachines().find(item => item.id === (local ? machineId() : machine))?.label || machine;
-    const source = { machineLabel, routed: !!meta.routed, poolEnabled: local && !meta.nativeAttached && codexCaptureEnabled() && codexSessions.provider(meta.sessionId) === 'openai' };
-    // For historical failures never label an old run with a login that changed after it started.
-    if (local && !meta.routed && !meta.nativeAttached && !process.env.CODEX_API_KEY) {
-      try {
-        const first = run.job.events.find(item => item.event === 'input');
-        if (fs.statSync(path.join(CODEX_HOME, 'auth.json')).mtimeMs <= Date.parse(first?.data.timestamp)) source.email = require('./core/codex-credentials').accountEmail(readCodexAuth());
-      } catch { /* The CLI may use its operating-system credential store. */ }
-    }
-    display = { ...meta, codexLogin: source };
-  }
+  const display = meta.engine === 'codex' ? { ...meta, codexLogin: codexLoginSource(run) } : meta;
   const cursor = require('./core/chat-job').parseCursor(req.headers['last-event-id'] || url.searchParams.get('after'), meta.jobId);
   return run.job.subscribe(res, cursor, display);
 }
@@ -2759,7 +2759,14 @@ const server = http.createServer(async (req, res) => {
         const page = { since: url.searchParams.get('since'), before: url.searchParams.get('before') ?? undefined, limit: Math.max(1, Number(url.searchParams.get('limit')) || 80) };
         const r = owner === machineId() || owner === 'local' ? sessionHistoryPage(id, page) : await conversationHistory(id, owner, { cachedDirectory: following, ...page });
         if (r?.unchanged) return sendJSON(res, 200, r);
-        return r ? sendJSON(res, 200, { ...r, project: directoryItem?.project || r.project, machineId: owner, worktree: metadata?.worktree || null }) : sendJSON(res, 404, { error: T(lang, 'errNotFound') });
+        if (!r) return sendJSON(res, 404, { error: T(lang, 'errNotFound') });
+        let lastLoginFailure;
+        if (!page.before && running?.engine === 'codex' && running.job.closed) {
+          const state = require('./conversation-state');
+          const failure = state.lastCodexLoginFailure(running.job.events, r.messages);
+          if (failure) lastLoginFailure = { at: failure.timestamp, hint: state.codexLoginHint(failure.error, codexLoginSource(running)) };
+        }
+        return sendJSON(res, 200, { ...r, project: directoryItem?.project || r.project, machineId: owner, worktree: metadata?.worktree || null, lastLoginFailure });
       }
       if (req.method === 'GET' && parts.length === 4 && parts[3] === 'replay') {
         const r = sessionReplay(decodeURIComponent(parts[2]));

@@ -28,6 +28,14 @@
       : 'Codex 登录已失效。' + [source.machineLabel, '原终端登录', source.email].filter(Boolean).join(' · ') + '。' +
         (source.poolEnabled ? '重新发送即可按面板账号策略续接此对话。' : '请在原执行机器运行 codex login 后重试。');
   }
+  function lastCodexLoginFailure(events, messages) {
+    // Only explain the most recent attempt. A later native turn supersedes it.
+    const last = events.findLast(item => ['input', 'turn', 'error', 'done', 'stopped'].includes(item.event));
+    if (!last || !revokedLogin.test(last.data?.error || '') || !['error', 'done'].includes(last.event)) return null;
+    const at = Date.parse(last.data.timestamp);
+    if (!Number.isFinite(at) || messages.some(message => Date.parse(message.timestamp) > at)) return null;
+    return last.data;
+  }
   function messageText(text, images) {
     if (!images?.length) return text;
     // Only strip the CLI-generated attachment prefix when its image is also rendered.
@@ -56,5 +64,5 @@
     return view;
   }
   const translations = { '等待后台任务': ['Waiting for background tasks','バックグラウンドタスク待ち'], '等待原会话汇总': ['Waiting for terminal summary','元のセッションの要約待ち'], '等待原窗口确认': ['Waiting for terminal approval','元のターミナルの承認待ち'], '投递待确认': ['Delivery awaiting confirmation','送信確認待ち'], '等待节点重连': ['Waiting for node reconnection','ノードの再接続待ち'], '结果待核对': ['Outcome needs review','結果の確認が必要'], '已连接原终端': ['Original terminal connected','元のターミナルに接続済み'], '等待原会话接续': ['Waiting to continue the original session','元のセッションの再開待ち'], '连接重试中': ['Retrying connection','接続を再試行中'] };
-  return { titleText, messageText, codexNotice, codexLoginHint, connectionRetry, create, apply, labels: phase => translations[phase] || [phase, phase] };
+  return { titleText, messageText, codexNotice, codexLoginHint, lastCodexLoginFailure, connectionRetry, create, apply, labels: phase => translations[phase] || [phase, phase] };
 });

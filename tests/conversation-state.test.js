@@ -34,3 +34,12 @@ test('a historical revoked grant shows one account-specific recovery action in t
  assert.match(shown,/Mac · 原终端登录 · demo@example.org/); assert.match(shown,/账号策略/);
  assert.ok(!shown.includes(raw)); assert.ok(!state.codexLoginHint(raw,{machineLabel:'Box'}).includes('undefined'));
 });
+
+test('reopened Codex histories explain the last revoked login until a newer native or panel turn', () => {
+  const { lastCodexLoginFailure } = require('../conversation-state');
+  const data = { error: 'Your access token could not be refreshed because your refresh token was revoked.', timestamp: '2026-01-01T10:01:00Z' };
+  const events = [{ event: 'error', data }, { event: 'done', data }, { event: 'end', data: {} }];
+  assert.equal(lastCodexLoginFailure(events, [{ timestamp: '2026-01-01T10:00:00Z' }]), data);
+  assert.equal(lastCodexLoginFailure(events, [{ timestamp: '2026-01-01T10:02:00Z' }]), null);
+  assert.equal(lastCodexLoginFailure([...events, { event: 'done', data: {} }], []), null);
+});
