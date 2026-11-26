@@ -29,7 +29,7 @@ function markdownChunks(value, limit = 6000) {
 async function sendMarkdown(channel, msg, value) {
   let result;
   for (const text of markdownChunks(value)) {
-    result = await channel.send(msg.chatId, { post: { zh_cn: { title: '', content: [[{ tag: 'md', text }]] } } }, { replyTo: msg.messageId, replyInThread: !!msg.threadId });
+    result = await channel.send(msg.chatId, { post: { zh_cn: { title: '', content: [[{ tag: 'md', text }]] } } }, { replyTo: msg.messageId, replyInThread: msg.chatType === 'p2p' || !!msg.threadId });
   }
   return result;
 }

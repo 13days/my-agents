@@ -86,3 +86,25 @@ test('clearing captures during indexing cannot resurrect the historical index', 
   const file = fixture(t); fs.writeFileSync(file, JSON.stringify({ id: 1 }) + '\n');
   const store = createCaptureStore(file), loading = store.loadAsync(); store.clear(); await loading; assert.deepEqual(store.list(), []);
 });
+
+test('large existing logs are archived in place, indexed once and excluded from rolling retention', async t => {
+  const file = fixture(t), options = {segmentBytes:110,maxBytes:220};
+  const legacy = {id:1,responseBody:'旧'.repeat(60)};
+  fs.writeFileSync(file,JSON.stringify(legacy));
+  const ino = fs.statSync(file).ino;
+  const store = createCaptureStore(file, options), loaded = store.loadAsync();
+  for(let id=2;id<=12;id++) store.append({id,responseBody:'x'.repeat(55)});
+  await loaded;
+  const archive = path.join(file+'.segments','legacy.jsonl');
+  assert.equal(fs.statSync(archive).ino,ino);
+  assert.ok(fs.statSync(archive+'.index').size > 0);
+  assert.deepEqual(store.get(1), legacy);
+  assert.equal(store.get(2), null);
+  assert.ok(store.status().storage.retainedBytes<=options.maxBytes);
+  const restored = createCaptureStore(file,options); await restored.loadAsync();
+  assert.deepEqual(restored.list().map(r=>r.id),store.list().map(r=>r.id));
+  for(const row of restored.list()) assert.deepEqual(restored.get(row.id),store.get(row.id));
+  restored.clearLegacy(); assert.equal(restored.status().storage.legacyBytes,0);
+  assert.equal(restored.get(1),null); assert.ok(restored.get(12));
+  restored.clear(); assert.equal(restored.list().length,0);
+});

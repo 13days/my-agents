@@ -12,11 +12,27 @@ async function refresh({store,source,now=Date.now}) {
   if(!source.reactions||now()<(state.source.reactionRetryAt||0))return;
   const ids=[...new Set(ps.flatMap(p=>p.messageIds))].filter(id=>state.messages[id]&&!state.messages[id].deleted)
     .sort((a,b)=>(state.cursor['reactions:'+a]||0)-(state.cursor['reactions:'+b]||0));
+  let identityChecked = false;
   for(const id of ids.filter(id=>now()-(state.cursor['reactions:'+id]||0)>600000).slice(0,10)){
     try{
-      const result=await source.reactions(id);
-      if(result.has_more)throw new Error('表情回应分页未完整读取，保留原记录');
-      const reactions=(result.items||[]).sort((a,b)=>String(a.reaction_id).localeCompare(String(b.reaction_id)));
+      if (!identityChecked) {
+        await source.checkReactionIdentity?.(state.config.selfId);
+        identityChecked = true;
+      }
+      const byId = new Map(), tokens = new Set();
+      let token;
+      do {
+        const result = await source.reactions(id, token);
+        if (!Array.isArray(result?.items)) throw new Error('表情回应接口未返回完整列表');
+        for (const item of result.items) {
+          if (!item.reaction_id) throw new Error('表情回应缺少 ID');
+          byId.set(item.reaction_id, item);
+        }
+        token = result.has_more ? result.page_token : null;
+        if (result.has_more && (!token || tokens.has(token) || tokens.size >= 19)) throw new Error('表情回应分页未完整读取，保留原记录');
+        tokens.add(token);
+      } while (token);
+      const reactions = [...byId.values()].sort((a,b)=>String(a.reaction_id).localeCompare(String(b.reaction_id)));
       store.transaction(s=>{
         const m=s.messages[id];if(!m)return;
         if(JSON.stringify(m.reactions||[])!==JSON.stringify(reactions)){

@@ -12,7 +12,7 @@ const args = process.argv.slice(2);
 const force = args.includes('--force');
 const waitMinutes = Number(args[args.indexOf('--wait') + 1]) > 0 && args.includes('--wait') ? Number(args[args.indexOf('--wait') + 1]) : 60;
 const repo = path.resolve(__dirname, '..');
-const dataDir = process.env.MY_AGENTS_HOME || path.join(os.homedir(), '.claude');
+const dataDir = require('../core/data-dir').resolveDataDir().dir;
 const port = process.env.PORT || 4321;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const log = (...parts) => console.log(new Date().toLocaleTimeString(), ...parts);
@@ -35,7 +35,7 @@ async function localApi(pathname, method = 'GET', body, attempt = 0) {
 }
 // Remote panels are reached on their own loopback, so no token leaves the machine.
 function remoteApi(machine, pathname, method = 'GET', body) {
-  const curl = `T=$(cat ${machine.home}/panel-token 2>/dev/null); curl -s -m 20 -X ${method} -H "authorization: Bearer $T" ${body ? `-H 'content-type: application/json' --data-binary @-` : ''} http://127.0.0.1:${machine.port}/api/${pathname}`;
+  const curl = `T=$(cat ${machine.home}/panel-token 2>/dev/null); curl -fsS -m 20 -X ${method} -H "authorization: Bearer $T" ${body ? `-H 'content-type: application/json' --data-binary @-` : ''} http://127.0.0.1:${machine.port}/api/${pathname}`;
   const out = ssh(machine.host, curl, { input: body ? JSON.stringify(body) : '' });
   try { return JSON.parse(out); } catch { throw new Error(`${machine.id} 返回无效：${out.slice(0, 200)}`); }
 }
@@ -43,20 +43,24 @@ const api = (machine, ...rest) => machine.local ? localApi(...rest) : Promise.re
 
 async function machines() {
   const cluster = await localApi('cluster'), nodes = (await localApi('nodes')).nodes;
-  const knownHosts = nodes.map(node => node.host).filter(Boolean);
-  const user = knownHosts[0]?.split('@')[0] || os.userInfo().username;
   let overrides = {}; try { overrides = JSON.parse(fs.readFileSync(path.join(dataDir, 'panel-deploy.json'), 'utf8')); } catch {}
   return cluster.members.filter(member => !member.witness).map(member => {
     const local = member.id === cluster.nodeId, url = new URL(member.url);
     const node = nodes.find(item => item.id === member.id);
+    const host = overrides[member.id]?.host || node?.ssh || node?.host;
+    if (!local && typeof host !== 'string') throw Error(`${member.id} 未配置部署 SSH 地址`);
     return { id: member.id, label: member.label || member.id, local, port: url.port || 4321,
-      host: overrides[member.id]?.host || node?.host || `${user}@${url.hostname}`,
-      home: overrides[member.id]?.home || '~/.my-agents', repo: local ? repo : overrides[member.id]?.repo || ssh(overrides[member.id]?.host || node?.host || `${user}@${url.hostname}`, 'systemctl --user show my-agents-panel.service -p WorkingDirectory --value') };
+      host,
+      home: overrides[member.id]?.home || '~/.my-agents', repo: local ? repo : overrides[member.id]?.repo || ssh(host, 'systemctl --user show my-agents-panel.service -p WorkingDirectory --value') };
   });
 }
 
 async function busyTasks(machine) {
-  try { return (await api(machine, 'chat/status')).running || []; } catch (error) { log(`  ${machine.label}: 无法读取任务状态（${error.message}），按忙碌处理`); return ['unknown']; }
+  try {
+    const health = await api(machine, 'health');
+    if (health?.ready !== true || !['running','preparing','executing'].every(key => Number.isSafeInteger(health.tasks?.[key]) && health.tasks[key] >= 0)) throw Error('任务计数缺失或无效');
+    return Object.keys(health.tasks).filter(key => health.tasks[key] > 0);
+  } catch (error) { log(`  ${machine.label}: 无法读取任务状态（${error.message}），按忙碌处理`); return ['unknown']; }
 }
 async function waitIdle(machine) {
   if (force) return;
@@ -64,8 +68,8 @@ async function waitIdle(machine) {
   for (;;) {
     const busy = await busyTasks(machine);
     if (!busy.length) return;
-    if (Date.now() > deadline) throw new Error(`${machine.label} 上 ${busy.length} 个任务 ${waitMinutes} 分钟内未结束，已停止部署（未重启任何正在运行的机器）。可加 --force 强制`);
-    if (!told) { log(`  ${machine.label}: ${busy.length} 个任务正在运行，等待结束后再重启…`); told = true; }
+    if (Date.now() > deadline) throw new Error(`${machine.label} 上 ${busy.length} 类任务 ${waitMinutes} 分钟内未结束，已停止部署（未重启任何正在运行的机器）。可加 --force 强制`);
+    if (!told) { log(`  ${machine.label}: ${busy.length} 类任务正在运行，等待结束后再重启…`); told = true; }
     await sleep(10000);
   }
 }
@@ -75,15 +79,19 @@ function update(machine, commit, bundle) {
   const remoteRepo = quote(machine.repo);
   const remoteOrigin = ssh(machine.host, `cd ${remoteRepo} && git remote get-url origin`);
   if (remoteOrigin !== run('git', ['remote', 'get-url', 'origin'])) throw new Error(`${machine.label} 仓库地址不一致，已停止`);
-  if (ssh(machine.host, `cd ${remoteRepo} && git status --porcelain`)) throw new Error(`${machine.label} 工作区有未提交改动，已停止`);
+  const dirty = ssh(machine.host, `cd ${remoteRepo} && git status --porcelain`);
+  if (dirty && dirty !== 'M package-lock.json') throw new Error(`${machine.label} 工作区有未提交改动，已停止`);
+  if (ssh(machine.host, `cd ${remoteRepo} && git symbolic-ref --short HEAD`) !== 'main') throw Error(`${machine.label} 尚未检出 main`);
   const head = ssh(machine.host, `cd ${remoteRepo} && git rev-parse HEAD`);
   if (head === commit) return;
-  const pulled = ssh(machine.host, `cd ${remoteRepo} && timeout 40 git pull -q --ff-only && git rev-parse HEAD`, { allowFail: true, timeout: 60000 });
-  if (pulled.split('\n').pop() === commit) return;
-  // GitHub may be unreachable from dev machines: ship the commits directly.
+  if (dirty && run('git',['diff','--name-only',head,commit,'--','package-lock.json'])) throw Error(`${machine.label} 锁文件有改动，与新版本重叠`);
+  // Ship the exact verified commit, including when the node cannot reach origin.
+  const remoteBundle = '/tmp/' + path.basename(bundle);
   run('git', ['bundle', 'create', bundle, `${head}..main`]);
-  run('scp', ['-q', '-o', 'BatchMode=yes', bundle, `${machine.host}:/tmp/my-agents-deploy.bundle`]);
-  ssh(machine.host, `cd ${remoteRepo} && git fetch -q /tmp/my-agents-deploy.bundle main:refs/remotes/bundle/main && git merge -q --ff-only bundle/main && rm -f /tmp/my-agents-deploy.bundle`);
+  run('scp', ['-q', '-o', 'BatchMode=yes', bundle, `${machine.host}:${remoteBundle}`]);
+  try {
+    ssh(machine.host, `cd ${remoteRepo} && git fetch -q ${quote(remoteBundle)} main && git merge -q --ff-only --no-overwrite-ignore FETCH_HEAD`);
+  } finally { ssh(machine.host, `rm -f ${quote(remoteBundle)}`); }
   if (ssh(machine.host, `cd ${remoteRepo} && git rev-parse HEAD`) !== commit) throw new Error(`${machine.label} 代码未能更新到 ${commit.slice(0, 7)}`);
 }
 function restart(machine) {
@@ -99,7 +107,7 @@ async function waitHealthy(machine, commit) {
       const health = await api(machine, 'health');
       const cluster = await localApi('cluster');
       const member = cluster.members.find(item => item.id === machine.id);
-      if (health?.build?.gitCommit === commit && member?.online && cluster.leader) return;
+      if (health?.ready && health.build?.gitCommit === commit && member?.online && cluster.leader) return;
     } catch {}
   }
   throw new Error(`${machine.label} 重启后 3 分钟内未以新版本上线，请检查`);
@@ -112,7 +120,7 @@ async function waitGateway(avoidLeader) {
     try {
       const view = await localApi('feishu');
       last = `主节点=${view.cluster?.leader || '无'} 机器人=${(view.bots || [view]).map(bot => (bot.appId || '').slice(-6) + ':' + bot.phase).join(',')}${view.lastError ? ' 错误=' + view.lastError : ''}`;
-      if (view.cluster?.leader && view.cluster.leader !== avoidLeader && (view.bots || [view]).every(bot => bot.phase === 'connected')) return view;
+      if (view.cluster?.leader && view.cluster.leader !== avoidLeader && (view.bots || [view]).filter(bot => bot.enabled !== false).every(bot => bot.phase === 'connected')) return view;
     } catch (error) { last = '面板接口：' + error.message; }
   }
   // Say what was actually seen, so a slow election is not mistaken for disconnected bots.
@@ -127,8 +135,9 @@ async function waitGateway(avoidLeader) {
   const bundle = path.join(os.tmpdir(), `my-agents-deploy-${process.pid}.bundle`);
   const all = await machines();
   log(`部署 ${commit.slice(0, 7)} 到 ${all.map(m => m.label).join('、')}`);
-  for (const machine of all) { update(machine, commit, bundle); log(`  ${machine.label}: 代码已就绪`); }
-  fs.rmSync(bundle, { force: true });
+  try {
+    for (const machine of all) { await waitIdle(machine); update(machine, commit, bundle); log(`  ${machine.label}: 代码已就绪`); }
+  } finally { fs.rmSync(bundle, { force: true }); }
 
   let leader = (await localApi('cluster')).leader;
   const order = [...all.filter(m => m.id !== leader), ...all.filter(m => m.id === leader)];
@@ -141,8 +150,8 @@ async function waitGateway(avoidLeader) {
         // Tasks on every machine are driven through the leader: wait for all of them.
         for (const other of all) await waitIdle(other);
         log(`  将 IM 主节点从 ${machine.label} 移交给 ${target.label}`);
-        await api(machine, 'cluster/transfer', 'POST', { target: target.id }).catch(error => log(`  移交失败（${error.message}），直接重启`));
-        try { const view = await waitGateway(machine.id); leader = view.cluster.leader; log(`  ${all.find(m => m.id === leader)?.label || leader} 已接管，机器人全部在线`); } catch (error) { log('  ' + error.message); }
+        await api(machine, 'cluster/transfer', 'POST', { target: target.id });
+        const view = await waitGateway(machine.id); leader = view.cluster.leader; log(`  ${all.find(m => m.id === leader)?.label || leader} 已接管，机器人全部在线`);
       }
     }
     await waitIdle(machine);

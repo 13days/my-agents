@@ -88,7 +88,7 @@ function createLarkSetup({ dir, configure, findCLI = findLarkCLI, spawnCLI = spa
   // One scan does everything: the confirm page creates the app with message events and the
   // card callback, the scanner becomes the paired owner, and the bot greets them in Feishu.
   const ADDONS = {
-    scopes: { tenant: ['application:application:patch', 'im:message', 'im:message:send_as_bot', 'im:resource', 'im:message.reactions:write_only'] },
+    scopes: { tenant: ['application:application:patch', 'im:message', 'im:message.group_msg', 'im:chat:read', 'im:message:send_as_bot', 'im:resource', 'im:message.reactions:write_only'] },
     events: { items: { tenant: ['im.message.receive_v1'] } },
     callbacks: { items: ['card.action.trigger'] },
   };

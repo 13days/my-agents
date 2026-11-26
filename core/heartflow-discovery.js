@@ -40,7 +40,7 @@ async function discoverMessages({ store, source, now }) {
         });
         if (!result.has_more) break;
       }
-    } catch (error) { errors.push(new Error(`${lane}: ${error.message || error}`)); }
+    } catch (error) { if (require('./heartflow-feishu').needsPersonalLogin(error)) throw error; errors.push(new Error(`${lane}: ${error.message || error}`)); }
   }
   if (errors.length) throw new AggregateError(errors, errors.map(e => e.message).join('; '));
 }

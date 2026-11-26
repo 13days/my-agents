@@ -188,14 +188,14 @@ test('new project paths must be existing directories and retain management autho
   assert.equal(f.calls.length, 1);
 });
 
-test('card actions cannot be used by another owner and groups require an allowlist plus mention', async t => {
+test('card actions require their owner and paired users can mention the bot in a new group', async t => {
   const f = await fixture(t); await f.pair(); await f.pair('ou_second');
   const action = { action: { value: { owner: 'ou_owner', action: 'switch', id: f.rows[0].id, key: contextKey(f.msg('')) } }, operator: { openId: 'ou_second' }, chatId: 'oc_private', messageId: 'card_id' };
   const before = f.sent.length; await f.gateway.action(action); assert.equal(f.sent.length, before + 1); assert.match(JSON.stringify(f.sent.at(-1).content), /仅限发起人/);
-  await f.gateway.receive(f.msg('Run', { chatType: 'group', chatId: 'oc_group', mentionedBot: true })); assert.equal(f.calls.length, 0);
-  await f.gateway.configure({ allowedChatIds: ['oc_group'] });
-  await f.gateway.receive(f.msg('Run', { chatType: 'group', chatId: 'oc_group', mentionedBot: false })); assert.equal(f.calls.length, 0);
   await f.gateway.receive(f.msg('Run', { chatType: 'group', chatId: 'oc_group', mentionedBot: true })); assert.equal(f.calls.length, 1);
+  await f.gateway.configure({ allowedChatIds: ['oc_group'] });
+  await f.gateway.receive(f.msg('Run', { chatType: 'group', chatId: 'oc_group', mentionedBot: false })); assert.equal(f.calls.length, 1);
+  await f.gateway.receive(f.msg('Run', { chatType: 'group', chatId: 'oc_group', mentionedBot: true })); assert.equal(f.calls.length, 2);
 });
 
 test('paired users, selections and processed receipts survive a gateway restart', async t => {
@@ -399,9 +399,9 @@ test('delivery capabilities keep each turn in its original chat/topic and enforc
   assert.equal(f.calls.at(-1).gatewayContext.includes('fake-test-secret'), false);
   let result = await f.gateway.sendReply({ token: one, text: '原话题回复' });
   assert.equal(result.threadId, 'omt_one'); assert.equal(f.sent.at(-1).chatId, 'oc_group'); assert.equal(f.sent.at(-1).options.replyInThread, true);
-  result = await f.gateway.sendReply({ token: dmToken, text: '原私聊回复' }); assert.equal(result.chatId, 'oc_private'); assert.equal(f.sent.at(-1).options.replyInThread, false);
+  result = await f.gateway.sendReply({ token: dmToken, text: '原私聊回复' }); assert.equal(result.chatId, 'oc_private'); assert.equal(f.sent.at(-1).options.replyInThread, true);
   await assert.rejects(f.gateway.sendReply({ token: two, text: '不能改目标', chatId: 'oc_private' }), /不能覆盖/);
-  await f.gateway.configure({ allowAllGroups: false });
+  await f.gateway.configure({ allowAllGroups: false, pairedInGroups: false });
   await assert.rejects(f.gateway.sendReply({ token: two, text: '撤权后禁止' }), /未获准/);
   f.advance(2 * 60 * 60 * 1000 + 1);
   await assert.rejects(f.gateway.sendReply({ token: dmToken, text: '过期后禁止' }), /过期/);
@@ -616,6 +616,7 @@ test('@bot new/engine/current commands are handled locally in detailed and simpl
 
 test('discovered contacts resolve names and permit local labels without changing access rules', async t => {
   const f = await fixture(t); await f.pair();
+  await f.gateway.configure({pairedInGroups:false});
   f.channel.getChatInfo = async () => ({ name: '研发群' });
   f.channel.rawClient = { contact: { v3: { user: { get: async () => ({ data: { user: { name: '张三' } } }) } } } };
   const group = { chatType: 'group', chatId: 'oc_names', mentionedBot: true };
@@ -1365,4 +1366,39 @@ test('completed cards fetch execution-node route evidence and exclude a previous
  assert.match(JSON.stringify(f.updated.at(-1)),/gpt-6.1-sol/);
  stale=true;await f.gateway.receive(f.msg('second'));await new Promise(r=>setTimeout(r,100));
  assert.doesNotMatch(JSON.stringify(f.updated.at(-1)),/gpt-6.1-sol/);
+});
+
+test('single-human groups can omit the mention, rechecking membership when the next message arrives', async t => {
+  const f = await fixture(t); await f.pair();
+  let count = '1';
+  f.channel.getChatInfo = async () => ({ memberCount: count });
+  const group = { chatType:'group', chatId:'oc_solo', chatName:'Single', mentionedBot:false };
+  await f.gateway.receive(f.msg('first', group));
+  await f.gateway.receive(f.msg('automated', {...group,raw:{sender:{sender_type:'app'}}}));
+  await f.gateway.receive(f.msg('broadcast', {...group,mentionAll:true}));
+  await f.gateway.receive(f.msg('someone else', {...group,mentions:[{openId:'ou_else'}]}));
+  assert.equal(f.calls.length, 1);
+  count = '2';
+  await f.gateway.receive(f.msg('someone joined', group));
+  await f.gateway.receive(f.msg('direct mention', {...group,mentionedBot:true}));
+  assert.equal(f.calls.length, 2);
+  await f.gateway.configure({disabledUserIds:['ou_owner']});
+  await f.gateway.receive(f.msg('disabled', {...group,mentionedBot:true}));
+  assert.equal(f.calls.length, 2);
+});
+
+test('DM cards and markdown replies target the incoming message thread and keep the existing DM binding', async t => {
+  const f = await fixture(t); await f.pair();
+  const dm = f.msg('first turn');
+  await f.gateway.receive(dm);
+  const id = f.calls.at(-1).sessionId;
+  assert.ok(f.sent.some(s => s.content.card && s.options.replyTo === dm.messageId && s.options.replyInThread));
+  const reply = f.msg('/reply markdown', {threadId:'omt_private'});
+  await f.gateway.receive(reply);
+  assert.equal(f.sent.at(-1).options.replyInThread, true);
+  const next = f.msg('follow up', {threadId:'omt_private'});
+  await f.gateway.receive(next);
+  assert.equal(f.calls.at(-1).sessionId, id);
+  await new Promise(r=>setTimeout(r,30));
+  assert.ok(f.sent.some(s=>s.content.post && s.options.replyTo===next.messageId && s.options.replyInThread));
 });

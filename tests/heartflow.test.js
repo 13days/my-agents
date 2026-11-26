@@ -205,3 +205,15 @@ test('unchanged store transactions preserve revision and do not rewrite the data
  store.configure({enabled:true});assert.notEqual(store.revision(),revision);assert.equal(createHeartflowStore({dir}).snapshot().config.enabled,true);
  assert.notEqual(createHeartflowStore({dir}).revision(),store.revision());
 });
+
+test('revoked personal grants pause scheduled reads and manual reauthorization resumes the same cursor', async t => {
+ const {store}=setup(t); let reads=0,revoked=true;
+ store.configure({selfId:'me',discoveryMode:'recent',chats:[{id:'oc_a'}]});
+ const source={identity:async()=>({user:{open_id:'me'}}), recent:async()=>{reads++;if(revoked)throw Error('invalid_grant 20064');return {messages:[]};},page:async()=>({messages:[]})};
+ const flow=createHeartflow({store,source,sessions:async()=>[]});
+ await assert.rejects(flow.sync(),/invalid_grant/); const cursor=store.snapshot().cursor;
+ assert.equal(reads,1);assert.equal(store.snapshot().source.authRequired,true);
+ assert.deepEqual(await flow.sync({automatic:true}),{authRequired:true});assert.equal(reads,1);assert.deepEqual(store.snapshot().cursor,cursor);
+ revoked=false;await flow.sync();assert.equal(store.snapshot().source.authRequired,false);
+ assert.ok(store.snapshot().source.lastSync);
+});

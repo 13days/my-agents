@@ -698,7 +698,7 @@ function sessionMessages(id, options = {}) {
   if (!fp || !fs.existsSync(fp)) fp = transcriptPathFor(id);
   if (!fp) {
     const meta = sessionStore.read()[id];
-    return meta?.project && !meta.deleted ? { id, project: meta.project, messages: meta.initialPrompt ? [{ role: 'user', text: meta.initialPrompt }] : [], truncated: false } : null;
+    return meta?.project && !meta.deleted ? pageSessionMessages({ id, project: meta.project, messages: meta.initialPrompt ? [{ role: 'user', text: meta.initialPrompt }] : [] }, options) : null;
   }
   if (!project) project = transcriptHead(fp).cwd;
   const stat = fs.statSync(fp), revision = `${stat.mtimeMs}:${stat.size}`;
@@ -747,6 +747,15 @@ function sessionMessages(id, options = {}) {
   sessionMessageCache.set(fp, { revision, value });
   while (sessionMessageCache.size > 2) sessionMessageCache.delete(sessionMessageCache.keys().next().value);
   return pageSessionMessages(value, options);
+}
+
+function sessionHistoryPage(id, options = {}) {
+  const fp = transcriptPathFor(id) || codexSessions.pathFor(id);
+  const stat = fp && fs.statSync(fp, {throwIfNoEntry:false});
+  const revision = stat ? `${stat.mtimeMs}:${stat.size}` : '';
+  if (options.before === undefined && revision && options.since === revision) return {unchanged:true, revision};
+  const result = sessionMessages(id, options);
+  return result && { ...result, revision };
 }
 
 // Codex rollouts are keyed by thread id; Claude transcripts take precedence on collision.
@@ -1910,18 +1919,22 @@ const sessionDirectory = require('./core/session-directory').createSessionDirect
   local: listSessions, selfId: machineId,
   peers: () => registry.nodes().filter(node => node.id !== 'local' && node.peer).map(node => ({ id: node.id, peer: clusterNetwork?.peer(node.id) || node.peer })),
 });
-async function conversationHistory(id, sourceMachine, { cachedDirectory = false } = {}) {
+async function conversationHistory(id, sourceMachine, { cachedDirectory = false, ...page } = {}) {
   const directoryItem = () => cachedDirectory ? sessionDirectory.findCached(id) : sessionDirectory.find(id);
   const saved = conversations.get(id), meta = sessionStore.read()[id] || saved || {};
   const source = sourceMachine || meta.machineId || meta.node || directoryItem()?.machineId || machineId();
   let result;
-  if (source === machineId() || source === 'local') result = sessionMessages(id);
+  if (source === machineId() || source === 'local') result = sessionHistoryPage(id, page);
   else {
     const peer = clusterNetwork?.peer(source) || registry.node(source)?.peer;
-    if (peer) { try { result = await peer.call('history.messages', { id }, { timeout: 5000 }); } catch {} }
+    if (peer) { try { result = await peer.call('history.messages', { id, ...page }, { timeout: 5000 }); } catch {} }
   }
+  if (result?.unchanged) return result;
   if (result && !result.checkpoint) { const item = directoryItem(); if (item?.machineId === source && item.project) result = { ...result, project: item.project }; }
-  return result || (saved ? { id, project: saved.project, engine: saved.engine, machineId: saved.machineId, messages: saved.messages || [], checkpoint: true } : null);
+  if (result || !saved) return result || null;
+  const revision = 'checkpoint:' + saved.updatedAt + ':' + (saved.messages?.length || 0);
+  if (page.before === undefined && page.since === revision) return { unchanged:true, revision };
+  return pageSessionMessages({ id, project: saved.project, engine: saved.engine, machineId: saved.machineId, messages: saved.messages || [], checkpoint: true, revision }, page);
 }
 
 const sessionInspection = require('./core/session-inspection').createSessionInspection({
@@ -2618,10 +2631,11 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'GET' && parts.length === 2) {
         if (url.searchParams.get('since') === String(captureStore.revision)) return sendJSON(res, 200, { unchanged: true, revision: captureStore.revision });
+        const captureIndex = captureStore.status();
         return sendJSON(res, 200, {
           proxyPort: Number(PROXY_PORT),
           linking: !!captureLinkPromise,
-          indexing: captureStore.status().loading, indexError: captureStore.status().error,
+          indexing: captureIndex.loading, indexError: captureIndex.error, storage: captureIndex.storage,
           revision: captureStore.revision,
           items: captureStore.list().map(r => ({
             key: String(r.id), engine: r.engine || 'claude', sessionId: r.sessionId, startedAt: r.startedAt, purpose: r.purpose, purposeInferred: r.purposeInferred,
@@ -2639,6 +2653,10 @@ const server = http.createServer(async (req, res) => {
         const r = captureStore.get(decodeURIComponent(parts[2]));
         if (!r) return sendJSON(res, 404, { error: T(lang, 'errNotFound') });
         return sendJSON(res, 200, { ...r, ...captureStore.metadata(r.id), navigation: captureNavigationFor(r.id) });
+      }
+      if (req.method === 'DELETE' && parts.length === 3 && parts[2] === 'archive') {
+        captureStore.clearLegacy();
+        return sendJSON(res, 200, {ok:true});
       }
       if (req.method === 'DELETE' && parts.length === 2) {
         captureStore.clear();
@@ -2701,13 +2719,12 @@ const server = http.createServer(async (req, res) => {
         if (running && !running.job.closed && Array.isArray(running.baseMessages) && !url.searchParams.has('before')) return sendJSON(res, 200, { ...running.baseHistory, id: running.id, project: running.job.meta.cwd, worktree: running.job.meta.worktree, messages: running.baseMessages, liveReplay: true, jobId: running.job.meta.jobId });
         const directoryItem = following ? sessionDirectory.findCached(id) : sessionDirectory.find(id);
         const metadata = sessionStore.read()[id];
-        const fp = transcriptPathFor(id) || codexSessions.pathFor(id);
-        let revision = '';
-        if (fp) { const st = fs.statSync(fp); revision = `${st.mtimeMs}:${st.size}`; }
-        if (revision && url.searchParams.get('since') === revision) return sendJSON(res, 200, { unchanged: true, revision });
-        const remote = metadata || conversations.get(id) || directoryItem;
-        const r = remote?.machineId && remote.machineId !== machineId() ? await conversationHistory(id, remote.machineId, { cachedDirectory: following }) : sessionMessages(id, { before: url.searchParams.has('before') ? url.searchParams.get('before') : undefined, limit: Math.max(1, Number(url.searchParams.get('limit')) || 80) });
-        return r ? sendJSON(res, 200, { ...r, project: directoryItem?.project || r.project, machineId: remote?.machineId || remote?.node || machineId(), worktree: metadata?.worktree || null, revision }) : sendJSON(res, 404, { error: T(lang, 'errNotFound') });
+        const saved = conversations.get(id);
+        const owner = metadata?.machineId || metadata?.node || saved?.machineId || directoryItem?.machineId || machineId();
+        const page = { since: url.searchParams.get('since'), before: url.searchParams.get('before') ?? undefined, limit: Math.max(1, Number(url.searchParams.get('limit')) || 80) };
+        const r = owner === machineId() || owner === 'local' ? sessionHistoryPage(id, page) : await conversationHistory(id, owner, { cachedDirectory: following, ...page });
+        if (r?.unchanged) return sendJSON(res, 200, r);
+        return r ? sendJSON(res, 200, { ...r, project: directoryItem?.project || r.project, machineId: owner, worktree: metadata?.worktree || null }) : sendJSON(res, 404, { error: T(lang, 'errNotFound') });
       }
       if (req.method === 'GET' && parts.length === 4 && parts[3] === 'replay') {
         const r = sessionReplay(decodeURIComponent(parts[2]));
@@ -2974,7 +2991,7 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
     const self = clusterConfig.members.find(item => item.id === clusterConfig.nodeId);
     if (self?.witness) return;
     const oldRuntime = registry.node(id); if (oldRuntime?.info.transport === 'cluster' && oldRuntime.peer !== peer) { registry.removeNode(id); clusterRuntimePending.delete(id); }
-    require('./node/agent').serveNode({ peer, runtime: executionRuntime, ownerId: id, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listSessions, messages: id => sessionMessages(id), previews: items => historyWorker.read('sessionPreviews', items), userPage: input => historyWorker.read('sessionUserPage', input) }, beforeOpen: async (id, options) => { const native = id && await registry.adapter(options.engine, 'local')?.nativeSessionAvailable?.(id); if (id && manager.busy(id) && !native) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed && !manager.busy(id)) previous.session.close(); } });
+    require('./node/agent').serveNode({ peer, runtime: executionRuntime, ownerId: id, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listSessions, messages: sessionHistoryPage, previews: items => historyWorker.read('sessionPreviews', items), userPage: input => historyWorker.read('sessionUserPage', input) }, beforeOpen: async (id, options) => { const native = id && await registry.adapter(options.engine, 'local')?.nativeSessionAvailable?.(id); if (id && manager.busy(id) && !native) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed && !manager.busy(id)) previous.session.close(); } });
     setImmediate(() => attachClusterRuntime(id, peer).catch(error => console.warn('集群执行连接：' + error.message)));
   } });
   cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: feishuGateway, canTransfer: () => manager.running().length === 0 && executionRuntime.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });

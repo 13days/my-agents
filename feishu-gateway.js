@@ -27,8 +27,8 @@ function helpText(engines) {
   ].join('\n');
 }
 const clip = (text, size) => Array.from(String(text || '')).slice(0, size).join('');
-const threadOf = msg => msg.chatType === 'p2p' ? '' : msg.threadId || msg.raw?.message?.thread_id || msg.raw?.event?.message?.thread_id || '';
-const contextKey = msg => JSON.stringify([msg.chatType === 'p2p' ? msg.senderId : '*', msg.chatId, threadOf(msg) || 'main']);
+const threadOf = msg => msg.threadId || msg.raw?.message?.thread_id || msg.raw?.event?.message?.thread_id || '';
+const contextKey = msg => JSON.stringify([msg.chatType === 'p2p' ? msg.senderId : '*', msg.chatId, msg.chatType === 'p2p' ? 'main' : threadOf(msg) || 'main']);
 const contextLabel = msg => msg.chatType === 'p2p' ? '当前私聊' : threadOf(msg) ? '当前话题' : '当前群聊';
 const messageUUID = id => { const hex = crypto.createHash('sha256').update(id).digest('hex'); return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`; };
 function atomic(file, value) {
@@ -53,7 +53,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   const configFile = path.join(dir, files.config || 'panel-feishu.json'), stateFile = path.join(dir, files.state || 'panel-feishu-state.json');
   fs.mkdirSync(inboxDir, { recursive: true, mode: 0o700 });
   const inbox = createFeishuInbox(inboxDir);
-  const defaults = { allowAllUsers: false, allowAllGroups: false, enabled: false, appId: '', appSecret: '', domain: 'feishu', allowedUserIds: [], disabledUserIds: [], allowedChatIds: [], defaultProject: '', defaultMachine: '', defaultEngine: 'claude', worktree: true, model: '', keepAwake: false, nativeAutoAccept: false };
+  const defaults = { allowAllUsers: false, allowAllGroups: false, pairedInGroups: true, enabled: false, appId: '', appSecret: '', domain: 'feishu', allowedUserIds: [], disabledUserIds: [], allowedChatIds: [], defaultProject: '', defaultMachine: '', defaultEngine: 'claude', worktree: true, model: '', keepAwake: false, nativeAutoAccept: false };
   const emptyState = () => ({ pending: {}, lastEventAt: 0, replyFormats: {}, bindings: {}, engineBindings: {}, cards: {}, sessionRefs: {}, taskCards: {}, sessionModels: {}, listings: {}, receipts: [], projects: [], nodeProjects: {} });
   let config = defaults, state = emptyState(), phase = 'disabled', lastError = '', channel = null, connecting = null, pairing = null;
   function reloadFiles() {
@@ -74,7 +74,25 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   const persist = () => { const drafts = Object.keys(state.drafts || {}); for (const id of drafts.slice(0,-100)) delete state.drafts[id]; state.receipts = state.receipts.slice(-2000); const keys = Object.keys(state.cards); for (const key of keys.slice(0, Math.max(0, keys.length - 1000))) delete state.cards[key]; atomic(stateFile, state); };
   const errorText = e => clip((errorMessage(e) || '飞书请求失败，请查看本机服务日志').split(config.appSecret || '\0').join('[secret]'), 600);
   const rememberError = e => { lastError = errorText(e); };
-  const allowed = msg => !config.disabledUserIds.includes(msg.senderId) && (msg.chatType === 'p2p' ? config.allowAllUsers || config.allowedUserIds.includes(msg.senderId) : config.allowAllGroups || config.allowedChatIds.includes(msg.chatId));
+  const groupAllowed = msg => config.allowAllGroups || config.allowedChatIds.includes(msg.chatId) ||
+    (config.pairedInGroups && config.allowedUserIds.includes(msg.senderId));
+  const allowed = msg => !config.disabledUserIds.includes(msg.senderId) && (msg.chatType === 'p2p'
+    ? config.allowAllUsers || config.allowedUserIds.includes(msg.senderId)
+    : msg.chatType === 'group' && groupAllowed(msg));
+  // A positive result must be fresh: another person may just have joined.
+  const groupChecks = new Map();
+  async function onlyHuman(chatId) {
+    const key = config.appId + ':' + chatId, cached = groupChecks.get(key);
+    if (cached && cached.expires > now()) return cached.result;
+    const result = Promise.resolve().then(() => channel?.getChatInfo?.(chatId)).then(info =>
+      info?.memberCount === 1 || info?.memberCount === '1', () => false);
+    if (groupChecks.size >= 1000) groupChecks.delete(groupChecks.keys().next().value);
+    const entry = { result, expires: now() + 30000 };
+    groupChecks.set(key, entry);
+    const single = await result;
+    if (single && groupChecks.get(key) === entry) groupChecks.delete(key);
+    return single;
+  }
   const detailed = msg => msg.chatType === 'p2p' || config.allowedChatIds.includes(msg.chatId);
   const managementNotice = msg => send(msg, { text: '此群使用普通文字回复，处理时显示思考表情。请在「IM 接入」逐项授权此群后使用会话管理功能。/new 在默认项目新建会话；/stop 停止当前任务。' });
   // Detailed chats choose task cards (default) or plain Markdown messages, per chat.
@@ -107,7 +125,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   }
   async function send(msg, content) {
     if (typeof content.text === 'string' || typeof content.markdown === 'string') return sendMarkdown(channel, { ...msg, threadId: threadOf(msg) }, content.markdown ?? content.text);
-    return channel.send(msg.chatId, widen(msg, content), { replyTo: msg.messageId, replyInThread: !!threadOf(msg) });
+    return channel.send(msg.chatId, widen(msg, content), { replyTo: msg.messageId, replyInThread: msg.chatType === 'p2p' || !!threadOf(msg) });
   }
   // Wide-card chats stretch every card to the window (Card JSON 2.0 width_mode "fill").
   function widen(msg, content) {
@@ -761,10 +779,12 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     inFlight.add(msg.messageId);
     const appId = config.appId;
     const userAllowed = msg.chatType !== 'p2p' || config.allowAllUsers || config.allowedUserIds.includes(msg.senderId);
-    const groupAllowed = msg.chatType === 'p2p' || config.allowAllGroups || config.allowedChatIds.includes(msg.chatId);
-    const needsMention = msg.chatType === 'group' && (!msg.mentionedBot || msg.mentionAll);
+    const senderType = msg.raw?.sender?.sender_type || msg.raw?.event?.sender?.sender_type;
+    if ((senderType && senderType !== 'user') || msg.senderId === channel?.botIdentity?.openId) { inFlight.delete(msg.messageId); return; }
+    const needsMention = msg.chatType === 'group' && (msg.mentionAll || (!msg.mentionedBot &&
+      (msg.mentions?.length > 0 || !allowed(msg) || !await onlyHuman(msg.chatId))));
     const pairingMessage = msg.chatType === 'p2p' && /^\/pair(?:\s|$)/i.test(commandText(msg, channel?.botIdentity));
-    const access = config.disabledUserIds.includes(msg.senderId) ? 'disabled_user' : needsMention ? 'needs_mention' : pairingMessage ? 'pairing' : !userAllowed ? 'blocked_user' : !groupAllowed ? 'blocked_group' : 'allowed';
+    const access = config.disabledUserIds.includes(msg.senderId) ? 'disabled_user' : needsMention ? 'needs_mention' : pairingMessage ? 'pairing' : !userAllowed ? 'blocked_user' : !allowed(msg) ? 'blocked_group' : 'allowed';
     if (!replay) try {
       if (!await inbox.record(appId, msg, access)) { inFlight.delete(msg.messageId); return; }
     } catch (e) { rememberError(e); inFlight.delete(msg.messageId); return; }
@@ -806,7 +826,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       try { if(!panel.heartflowReview)throw new Error('当前节点尚未支持助理，请同步升级');await panel.heartflowReview(value,msg.senderId);return send(msg,{text:'助理 check 已记录；执行进度可在助理页面查看。'}); }
       catch(error) { return send(msg,{text:'助理：'+error.message}); }
     }
-    if (!detailed(msg) && value.action !== 'new_submit') return managementNotice(msg);
+    if (!detailed(msg) && value.action !== 'new_submit') return;
     if (value.key) {
       let parts;
       try { parts = JSON.parse(value.key); } catch { return send(msg, { text: '卡片上下文无效，请发送 /sessions 刷新列表。' }); }
@@ -974,7 +994,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   }
   async function configure(input) {
     const next = { ...config };
-    for (const key of ['enabled', 'keepAwake', 'nativeAutoAccept', 'cardCallbacksReady', 'worktree', 'allowAllUsers', 'allowAllGroups']) if (key in input) { if (typeof input[key] !== 'boolean') throw new Error('配置类型无效'); next[key] = input[key]; }
+    for (const key of ['enabled', 'keepAwake', 'nativeAutoAccept', 'cardCallbacksReady', 'worktree', 'allowAllUsers', 'allowAllGroups', 'pairedInGroups']) if (key in input) { if (typeof input[key] !== 'boolean') throw new Error('配置类型无效'); next[key] = input[key]; }
     for (const key of ['appId', 'domain', 'defaultProject', 'defaultMachine', 'defaultEngine', 'model']) if (key in input) { if (typeof input[key] !== 'string') throw new Error('配置类型无效'); next[key] = input[key].trim(); }
     if (input.appSecret) next.appSecret = String(input.appSecret).trim();
     for (const key of ['allowedUserIds', 'disabledUserIds', 'allowedChatIds']) if (key in input) {
@@ -988,7 +1008,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (next.defaultProject) { if (panel.resolveDirectory) next.defaultProject = await panel.resolveDirectory(next.defaultMachine, next.defaultProject); else { next.defaultProject = fs.realpathSync(next.defaultProject); if (!fs.statSync(next.defaultProject).isDirectory()) throw new Error('默认项目必须是文件夹'); } }
     }
     if (next.model && !/^[\w.\/:\[\]-]{1,100}$/.test(next.model)) throw new Error('模型名称无效');
-    if (next.appId !== config.appId || next.domain !== config.domain) { next.cardCallbacksReady = input.cardCallbacksReady || false; next.allowAllUsers = input.allowAllUsers || false; next.allowAllGroups = input.allowAllGroups || false; next.allowedUserIds = input.allowedUserIds || []; next.disabledUserIds = input.disabledUserIds || []; pairing = null; state = { ...emptyState(), drafts: {} }; persist(); }
+    if (next.appId !== config.appId || next.domain !== config.domain) { next.cardCallbacksReady = input.cardCallbacksReady || false; next.allowAllUsers = input.allowAllUsers || false; next.allowAllGroups = input.allowAllGroups || false; next.pairedInGroups = input.pairedInGroups ?? true; next.allowedChatIds = input.allowedChatIds || []; next.allowedUserIds = input.allowedUserIds || []; next.disabledUserIds = input.disabledUserIds || []; pairing = null; state = { ...emptyState(), drafts: {} }; persist(); }
     const reconnect = next.enabled !== config.enabled || next.appId !== config.appId || next.appSecret !== config.appSecret || next.domain !== config.domain;
     if (reconnect) await stop();
     config = next; atomic(configFile, config); applyRuntime();

@@ -1,18 +1,27 @@
-const { normalizeMessage } = require('./heartflow-feishu');
+const { normalizeMessage, needsPersonalLogin } = require('./heartflow-feishu');
 function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>null,notify=null,notifyResult=null,history=null,now=Date.now}) {
   let polling=false,analyzing=false,dispatching=false,notifying=false,checking=false,timer;
   store.recover();
   analyze=require('./heartflow-budget').trackedAnalysis({store,analyze,now});
   const backgroundAnalyze=(...args)=>{const c=store.snapshot().config;if(!c.enabled||!c.modelEnabled)throw Object.assign(new Error('自动分析已关闭'),{code:'ANALYSIS_PAUSED'});return analyze(...args);};
   const errorText=e=>String(e.message||e).slice(0,1000);
-  async function sync() {
+  async function sync({ automatic = false } = {}) {
+    const { source: status } = store.snapshot();
+    if (automatic && status.authRequired && now() < status.authRetryAt) return {authRequired:true};
     if(polling)return {busy:true};polling=true;
+    let needsIdentity = status.authRequired;
     try{
       const config=store.snapshot().config;
       if(!config.chats.length && config.discoveryMode!=='recent')throw new Error('先选择需要监听的聊天');
-      if(!config.selfId){const who=await source.identity();if(!who.user?.open_id)throw new Error('无法确认当前飞书用户身份');store.configure({selfId:who.user.open_id});}
+      if (!config.selfId || needsIdentity) {
+        const who = await source.identity();
+        if (!who.user?.open_id) throw new Error('无法确认当前飞书用户身份');
+        if (config.selfId && config.selfId !== who.user.open_id) throw new Error('飞书授权用户与原账号不同，请重新授权原账号');
+        store.configure({selfId:who.user.open_id});
+        needsIdentity = false;
+      }
       const syncErrors=[];
-      if(config.discoveryMode==='recent')try{await require('./heartflow-discovery').discoverMessages({store,source,now});}catch(e){syncErrors.push(e);}
+      if(config.discoveryMode==='recent')try{await require('./heartflow-discovery').discoverMessages({store,source,now});}catch(e){if(needsPersonalLogin(e))throw e;syncErrors.push(e);}
       for(const chat of config.chats){
         try{
         let snapshot=store.snapshot(),cursor=snapshot.cursor[chat.id]||{},page=cursor.page||'',upper=cursor.upper||now(),floor=cursor.floor||Math.max(config.since,(cursor.watermark||config.since)-5*60000),finished=false;
@@ -24,7 +33,7 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
           if(!result.has_more||older){finished=true;break;}page=result.page_token;if(!page)throw new Error('飞书分页游标缺失');
         }
         store.transaction(s=>{s.cursor[chat.id]=finished?{watermark:upper}:{page,upper,floor,watermark:cursor.watermark};});
-        }catch(e){syncErrors.push(new Error(`${chat.id}: ${errorText(e)}`));}
+        }catch(e){if(needsPersonalLogin(e))throw e;syncErrors.push(new Error(`${chat.id}: ${errorText(e)}`));}
       }
       const snapshot=store.snapshot();
       const parents=[...new Set(Object.values(snapshot.messages).filter(m=>require('./heartflow-discovery').inScope(m,config)&&m.createdAt>=config.since).map(m=>m.parentId).filter(id=>id&&!snapshot.messages[id]))].slice(0,30);
@@ -33,9 +42,13 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
       if(missing.length&&source.messages){const refs=await source.messages(missing.map(m=>m.id));store.ingest((refs.messages||refs.items||[]).map(normalizeMessage));}
       await require('./heartflow-completion').refresh({store,source,now});
       if(syncErrors.length)throw new AggregateError(syncErrors,syncErrors.map(errorText).join('; '));
-      store.transaction(s=>{s.source={...s.source,ok:true,lastSync:now(),error:''};});
+      store.transaction(s=>{s.source={...s.source,ok:true,lastSync:now(),error:'',authRequired:false,authRetryAt:0};});
       return {ok:true};
-    }catch(e){store.transaction(s=>{s.source={...s.source,ok:false,error:errorText(e)};});throw e;}finally{polling=false;}
+    }catch(e){
+      const authRequired = needsPersonalLogin(e) || !!needsIdentity;
+      store.transaction(s=>{s.source={...s.source,ok:false,error:errorText(e),authRequired,authRetryAt:authRequired ? now()+6*3600000 : 0};});
+      throw e;
+    }finally{polling=false;}
   }
   async function followups(id,force=false,automatic=false) {
     const snapshot=store.snapshot();
@@ -167,7 +180,7 @@ function createHeartflow({store,source,analyze,sessions,dispatch,observe=()=>nul
     }
     }finally{notifying=false;}
   }
-  async function tick() {if(store.snapshot().config.enabled){try{await sync();if(store.snapshot().config.modelEnabled && (store.snapshot().source.analysisRetryAt||0)<=now())await suggest({automatic:true});}catch{}}await deliver();await notices();}
+  async function tick() {if(store.snapshot().config.enabled){try{const result=await sync({automatic:true});if(result.ok && store.snapshot().config.modelEnabled && (store.snapshot().source.analysisRetryAt||0)<=now())await suggest({automatic:true});}catch{}}await deliver();await notices();}
   return {sync,suggest,deliver,notices,verify,followups,status:()=>({polling,analyzing,dispatching,usage:require('./heartflow-budget').usageStatus(store.snapshot(),now())}),start(){if(timer)return;const schedule=()=>{timer=setTimeout(async()=>{await tick().catch(()=>{});schedule();},Math.max(30,store.snapshot().config.intervalSeconds)*1000);timer.unref();};schedule();},stop(){clearTimeout(timer);timer=null;},
     async review(id,input){
       if(input.decision==='approve'){

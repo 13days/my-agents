@@ -38,11 +38,12 @@ function hfProgress(data) {
   const pending=ps.filter(p=>['pending','deferred'].includes(p.state)).length;
   const running=ds.filter(d=>['queued','dispatching','accepted','running'].includes(d.state)).length;
   const completed=ps.filter(p=>p.state==='completed').length;
-  const status=!data.config.enabled?'已暂停':data.source.error?'同步异常':data.runtime.polling?'正在读取消息':data.runtime.analyzing?'正在分析消息':!data.config.modelEnabled?'自动分析已关闭':data.runtime.usage?.paused?'等待预算恢复':'正在关注你的工作';
+  const status=!data.config.enabled?'已暂停':data.source.authRequired?'等待飞书重新授权':data.source.error?'同步异常':data.runtime.polling?'正在读取消息':data.runtime.analyzing?'正在分析消息':!data.config.modelEnabled?'自动分析已关闭':data.runtime.usage?.paused?'等待预算恢复':'正在关注你的工作';
   const metrics=[['pending','待你确认',pending,'查看建议，决定下一步'],['messages','已读取消息',messages.length.toLocaleString(),`${backlog} 条等待分析`],['activity','正在执行',running,'已确认行动的执行进展'],['home','已完成事项',completed,'含你确认及后续对话确认']];
   return `<div class="hf-status"><span class="hf-dot ${data.config.enabled&&!data.source.error?'on':''}"></span><strong>${status}</strong><span>${hfCoverage(data)}</span><span>最近同步 ${esc(hfTime(data.source.lastSync))}</span></div>
     <div class="hf-metrics">${metrics.map(([id,title,value,note])=>`<button class="hf-metric" data-hf-jump="${id}"><span>${title}</span><strong>${value}</strong><small>${note}</small></button>`).join('')}</div>
-    ${[['消息同步',data.source.error],['建议分析',data.source.analysisError],['表情回应',data.source.reactionError],['通知发送',data.source.noticeError]].filter(([,error])=>error).map(([title,error])=>`<div class="hf-alert" role="status"><strong>${title}需要关注</strong><span>${esc(error)}</span><button class="btn" data-hf-jump="settings">查看设置</button></div>`).join('')}
+    ${data.source.authRequired ? '<div class="hf-alert" role="status"><strong>个人飞书授权已失效</strong><span>在运行助理的机器上执行 <code>bytedcli feishu login --force-oauth --scope offline_access,search:message,im:chat:read,im:message:readonly,im:message.group_msg:get_as_user,im:message.p2p_msg:get_as_user,im:message.reactions:read</code>，用原账号确认后从上次进度继续。</span><button type="button" class="btn" data-hf-retry>已授权，恢复同步</button></div>' : ''}
+    ${[['消息同步',!data.source.authRequired && data.source.error],['建议分析',data.source.analysisError],['表情回应',data.source.reactionError],['通知发送',data.source.noticeError]].filter(([,error])=>error).map(([title,error])=>`<div class="hf-alert" role="status"><strong>${title}需要关注</strong><span>${esc(error)}</span><button class="btn" data-hf-jump="settings">查看设置</button></div>`).join('')}
     <div class="hf-usage-strip">${hfUsage(data)}</div>`;
 }
 const hfViews=[['home','工作概览','查看关注内容与最新决策'],['pending','待我确认','核对建议，再决定是否执行'],['messages','消息记录','查看助理已读取的原始消息'],['activity','执行记录','追踪已确认行动的执行结果'],['matters','事项','管理消息与任务之间的关联'],['learning','反馈与学习','查看并管理你对助理的纠正'],['settings','设置','消息范围、分析预算与通知']];
@@ -64,6 +65,7 @@ async function renderHeartflow(useCache=false) {
     root.innerHTML=`<section class="hf"><header class="hf-header"><div><div class="hf-eyebrow">工作 / 助理</div><h1>助理工作台</h1><p>查看消息，理解进展，把需要你决定的事放在一起。</p></div><div class="hf-header-actions"><a class="btn" href="/connections">管理消息渠道</a><button class="btn" id="hf-refresh">刷新</button></div></header>
       <div id="hf-analysis-control">${hfAnalysisControl(data)}</div><nav class="hf-tabs" aria-label="助理导航">${hfViews.map(([id,title])=>`<button class="hf-nav-item ${heartflowView===id?'active':''}" data-hf-tab="${id}" ${heartflowView===id?'aria-current="page"':''}>${title}${id==='pending'?`<span class="hf-nav-count">${pending}</span>`:''}</button>`).join('')}</nav><div id="hf-live-status">${hfProgress(data)}</div><div class="hf-view-header"><div><h2 id="hf-view-heading"></h2><p id="hf-view-description"></p></div><p id="hf-live-update" role="status"></p></div><div id="hf-notice" role="status"></div><div id="hf-content"></div></section>`;
     root.onclick=e=>{
+      const retry=e.target.closest('[data-hf-retry]');if(retry){hfDo(retry,()=>api('POST','heartflow/sync',{}));return;}
       const toggle=e.target.closest('[data-hf-analysis-toggle]');if(toggle){hfToggleAnalysis(toggle);return;}
       const target=e.target.closest('[data-hf-tab],[data-hf-jump],[data-hf-budget-settings]');
       if(target){e.preventDefault();heartflowView=target.dataset.hfTab||target.dataset.hfJump||'settings';hfRenderContent(heartflowData);}

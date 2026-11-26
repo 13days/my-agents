@@ -40,7 +40,7 @@ function serveNode({ peer, host, engines, id = os.hostname(), label = id, before
   peer.handle('engine.nativeSession', async ({ engine, id: sessionId }) => !!await engineOf(engine).nativeSessionAvailable?.(sessionId));
   peer.handle('engine.owns', async ({ engine, id: sessionId }) => !!await engineOf(engine).owns(sessionId));
   if (history) {
-    peer.handle('history.messages', ({ id }) => history.messages(id));
+    peer.handle('history.messages', ({ id, before, limit, since }) => history.messages(id, { before, limit, since }));
     peer.handle('history.list', () => history.list());
     peer.handle('history.previews', async ({ items }) => history.previews ? history.previews(items) : Promise.all(items.map(async item => require('../core/session-previews').sessionPreview(await history.messages(item.id), item))));
     peer.handle('history.userPage', async ({ item, page }) => history.userPage ? history.userPage({ item, page }) : require('../core/session-previews').userMessagePage(await history.messages(item.id), page, item));

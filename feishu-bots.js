@@ -9,7 +9,7 @@ const { createFeishuGateway } = require('./feishu-gateway');
 const BOT_FILE = /^panel-feishu-bot-(cli_[\w-]{4,100})\.json$/;
 const botFiles = appId => ({ config: `panel-feishu-bot-${appId}.json`, state: `panel-feishu-bot-${appId}-state.json` });
 // Settings a new bot inherits from the primary one; app-scoped ids (open_id) are not portable.
-const INHERITED = ['defaultProject', 'defaultMachine', 'defaultEngine', 'worktree', 'model', 'models', 'allowAllGroups', 'allowedChatIds'];
+const INHERITED = ['defaultProject', 'defaultMachine', 'defaultEngine', 'worktree', 'model', 'models', 'allowAllGroups', 'pairedInGroups', 'allowedChatIds'];
 
 function createFeishuBots({ dir, create = createFeishuGateway, ...options }) {
   const primary = create({ dir, ...options });

@@ -29,8 +29,19 @@ test('history pages preserve all long text, cover every message, and reuse uncha
   assert.equal(first.truncated, false);
   assert.equal(complete[0].text, 'question-0');
   assert.equal(complete.at(-1).text, 'answer-99');
+  const page = context.sessionHistoryPage('session-id', {before:1,limit:1});
+  assert.deepEqual(Array.from(page.messages, m=>m.text), ['question-0']);
+  assert.equal(context.sessionHistoryPage('session-id',{since:page.revision}).unchanged,true);
   assert.equal(reads, 1);
   fs.appendFileSync(file, JSON.stringify({ type: 'user', message: { content: 'new question' } }) + '\n');
   assert.equal(context.sessionMessages('session-id').messages.at(-1).text, 'new question');
   assert.equal(reads, 2);
+});
+
+test('remote history pages and conditional reads execute on the transcript owner',async t=>{
+ const {serveNode}=require('../node/agent'), handlers=new Map(), requests=[];
+ const peer={handle:(name,fn)=>handlers.set(name,fn),on:()=>{},onClose:()=>{}};
+ serveNode({peer,host:{platform:'test',homeDir:()=>'/tmp'},engines:[],id:'remote',history:{list:()=>[],messages:(id,options)=>{requests.push({id,...options});return {revision:'owner'};}}});
+ assert.equal((await handlers.get('history.messages')({id:'a',before:1,limit:1,since:'rev'})).revision,'owner');
+ assert.deepEqual(requests,[{id:'a',before:1,limit:1,since:'rev'}]);
 });

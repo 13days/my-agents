@@ -30,91 +30,127 @@ function compareCaptures(a, b) {
   return (Date.parse(a.startedAt) || 0) - (Date.parse(b.startedAt) || 0) || Number(a.id) - Number(b.id) || String(a.id).localeCompare(String(b.id));
 }
 
+function captureEntry(rec, offset, length) {
+  const meta = {};
+  for (const key of ['id', 'ts', 'path', 'status', 'durationMs', 'model', 'messagesCount', 'respMsgId', 'clientVersion', 'upstreamId', 'upstreamName', 'usage', 'requestOrder', 'routing', 'method', 'incomplete', 'engine', 'observation', 'responseModel', 'streamOutcome']) meta[key] = rec[key];
+  Object.assign(meta, captureMetadata(rec));
+  const start = Date.parse(rec.ts);
+  meta.startedAt = rec.startedAt || (Number.isFinite(start) ? new Date(start - (Number(rec.durationMs) || 0)).toISOString() : '');
+  meta.hasThinking = !!rec.thinking;
+  meta.toolCount = rec.tools?.length || 0;
+  return {meta, offset, length};
+}
+
+function scanCaptureFile(fd, limit, visit) {
+  const chunk = Buffer.alloc(1024 * 1024);
+  let offset = 0, fragments = [], length = 0;
+  const consume = () => {
+    const line = Buffer.concat(fragments, length);
+    let rec; try { rec = JSON.parse(line.toString('utf8')); } catch {}
+    if (rec?.id != null) visit(rec, offset, length);
+    offset += length; fragments = []; length = 0;
+  };
+  let count;
+  let consumed = 0;
+  while (consumed < limit && (count = fs.readSync(fd, chunk, 0, Math.min(chunk.length, limit - consumed), null))) {
+    consumed += count;
+    let start = 0, end;
+    while ((end = chunk.indexOf(10, start)) >= 0 && end < count) {
+      const part = Buffer.from(chunk.subarray(start, end + 1));
+      fragments.push(part); length += part.length; consume(); start = end + 1;
+    }
+    if (start < count) { const part = Buffer.from(chunk.subarray(start, count)); fragments.push(part); length += part.length; }
+  }
+  if (length) consume();
+}
+
 // Keep only byte offsets and list metadata in memory. Bodies remain complete on disk.
-function createCaptureStore(file) {
+function createCaptureStore(file, options) {
+  const segments = require('./core/capture-segments').createCaptureSegments(file, options);
   const records = new Map(), messages = new Map(), proxyRoutes = new Map();
   let sequence = 0, needsNewline = false, revision = 0, loading = null, loadError = '', generation = 0;
-  function index(rec, offset, length) {
-    const meta = {};
-    for (const key of ['id', 'ts', 'path', 'status', 'durationMs', 'model', 'messagesCount', 'respMsgId', 'clientVersion', 'upstreamId', 'upstreamName', 'usage', 'requestOrder', 'routing', 'method', 'incomplete', 'engine', 'observation', 'responseModel', 'streamOutcome']) meta[key] = rec[key];
-    Object.assign(meta, captureMetadata(rec));
-    const start = Date.parse(rec.ts);
-    meta.startedAt = rec.startedAt || (Number.isFinite(start) ? new Date(start - (Number(rec.durationMs) || 0)).toISOString() : '');
-    meta.hasThinking = !!rec.thinking;
-    meta.toolCount = rec.tools?.length || 0;
-    records.set(String(rec.id), { meta, offset, length });
-    updateRoutes(proxyRoutes, routeRecord(meta));
-    if (rec.respMsgId) messages.set(rec.respMsgId, String(rec.id));
-    sequence = Math.max(sequence, Number(rec.id) || 0);
+  function accept(id, entry, segment) {
+    if (segment.removed || records.has(id)) return;
+    entry.segment = segment;
+    records.set(id, entry);
+    updateRoutes(proxyRoutes, routeRecord(entry.meta));
+    const msg = entry.meta.respMsgId;
+    if (msg && Number(messages.get(msg) || 0) < Number(id)) messages.set(msg, id);
+    sequence = Math.max(sequence, Number(id) || 0);
   }
-  function load({ limit = Infinity } = {}) {
-    records.clear(); messages.clear(); proxyRoutes.clear(); sequence = 0; needsNewline = false;
-    if (!fs.existsSync(file)) return;
-    const fd = fs.openSync(file, 'r'), chunk = Buffer.alloc(1024 * 1024);
-    let offset = 0, fragments = [], length = 0;
-    const consume = () => {
-      const line = Buffer.concat(fragments, length);
-      try { index(JSON.parse(line.toString('utf8')), offset, length); } catch {}
-      offset += length; fragments = []; length = 0;
-    };
-    try {
-      let count;
-      let consumed = 0;
-      while (consumed < limit && (count = fs.readSync(fd, chunk, 0, Math.min(chunk.length, limit - consumed), null))) {
-        consumed += count;
-        let start = 0, end;
-        while ((end = chunk.indexOf(10, start)) >= 0 && end < count) {
-          const part = Buffer.from(chunk.subarray(start, end + 1));
-          fragments.push(part); length += part.length; consume(); start = end + 1;
-        }
-        if (start < count) { const part = Buffer.from(chunk.subarray(start, count)); fragments.push(part); length += part.length; }
-      }
-      if (length) { needsNewline = true; consume(); }
-    } finally { fs.closeSync(fd); }
+  function snapshots() {
+    const parts = segments.snapshots();
+    const current = parts.find(p => p.file === file);
+    if (current) {
+      const fd = fs.openSync(file, 'r'), tail = Buffer.alloc(1);
+      try { fs.readSync(fd, tail, 0, 1, current.bytes-1); needsNewline = tail[0] !== 10; }
+      finally { fs.closeSync(fd); }
+    }
+    return parts;
+  }
+  function load() {
+    records.clear(); messages.clear(); proxyRoutes.clear(); sequence = 0;
+    for (const segment of snapshots()) {
+      const fd = fs.openSync(segment.file, 'r');
+      try { scanCaptureFile(fd, segment.bytes, (rec, offset, length) => accept(String(rec.id), captureEntry(rec, offset, length), segment)); }
+      finally { fs.closeSync(fd); }
+    }
     revision++;
   }
   function loadAsync() {
     if (loading) return loading;
-    if (!fs.existsSync(file)) return Promise.resolve();
-    // New traffic may arrive before the historical maximum id is known.
-    sequence = Math.max(sequence, Date.now() * 1000);
-    const limit = fs.statSync(file).size, epoch = generation;
-    if (limit) { const fd = fs.openSync(file, 'r'), tail = Buffer.alloc(1); try { fs.readSync(fd, tail, 0, 1, limit - 1); needsNewline = tail[0] !== 10; } finally { fs.closeSync(fd); } }
-    const { Worker } = require('worker_threads');
-    const worker = new Worker(require.resolve('./capture-index-worker'), { workerData: { file, limit } });
-    loading = new Promise((resolve, reject) => {
-      let complete = false;
-      worker.on('message', message => {
-        if (epoch === generation && message.entries) for (const [id, entry] of message.entries) {
-          if (!records.has(id)) {
-            records.set(id, entry);
-            updateRoutes(proxyRoutes, routeRecord(entry.meta));
-          }
-          if (entry.meta.respMsgId && Number(messages.get(entry.meta.respMsgId) || 0) < Number(id)) messages.set(entry.meta.respMsgId, id);
-          sequence = Math.max(sequence, Number(id) || 0);
-        }
-        if (message.done) { complete = true; revision++; resolve(); }
+    const parts = snapshots();
+    if (!parts.length) return Promise.resolve();
+    sequence = Math.max(sequence, Date.now()*1000);
+    const epoch = generation, handles = [];
+    // Pin the original inodes while appends can rename or retire their segments.
+    try {
+      for (const p of parts) handles.push({fd:fs.openSync(p.file,'r'), limit:p.bytes, cache:p.legacy ? p.file + '.index' : ''});
+      const { Worker } = require('worker_threads');
+      const worker = new Worker(require.resolve('./capture-index-worker'), {workerData:handles});
+      loading = new Promise((resolve, reject) => {
+        worker.on('message', ({part, entries}) => {
+          if (epoch !== generation) return;
+          for (const [id, entry] of entries) accept(id, entry, parts[part]);
+          revision++;
+        });
+        worker.once('error', reject);
+        worker.once('exit', code => code ? reject(new Error('抓包索引进程退出：'+code)) : resolve());
+      }).catch(error => { loadError=error.message; throw error; }).finally(() => {
+        for (const h of handles) fs.closeSync(h.fd);
+        loading=null; revision++;
       });
-      worker.once('error', reject);
-      worker.once('exit', code => { if (!complete) reject(new Error('抓包索引进程退出：' + code)); });
-    }).catch(error => { loadError = error.message; throw error; }).finally(() => { loading = null; revision++; });
+    } catch (error) { for (const h of handles) fs.closeSync(h.fd); throw error; }
     return loading;
   }
+  function forget(segment) {
+    segment.removed = true;
+    for (const [id, entry] of records) if (entry.segment === segment) records.delete(id);
+    messages.clear(); proxyRoutes.clear();
+    for (const [id, {meta}] of records) {
+      if (meta.respMsgId && Number(messages.get(meta.respMsgId) || 0) < Number(id)) messages.set(meta.respMsgId,id);
+      updateRoutes(proxyRoutes, routeRecord(meta));
+    }
+    revision++;
+  }
   function append(rec) {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    const fd = fs.openSync(file, 'a', 0o600);
+    fs.mkdirSync(path.dirname(file), {recursive:true});
+    const data = Buffer.from(JSON.stringify(rec)+'\n');
+    const segment = segments.reserve(data.length + Number(needsNewline), forget);
+    const fd = fs.openSync(file,'a',0o600);
     try {
-      if (needsNewline) { fs.writeSync(fd, '\n'); needsNewline = false; }
+      if (needsNewline && segment.bytes) fs.writeSync(fd,'\n');
+      needsNewline = false;
       const offset = fs.fstatSync(fd).size;
-      const data = Buffer.from(JSON.stringify(rec) + '\n');
-      fs.writeFileSync(fd, data);
-      index(rec, offset, data.length); revision++;
-    } finally { fs.closeSync(fd); }
+      fs.writeFileSync(fd,data);
+      accept(String(rec.id),captureEntry(rec,offset,data.length),segment);
+      revision++;
+    } finally { segment.bytes=fs.fstatSync(fd).size; fs.closeSync(fd); }
   }
   function get(id) {
     const entry = records.get(String(id));
     if (!entry) return null;
-    const fd = fs.openSync(file, 'r'), data = Buffer.alloc(entry.length);
+    const fd = fs.openSync(entry.segment.file, 'r'), data = Buffer.alloc(entry.length);
     try {
       let read = 0;
       while (read < data.length) {
@@ -127,8 +163,7 @@ function createCaptureStore(file) {
   }
   return {
     load, loadAsync, append, get,
-    indexEntries: () => [...records],
-    status: () => ({ loading: !!loading, error: loadError, records: records.size }),
+    status: () => ({ loading: !!loading, error: loadError, records: records.size, storage:segments.status() }),
     metadata: id => records.get(String(id))?.meta || null,
     latestProxyRoute(sessionId, window) {
       const latest = proxyRoutes.get(sessionId);
@@ -163,7 +198,8 @@ function createCaptureStore(file) {
       return { sessionId: current.sessionId, position: index + 1, total: items.length, previousId: index > 0 ? String(items[index - 1].id) : null, nextId: index < items.length - 1 ? String(items[index + 1].id) : null };
     },
     getByMessageId: id => get(messages.get(id)),
-    clear() { generation++; fs.writeFileSync(file, ''); records.clear(); messages.clear(); proxyRoutes.clear(); revision++; },
+    clearLegacy() { segments.clearLegacy(forget); },
+    clear() { generation++; segments.clear(forget); needsNewline=false; revision++; },
   };
 }
-module.exports = { createCaptureStore, captureMetadata, compareCaptures };
+module.exports = { createCaptureStore, captureMetadata, compareCaptures, captureEntry, scanCaptureFile };

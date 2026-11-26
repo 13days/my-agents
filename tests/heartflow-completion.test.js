@@ -24,3 +24,12 @@ test('turning automatic analysis off between calls prevents subsequent backgroun
  const result=await flow.suggest({automatic:true});assert.equal(calls,1);assert.equal(result.paused,true);assert.equal(store.snapshot().source.analysisFailures||0,0);
  await flow.suggest({automatic:true});assert.equal(calls,1);
 });
+
+test('personal reaction pages retain API operator identity and support DONE evidence',async t=>{
+ const store=setup(t),p=draft(store),tokens=[];
+ const real={reaction_id:'done',operator:{operator_type:'user',operator_id:'reviewer'},reaction_type:{emoji_type:'DONE'}};
+ await refresh({store,source:{reactions:async(id,token)=>{tokens.push(token);return token?{items:[real]}:{items:[],has_more:true,page_token:'next'};}}});
+ assert.deepEqual(tokens,[undefined,'next']);
+ const {completion}=await inspectFollowup(p,store.snapshot(),async()=>({completion:{...complete,evidence:[{messageId:'m',reactionId:'done'}]}}));
+ assert.equal(completion.evidence[0].senderId,'reviewer');
+});

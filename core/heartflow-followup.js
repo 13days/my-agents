@@ -32,7 +32,7 @@ async function inspectFollowup(p,state,analyze,force=false,now=Date.now()) {
       if(!m||m.deleted||m.createdAt<floor)return null;
       if(e.reactionId){
         const r=(m.reactions||[]).find(r=>r.reaction_id===e.reactionId);
-        if(!r||r.reaction_type?.emoji_type!=='DONE'||r.operator?.type!=='user'||!r.operator.operator_id)return null;
+        if(!r||r.reaction_type?.emoji_type!=='DONE'||(r.operator?.operator_type ?? r.operator?.type)!=='user'||!r.operator.operator_id)return null;
         return {id:m.id,revision:m.revision,source:'feishu_reaction',reactionId:r.reaction_id,senderId:r.operator.operator_id,quote:'DONE',timestamp:r.action_time};
       }
       if(!m.senderId||m.senderType==='app'||typeof e.quote!=='string'||e.quote.trim().length<2||!m.text.includes(e.quote))return null;
