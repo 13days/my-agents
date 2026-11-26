@@ -31,7 +31,7 @@
 
 <main id="main">
   <div id="toolbar">
-    <button class="btn" id="libraryToggle" type="button" aria-label="打开资源列表" aria-expanded="false">☰</button>
+    <button class="btn" id="libraryToggle" type="button" aria-label="展开列表" aria-controls="sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16m3-11 3 3-3 3"/></svg></button>
     <div id="toolbarIdentity"><div id="sectionCrumb">工作空间</div><div id="title">未选择<span id="fpath"></span></div></div>
     <span id="workspaceScope" class="scope-label"></span>
     <div id="capture-nav" class="capture-nav" hidden></div>
@@ -405,7 +405,6 @@ function updateWorkspaceChrome() {
   $('#projbar').hidden = !SCOPED.includes(state.type);
   $('#libraryToggle').hidden = dashboard;
   document.body.dataset.libraryOpen = 'false';
-  $('#libraryToggle').setAttribute('aria-expanded', 'false');
   syncPanelToggles();
   document.querySelectorAll('.tab').forEach(tab => {
     tab.classList.toggle('active', tab.dataset.type === productNavParent(state.type));
@@ -828,6 +827,7 @@ async function switchType(type, updateRoute = true) {
     state.resourceEngine=compatible.id;localStorage.setItem('panel-resource-engine',compatible.id);
   }
   clearCaptureSearch();
+  previewSidebar(false);
   if (state.editing && !confirm(t('unsaved'))) return;
   closeExpandedWindow();
   if(state.type==='sessions'){rememberChatPage();sessionNavigation={items:state.items.slice(),current:chatView.sessionId||($('#chat-messages')?'__draft__':''),keyword:state.keyword,scroll:$('#list').scrollTop,page:{...listPage}};}
@@ -1070,7 +1070,7 @@ async function openItem(key, displayName) {
     state.current = key;
     routeView = view; writeRoute();
     document.body.dataset.libraryOpen = 'false';
-    $('#libraryToggle').setAttribute('aria-expanded', 'false');
+    syncPanelToggles();
     state.raw = d.content;
     $('#empty').style.display = 'none';
     $('#title').firstChild.textContent = (state.type === 'commands' ? '/' : '') + (displayName || d.name);
@@ -1875,7 +1875,7 @@ async function openInspect(key) {
     routeView = ''; writeRoute();
     renderCaptureNavigation(r);
     document.body.dataset.libraryOpen = 'false';
-    $('#libraryToggle').setAttribute('aria-expanded', 'false');
+    syncPanelToggles();
     $('#empty').style.display = 'none';
     $('#title').firstChild.textContent = (r.model || '?') + ' · ' + r.status;
     $('#fpath').textContent = r.path + ' · ' + Math.round(r.durationMs / 1000) + 's';
@@ -1931,9 +1931,11 @@ function toggleLibrary(force) {
   }
   const open = force ?? document.body.dataset.libraryOpen !== 'true';
   document.body.dataset.libraryOpen = String(open);
-  $('#libraryToggle').setAttribute('aria-expanded', String(open));
+  syncPanelToggles();
 }
-$('#libraryToggle').onclick = () => toggleLibrary();
+$('#libraryToggle').onclick = () => {
+  toggleLibrary(); if (!narrowNav.matches) $('#libraryCollapse').focus();
+};
 $('#libraryBackdrop').onclick = () => toggleLibrary(false);
 function syncPanelToggles() {
   const navClosed = document.body.dataset.navCollapsed === 'true';
@@ -1942,11 +1944,15 @@ function syncPanelToggles() {
   const navLabel = !navClosed || (preview && window.matchMedia('(max-width: 560px)').matches)
     ? ui('收起导航', 'Collapse navigation') : preview ? ui('固定展开导航', 'Pin navigation open') : ui('展开导航', 'Expand navigation');
   $('#navToggle').title = navLabel; $('#navToggle').setAttribute('aria-label', navLabel); $('#navToggle').setAttribute('aria-expanded', String(!navClosed || preview));
-  const listLabel = ui(sidebarClosed ? '展开列表' : '收起列表', sidebarClosed ? 'Expand list' : 'Collapse list');
-  $('#libraryToggle').title = listLabel; $('#libraryToggle').setAttribute('aria-label', listLabel); $('#libraryToggle').setAttribute('aria-expanded', String(!sidebarClosed));
-  $('#libraryCollapse').title = listLabel; $('#libraryCollapse').setAttribute('aria-label', listLabel); $('#libraryCollapse').setAttribute('aria-controls', 'sidebar'); $('#libraryCollapse').setAttribute('aria-expanded', String(!sidebarClosed)); $('#libraryCollapse').textContent = sidebarClosed ? '›' : '‹';
+  const mobile = window.matchMedia('(max-width: 560px)').matches;
+  const listPreview = document.body.dataset.sidebarPreview === 'true';
+  const listOpen = mobile ? document.body.dataset.libraryOpen === 'true' : !sidebarClosed || listPreview;
+  const listLabel = listPreview ? ui('固定展开列表','Pin list open') : listOpen ? ui('收起列表','Collapse list') : ui('展开列表','Expand list');
+  $('#libraryToggle').title = listLabel; $('#libraryToggle').setAttribute('aria-label', listLabel); $('#libraryToggle').setAttribute('aria-expanded', String(listOpen));
+  $('#libraryCollapse').title = ui('收起列表','Collapse list'); $('#libraryCollapse').setAttribute('aria-label', $('#libraryCollapse').title); $('#libraryCollapse').setAttribute('aria-controls', 'sidebar'); $('#libraryCollapse').setAttribute('aria-expanded', String(listOpen));
 }
 function setSidebarCollapsed(collapsed) {
+  previewSidebar(false);
   document.body.dataset.sidebarCollapsed = String(collapsed); localStorage.setItem('panel-sidebar-collapsed', String(collapsed)); syncPanelToggles();
 }
 document.body.dataset.sidebarCollapsed = localStorage.getItem('panel-sidebar-collapsed') || 'false';
@@ -1988,7 +1994,34 @@ document.addEventListener('keydown', event => {
 narrowNav.addEventListener('change', restoreNavigation);
 compactNav.addEventListener('change', restoreNavigation);
 restoreNavigation();
-$('#libraryCollapse').onclick = () => { if (window.matchMedia('(max-width: 560px)').matches) toggleLibrary(false); else setSidebarCollapsed(document.body.dataset.sidebarCollapsed !== 'true'); };
+const sidebar = $('#sidebar'), listToggle = $('#libraryToggle');
+let listCloseTimer;
+function previewSidebar(open) {
+  clearTimeout(listCloseTimer);
+  if (open && (narrowNav.matches || document.body.dataset.sidebarCollapsed !== 'true' || document.body.dataset.view !== 'library')) return;
+  if (open) {
+    sidebar.style.setProperty('--list-preview-left', $('#main').getBoundingClientRect().left + 'px');
+    sidebar.style.setProperty('--list-preview-top', $('#toolbar').getBoundingClientRect().bottom + 'px');
+  }
+  document.body.dataset.sidebarPreview = String(open); syncPanelToggles();
+}
+listToggle.addEventListener('pointerenter', event => { if (event.pointerType === 'mouse') previewSidebar(true); });
+function leaveSidebar() {
+  if (document.body.dataset.sidebarPreview === 'true' && !sidebar.contains(document.activeElement)) listCloseTimer = setTimeout(() => previewSidebar(false), 200);
+}
+listToggle.addEventListener('pointerleave', leaveSidebar);
+sidebar.addEventListener('pointerenter', () => clearTimeout(listCloseTimer));
+sidebar.addEventListener('pointerleave', leaveSidebar);
+sidebar.addEventListener('focusout', event => { if (!sidebar.contains(event.relatedTarget)) leaveSidebar(); });
+document.addEventListener('pointerdown', event => {
+  if (document.body.dataset.sidebarPreview === 'true' && !sidebar.contains(event.target) && !listToggle.contains(event.target)) previewSidebar(false);
+});
+window.addEventListener('resize', () => { if (document.body.dataset.sidebarPreview === 'true') previewSidebar(false); });
+$('#libraryCollapse').onclick = () => {
+  if (narrowNav.matches) toggleLibrary(false);
+  else setSidebarCollapsed(true);
+  listToggle.focus();
+};
 syncPanelToggles();
 document.querySelectorAll('.fbtn').forEach(b => b.onclick = () => {
   state.origin = b.dataset.origin;
@@ -2000,7 +2033,11 @@ document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f' && !expandedWindow && !$('#capture-search').hidden) { e.preventDefault(); $('#capture-search input').focus(); $('#capture-search input').select(); return; }
   if (e.key === 'Escape' && expandedWindow) { e.preventDefault(); closeExpandedWindow(); return; }
   if ((e.metaKey || e.ctrlKey) && e.key === 's' && state.editing) { e.preventDefault(); $('#saveBtn').click(); }
-  if (e.key === 'Escape') { closeModal(); toggleLibrary(false); }
+  if (e.key === 'Escape') {
+    closeModal();
+    if (document.body.dataset.sidebarPreview === 'true') { previewSidebar(false); listToggle.focus(); }
+    if (narrowNav.matches && document.body.dataset.libraryOpen === 'true') { toggleLibrary(false); listToggle.focus(); }
+  }
 });
 
 // ---------- 悬浮提示（任何带 data-tip 的元素）----------
@@ -2910,7 +2947,7 @@ function chatChrome(title, path) {
   $('#empty').style.display = 'none'; $('#metabar').style.display = 'none'; $('#render').classList.add('wide');
   $('#title').firstChild.textContent = title; $('#fpath').textContent = path;
   $('#editBtn').disabled = $('#delBtn').disabled = true;
-  document.body.dataset.libraryOpen = 'false'; $('#libraryToggle').setAttribute('aria-expanded', 'false');
+  document.body.dataset.libraryOpen = 'false'; syncPanelToggles();
 }
 let choosingChatProject = false;
 async function openNewChat() {
