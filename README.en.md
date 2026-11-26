@@ -12,6 +12,8 @@ Start a conversation in Codex or Claude Code, pick it up in Feishu on your phone
 2. **Pick it up on your phone.** Send your Feishu bot `/sessions product updates`. Find the conversation by its machine, project, and last question, then select **切换** (Switch) on the row. Expand **会话详情** for the branch and prompts, or send `/help` for Find session and New task. Ask “Expand the second update for the design team.” The agent has the list you were discussing.
 3. **Continue at your desk.** Open the same session under **Conversations** in the web panel. Your follow-up from Feishu and the reply are there, and you can keep editing. You can also continue in the original terminal. If you closed it, run `codex resume <session-id>` or `claude --resume <session-id>` in the project directory on the original machine.
 
+![Feishu session list and /help card layout preview with sample data](https://raw.githubusercontent.com/13days/my-agents/main/docs/feishu-session-help-preview.png)
+
 To continue in a terminal window that is still open, the Codex daemon on that machine must have the session loaded, or the Claude Code window must allow incoming session messages. [Terminal handoff details (Chinese)](docs/user-guide.md)
 
 ![Continue the product-update conversation in the web panel](https://raw.githubusercontent.com/13days/my-agents/main/docs/conversation-preview.png)

@@ -210,8 +210,9 @@ if (CLI_CMD === 'migrate-data') {
   console.log('请重启面板（含后台服务）以使用新目录；仍在运行的旧版面板会继续写旧目录。');
   process.exit(0);
 }
-if (CLI_CMD === '--help' || CLI_CMD === '-h') {
-  console.log('my-agents            start the panel + inspector proxy');
+if (['help', '--help', '-h'].includes(CLI_CMD)) {
+  console.log('my-agents                  start the panel and local model proxy');
+  console.log('my-agents service install|status|restart|uninstall    manage the background service');
   console.log('my-agents migrate-data     copy panel data from ~/.claude to ~/.my-agents (originals kept)');
   console.log('my-agents node --hub ws://<hub>:4321 --token <token>   serve this machine\'s engines to a hub');
   console.log('my-agents node --stdio     same, over stdio (the hub launches it via SSH)');
@@ -219,6 +220,10 @@ if (CLI_CMD === '--help' || CLI_CMD === '-h') {
   console.log('my-agents witness          run a voter-only cluster witness');
   console.log('my-agents install-proxy    add a smart `claude` wrapper to your shell rc');
   console.log('my-agents uninstall-proxy  remove it');
+  console.log(`\nWeb help        http://127.0.0.1:${PORT}/guide`);
+  console.log(`Chat apps       http://127.0.0.1:${PORT}/im`);
+  console.log('Feishu / Lark   /help opens session and task shortcuts, with commands for the current chat');
+  console.log('WeCom           /help lists text commands, /new starts a conversation, /whoami shows your UserID');
   process.exit(0);
 }
 const CLAUDE_DIR = process.env.CLAUDE_DIR || path.join(os.homedir(), '.claude');

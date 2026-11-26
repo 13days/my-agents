@@ -12,6 +12,8 @@
 2. **出门后用飞书接手。** 给机器人发 `/sessions 产品更新`，按机器、项目和最近的问题找到刚才的会话，点行尾「切换」。需要核对分支或历史时展开「会话详情」。接着发「把第二条展开，写给设计组看」，它就能接着上文回答。
 3. **回到电脑继续。** 在网页的「对话」里打开同一条记录，可以看到飞书里的追问和答复，继续改稿。也可以回到原终端接着聊。如果窗口已经关闭，在原机器的项目目录用 `codex resume <会话ID>` 或 `claude --resume <会话ID>` 恢复。
 
+![飞书会话列表与 /help 卡片布局预览，使用示例数据](https://raw.githubusercontent.com/13days/my-agents/main/docs/feishu-session-help-preview.png)
+
 要接手仍开着的终端窗口，Codex 需要原机器的 daemon 已加载该会话，Claude Code 需要原窗口允许接收会话消息。[原终端接续说明](docs/user-guide.md)
 
 ![在网页中接着查看同一场关于产品更新的对话](https://raw.githubusercontent.com/13days/my-agents/main/docs/conversation-preview.png)
