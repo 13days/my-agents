@@ -217,6 +217,13 @@ function createRouter({ dir, claudeDir = dir, port, record = () => {}, reserveCa
       res.end(JSON.stringify({ error: '模型代理不接受浏览器跨域请求' }));
       return;
     }
+    // Claude Code periodically probes /api/hello; answer locally so gateways without this route never trigger cooldowns.
+    if ((req.method === 'HEAD' || req.method === 'GET') && /^\/api\/hello\/?(?:\?|$)/.test(req.url || '')) {
+      const helloBody = JSON.stringify({ message: 'hello' });
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(helloBody) });
+      res.end(req.method === 'HEAD' ? undefined : helloBody);
+      return;
+    }
     const requestInfo = reserveCapture();
     let activeRequest, cancelCapture;
     const cancel = () => { cancelCapture?.(); activeRequest?.destroy(); };
