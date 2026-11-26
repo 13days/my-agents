@@ -48,11 +48,12 @@ test('task cards keep the answer first and put metadata and callbacks behind one
   for (const [phase, done, text] of [['正在处理', false, ''], ['正在输出', false, '部分答复'], ['已完成', true, '完整答复'], ['已完成', true, '中'.repeat(8000)], ['失败', true, '模型连接失败'], ['已停止', true, '']]) {
     const view = { phase, done, text, accepted: true, tools: new Map(), permissions: new Map(), modelRoute: { model: 'model-name', proxyName: 'proxy-name', state: 'success' } };
     const card = cards.task({ ...context, title: '原始问题', binding, nodeLabel: 'node-name', view, elapsed: 3000 });
-    const [reply, details, divider, signature] = card.body.elements;
-    assert.equal(card.body.elements.length, 4);
+    const [reply, divider, details] = card.body.elements;
+    const signature = details.header.title;
+    assert.equal(card.body.elements.length, 3);
     assert.equal(card.header?.template, phase === '失败' ? 'red' : undefined);
     if (text) assert.equal(reply.content, text.length > cards.REPLY_PREVIEW ? text.slice(0, cards.REPLY_PREVIEW) + '…' : text);
-    assert.equal(details.header.title.content, '详情与操作');
+    assert.match(details.header.title.content, / · 详情与操作$/);
     assert.equal(details.expanded, false);
     assert.equal(details.border, undefined);
     for (const label of ['原始问题', '/work/repo', 'session-uuid', 'work-branch', 'proxy-name', 'node-name']) {
@@ -62,7 +63,8 @@ test('task cards keep the answer first and put metadata and callbacks behind one
     assert.deepEqual(actions(card), actions(details));
     assert.equal(actions(details).some(a => a.action === 'share_result'), phase === '已完成');
     assert.equal(divider.tag, 'hr');
-    assert.equal(signature.text_size, 'notation');
+    assert.equal(signature.tag, 'markdown');
+    assert.equal(details.header.icon_position, 'follow_text');
     assert.equal(JSON.stringify(card.body).split('https://github.com/13days/my-agents#readme').length, 2);
   }
 });
@@ -71,12 +73,28 @@ test('recovery moves controls from legacy cards into the footer and preserves pa
   const legacy = cards.card('正在处理', [cards.markdown('旧版部分答复'), cards.button('查看最近对话', { action: 'history', id: 'old' }), cards.button('旧停止', { action: 'stop', id: 'old' })], { subtitle: '旧版问题' });
   const restored = cards.interruptedTask(legacy);
   assert.equal(restored.body.elements[1].content, '旧版部分答复');
-  const details = restored.body.elements[2];
-  assert.equal(details.header.title.content, '详情与操作');
+  const details = restored.body.elements.at(-1);
+  assert.match(details.header.title.content, / · 详情与操作$/);
   assert.deepEqual(actions(details).map(a => a.action), ['history', 'view']);
   assert.equal(actions(restored).length, 2);
   assert.match(JSON.stringify(details), /旧版问题/);
-  assert.match(restored.body.elements.at(-1).content, /github.com/);
+  assert.match(details.header.title.content, /github.com/);
+});
+
+test('repairing an old or current task card keeps one linked signature in its bottom disclosure', () => {
+  const sign = cards.replySignature(null, '林舟', { engineLabel: 'Codex', reportedModel: 'served' });
+  const task = cards.task({ ...context, signature: sign, title: 'Task', binding: { id: 'demo', cwd: '/project' }, view: { phase: '正在输出', done: false, text: 'Partial answer', tools: new Map(), permissions: new Map() }, elapsed: 1500 });
+  const details = task.body.elements.at(-1);
+  const legacy = { ...task, body: { elements: [
+    task.body.elements[0], { ...details, header: { ...details.header, title: { tag: 'plain_text', content: '详情与操作' } } },
+    task.body.elements[1], { tag: 'markdown', element_id: 'my_agents_reply_signature', content: sign },
+  ] } };
+  for (const original of [legacy, task]) {
+    const fixed = cards.interruptedTask(original);
+    assert.equal(fixed.body.elements.at(-1).header.title.content, sign + ' · 详情与操作');
+    assert.equal(JSON.stringify(fixed).split('[my-agents]').length, 2);
+    assert.equal(actions(fixed).some(action => action.action === 'stop'), false);
+  }
 });
 
 test('large CJK output and parallel tool calls stay within message size and component budgets', () => {

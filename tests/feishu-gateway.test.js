@@ -45,7 +45,10 @@ test('a shared conversation keeps its execution machine when the IM leader chang
   await f.gateway.receive(f.msg('/new'));
   f.panel.machineId = () => 'linux';
   f.panel.nodes = () => [{ id: 'mac', label: 'Mac', connected: true }];
+  f.panel.machines = () => [{ id: 'linux', label: '开发机' }, ...f.panel.nodes()];
+  await f.gateway.configure({ defaultMachine: 'linux' });
   await f.gateway.receive(f.msg('Continue on the original machine'));
+  assert.match(JSON.stringify(f.sent.at(-1).content.card), /执行机器：Mac（本会话绑定，新话题默认：开发机）/);
   assert.equal(f.calls.at(-1).machineId, 'mac');
   assert.equal(f.calls.at(-1).node, 'mac');
   assert.equal(f.calls.at(-1).cwd, fs.realpathSync(f.dir));
@@ -1425,7 +1428,7 @@ test('the card footer uses the response model from the same turn on a direct con
   };
   await f.gateway.receive(f.msg('Use the direct connection'));
   await f.gateway.stop();
-  const signature = f.updated.at(-1).card.body.elements.at(-1).content;
+  const signature = f.updated.at(-1).card.body.elements.at(-1).header.title.content;
   assert.match(signature, /Claude Code · direct-model/);
   assert.doesNotMatch(signature, /unrelated-model/);
 });
@@ -1469,7 +1472,7 @@ test('shared answers refer to the original completed turn, survive restart, and 
   const f = await fixture(t); await f.pair();
   f.panel.routeObservation = async ({sessionId,since}) => ({ request: {sessionId, startedAt:new Date(since).toISOString(), model:'actual-model', effort:'high', state:'success'} });
   await f.gateway.receive(f.msg('original', { senderName: '林舟' }));
-  assert.match(f.sent.at(-1).content.card.body.elements.at(-1).content, /Claude Code · 模型待确认/);
+  assert.match(f.sent.at(-1).content.card.body.elements.at(-1).header.title.content, /Claude Code · 模型待确认/);
   await new Promise(r => setTimeout(r, 50));
   const {id, card} = f.updated.at(-1);
   const {owner,key} = JSON.parse(JSON.stringify(card).match(/\{"action":"share_result"[^}]*\}/)[0]);
@@ -1479,7 +1482,7 @@ test('shared answers refer to the original completed turn, survive restart, and 
   await f.gateway.sendReply({token, card:{ schema:'2.0', body:{elements:[{tag:'markdown',content:'业务数据'}]} }});
   const signature = f.sent.at(-1).content.card.body.elements.at(-1).content;
   assert.match(signature, /Claude Code · actual-model \(high\).*@林舟/);
-  assert.equal(card.body.elements.at(-1).content,signature);
+  assert.equal(card.body.elements.at(-1).header.title.content, signature + ' · 详情与操作');
   await f.gateway.stop();
   const resumed = createFeishuGateway(f.options); await resumed.start();
   try {

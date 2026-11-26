@@ -15,6 +15,7 @@ const collapse = (title, elements, expanded = false, id) => ({ tag: 'collapsible
 function card(title, elements, { subtitle = 'my-agents', template = 'grey', summary = title, showHeader = true } = {}) {
   return { schema: '2.0', config: { width_mode: 'default', update_multi: true, summary: { content: clip(summary, 120) } }, ...(showHeader ? { header: { title: plain(clip(title, 64)), ...(subtitle ? { subtitle: plain(clip(subtitle, 100)) } : {}), template } } : {}), body: { padding: '12px 16px 12px 16px', vertical_spacing: '12px', elements } };
 }
+const TASK_DETAILS = 'task_details';
 const RESULT_SIGNATURE = 'my_agents_reply_signature';
 const SIGNATURE_DIVIDER = 'my_agents_reply_divider';
 const brandLink = '[my-agents](' + require('./package.json').homepage + ')';
@@ -42,8 +43,17 @@ function withReplySignature(original, signature = brandLink, engineLabel) {
     signature = signature.replace('[my-agents · GitHub ↗]', '[my-agents]');
     if (engineLabel) signature = signature.replace(brandLink, () => brandLink + ' · ' + signatureText(engineLabel));
   }
-  const elements = original.body.elements.filter(item => ![RESULT_SIGNATURE, SIGNATURE_DIVIDER].includes(item?.element_id));
-  elements.push({ tag: 'hr', element_id: SIGNATURE_DIVIDER }, { ...markdown(signature, true), element_id: RESULT_SIGNATURE });
+  const panel = original.body.elements.find(item => item?.element_id === TASK_DETAILS && item.tag === 'collapsible_panel' &&
+    /(?:^| · )(详情与操作|执行详情)$/.test(item.header?.title?.content));
+  const elements = original.body.elements.filter(item => item !== panel && ![RESULT_SIGNATURE, SIGNATURE_DIVIDER].includes(item?.element_id));
+  elements.push({ tag: 'hr', element_id: SIGNATURE_DIVIDER });
+  if (panel) {
+    const label = panel.header.title.content.split(' · ').at(-1);
+    const title = { tag: 'markdown', content: signature + ' · ' + label };
+    elements.push({ ...panel, header: { ...panel.header, title, icon_position: 'follow_text' } });
+  } else {
+    elements.push({ ...markdown(signature, true), element_id: RESULT_SIGNATURE });
+  }
   return { ...original, body: { ...original.body, elements } };
 }
 function resultSnapshot(text, signature) {
@@ -237,7 +247,6 @@ function currentSession({ binding, item, switched = false, exists = false, runni
   elements.push(muted('直接发送消息可继续当前会话。群和话题内已授权成员共用绑定；卡片操作限发起人。'));
   return card(switched ? '已切换到此会话' : pending ? '新会话已就绪' : '会话设置', elements, { subtitle: `${engine} · ${nodeLabel} · ${projectName}`, template: requests.length ? 'orange' : 'grey' });
 }
-const TASK_DETAILS = 'task_details';
 const TASK_REPLY = 'task_reply';
 const TASK_STATUS = 'task_status';
 
@@ -248,7 +257,7 @@ function taskDetails(elements, title = '详情与操作') {
   return panel;
 }
 
-function task({ binding, title, view, elapsed, nodeLabel = '', ...context }) {
+function task({ binding, title, view, elapsed, nodeLabel = '', defaultNodeLabel = '', ...context }) {
   context.session = sessionReference(binding);
   const tools = [...view.tools.values()], requests = view.done ? [] : [...view.permissions.values()];
   const detailed = context.detailed !== false;
@@ -287,7 +296,7 @@ function task({ binding, title, view, elapsed, nodeLabel = '', ...context }) {
     details.push(muted([
       ['会话信息', context.location, catalogOf(context).label(binding.engine || 'claude')].filter(Boolean).join(' · '),
       model, (route?.proxyName || route?.accountName) && '代理：' + escape(route.proxyName || route.accountName),
-      nodeLabel && '执行机器：' + escape(nodeLabel), '目录：' + escape(binding.cwd), '会话 ID：' + escape(binding.id),
+      nodeLabel && '执行机器：' + escape(nodeLabel) + (defaultNodeLabel ? '（本会话绑定，新话题默认：' + escape(defaultNodeLabel) + '）' : ''), '目录：' + escape(binding.cwd), '会话 ID：' + escape(binding.id),
       binding.worktree && '独立工作区 · ' + escape(binding.worktree.branch),
       view.nativeSession?.name && '原终端会话：' + escape(clip(view.nativeSession.name, 80)) + ' · ' + escape(String(view.nativeSession.id || binding.id).slice(0, 8)),
     ].filter(Boolean).join('\n')));
@@ -315,7 +324,9 @@ function task({ binding, title, view, elapsed, nodeLabel = '', ...context }) {
 function interruptedTask(original, engineLabel) {
   const output = JSON.parse(JSON.stringify(original));
   const previous = output.body.elements;
-  const signature = previous.find(item => item.element_id === RESULT_SIGNATURE)?.content || brandLink;
+  const title = previous.find(item => item.element_id === TASK_DETAILS)?.header?.title;
+  const signature = previous.find(item => item.element_id === RESULT_SIGNATURE)?.content ||
+    (title?.tag === 'markdown' && title.content.replace(/ · (详情与操作|执行详情)$/, '')) || brandLink;
   const controls = [];
   const clean = value => {
     if (!value || typeof value !== 'object') return value;

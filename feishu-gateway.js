@@ -639,7 +639,18 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       } catch (e) { await reply.close(); throw e; }
       return;
     }
-    const progress = () => widen(msg, { card: cards.task({ signature: signatureFor(msg, turn), replyFormat: replyFormat(msg), nodeLabel: nodeLabel(nodeOf(binding)), engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), detailed: detailed(msg), binding, title: prompt || '图片对话', view: { ...view, modelRoute: turn.route, reportedModel: turn.reportedModel }, taskMessageId: id, elapsed: now() - startedAt }) }).card;
+    const progress = () => {
+      const node = nodeOf(binding);
+      const defaultNode = config.defaultMachine === panel.machineId?.() ? 'local' : config.defaultMachine;
+      const card = cards.task({
+        signature: signatureFor(msg, turn), replyFormat: replyFormat(msg), nodeLabel: nodeLabel(node),
+        defaultNodeLabel: defaultNode && defaultNode !== node ? nodeLabel(defaultNode) : '',
+        engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), detailed: detailed(msg), binding,
+        title: prompt || '图片对话', view: { ...view, modelRoute: turn.route, reportedModel: turn.reportedModel },
+        taskMessageId: id, elapsed: now() - startedAt,
+      });
+      return widen(msg, { card }).card;
+    };
     const sent = await send(msg, { card: progress() }); rememberCard(sent, msg, binding);
     const transport = channel;
     const saveTask = card => {
