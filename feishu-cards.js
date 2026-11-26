@@ -173,7 +173,7 @@ function nodePicker({ node = 'local', nodes = [], engine = 'claude', sessionId, 
     const detail = here ? '● 当前执行机器' : item.id === 'local' ? '当前面板所在机器' : `${item.connected ? '在线' : '离线'}${item.platform ? ' · ' + escape(item.platform) : ''}`;
     elements.push(row(escape(item.label || item.id), detail, here ? null : item.connected ? button('在此机器接续', action(context, { action: 'use_node', node: item.id })) : null));
   }
-  if (nodes.length < 2) elements.push(markdown('还没有远程节点。请在「机器与引擎」添加执行机器。'));
+  if (nodes.length < 2) elements.push(markdown('还没有远程节点。请在「电脑与 AI 账号 → 连接电脑」添加电脑。'));
   elements.push(muted(`/node 节点名 路径 直接切到某台机器的指定目录，例如 /node ${escape(nodes[1]?.id || 'devbox')} ~/repos/项目。远程节点上的 Claude 和 Codex 都走面板的账号与抓包。`));
   if (sessionId) elements.push(buttons([button('返回会话设置', action(context, { action: 'view', id: sessionId }))]));
   return card('切换执行机器', elements, { subtitle: `my-agents · ${current}` });
@@ -381,7 +381,7 @@ function routes({ status, codex, pinned, sessionId, notice = '', now = Date.now(
     const current = mode === 'manual' && account.id === selected;
     elements.push(row(`${index + 1}. ${escape(clip(account.name, 40))}${account.id === pinned ? '（本会话固定）' : ''}`, escape(accountState(account, selected, mode, now)), current || !account.enabled ? null : button('使用此账号', action(context, { action: 'route', selected: account.id }))));
   });
-  if (!accounts.length) elements.push(markdown('还没有配置可用账号，请在面板「引擎与账号」添加或导入登录。'));
+  if (!accounts.length) elements.push(markdown('还没有配置可用账号，请在面板「电脑与 AI 账号 → AI 账号」添加或导入登录。'));
   const modes = [['failover', '自动故障转移'], ['round-robin', '轮询']].filter(([id]) => id !== mode).map(([id, label]) => button(label, action(context, { action: 'route', mode: id })));
   const controls = accounts.length ? modes : [];
   const advanced = accounts.length ? [button('清除账号冷却', action(context, { action: 'route', reset: true }))] : [];

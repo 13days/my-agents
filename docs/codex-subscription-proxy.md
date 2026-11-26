@@ -4,7 +4,7 @@
 
 ## 获取配置
 
-在「机器与引擎 → 引擎与账号 → Codex」账号池中点击「Claude Code 使用订阅代理」，复制 JSON 配置。模型从订阅账号的实际模型目录获取，不硬编码默认模型。配置包含独立代理密钥，不包含订阅 access token 或 refresh token。
+在「电脑与 AI 账号 → AI 账号 → Codex」账号池中点击「Claude Code 使用订阅代理」，复制 JSON 配置。模型从订阅账号的实际模型目录获取，不硬编码默认模型。配置包含独立代理密钥，不包含订阅 access token 或 refresh token。
 
 建议把配置保存到独立目录，例如 `~/.claude-codex-proxy/settings.json`，再运行：
 

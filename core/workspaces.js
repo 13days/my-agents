@@ -27,7 +27,7 @@ function createWorkspaces({ dir, selfId, machines, hostFor, leaderId = () => '' 
     const manualProject = manual && input.cwd ? config.projects.find(item => item.paths[id] === input.cwd) : null;
     const project = input.workspaceId ? config.projects.find(item => item.id === input.workspaceId) : manual ? manualProject : moved ? inferred : null;
     if (input.workspaceId && !project) throw fail('项目工作区不存在，请重新选择');
-    if (moved && !project && !(manual && input.cwd) && sourcePath && sourcePath !== hostFor(original)?.homeDir()) throw fail(`已选择接管机器 ${id}，但原项目尚未配置目录映射；请在「项目与目录」补充映射，或手动选择目标机器的项目`);
+    if (moved && !project && !(manual && input.cwd) && sourcePath && sourcePath !== hostFor(original)?.homeDir()) throw fail(`接手续聊前，请在「电脑与 AI 账号 → 项目文件夹」填写原项目在 ${id} 上的路径，或手动选择这台电脑上的项目`);
     if (moved && !manual && owner?.worktree) throw fail(`已选择接管机器 ${id}，但原独立工作区的未提交改动尚不能确认已同步。请手动选择目标机器的项目接续，或等待原机器恢复；不会自动重跑原任务`);
     const sameWorkspace = manual && id === original && input.cwd === owner?.project && (!input.workspaceId || project?.paths[id] === owner?.worktree?.repository);
     const cwd = (!moved || sameWorkspace) && owner?.project || (project ? project.paths[id] : manual ? input.cwd : moved ? '' : input.cwd) || config.defaults[id] || hostFor(id)?.homeDir();

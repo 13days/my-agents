@@ -24,7 +24,7 @@ test('self contained old card resolves after the card cache is evicted', async (
 });
 test('ambiguous and unavailable legacy owners never silently become a new local session', async () => {
   const f = fixture(); f.options.owns = async () => true;
-  await assert.rejects(createSessionResolver(f.options)(id), /多个机器/);
+  await assert.rejects(createSessionResolver(f.options)(id), /多台电脑都有这条会话记录/);
   f.options.owns = async () => { throw new Error('offline'); };
   await assert.rejects(createSessionResolver(f.options)(id), /原执行机器/);
   f.options.metadata = () => ({ deleted: true });

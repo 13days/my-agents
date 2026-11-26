@@ -39,5 +39,5 @@ test('offline execution follows the valid leader using project mappings; manual 
   assert.throws(()=>store.resolve({machineId:'mac',allowFailover:false},owner),/离线/);
   assert.throws(()=>store.resolve({machineId:'mac'}, {...owner,worktree:{repository:'/Users/test/app',branch:'task'}}),/独立工作区/);
   assert.equal(store.resolve({switchMachine:true,machineId:'linux',workspaceId:'app'},owner).handoff.reason,'manual');
-  assert.throws(()=>store.resolve({machineId:'mac'}, {...owner,project:'/Users/test/missing'}),/目录映射/);
+  assert.throws(()=>store.resolve({machineId:'mac'}, {...owner,project:'/Users/test/missing'}),/项目文件夹.*linux.*路径/);
 });

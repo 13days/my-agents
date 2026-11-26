@@ -13,7 +13,7 @@ test('the connections page loads cluster state as an optional capability', () =>
   assert.match(clusterSource, /role="alert"/);
   assert.match(clusterSource, /data\.enabled === false/);
   assert.match(clusterSource, /workspaces/);
-  assert.ok(html.indexOf('id="cluster-panel"') < html.indexOf('class="engine-tabs connection-tabs"'));
+  assert.ok(html.indexOf('id="cluster-panel"') < html.indexOf('class="account-tool-picker"'));
 });
 
 test('cluster controls transfer leadership and expose the join command', () => {
@@ -23,7 +23,7 @@ test('cluster controls transfer leadership and expose the join command', () => {
 });
 
 test('cluster and runtime-node copy stays explicit in Chinese and English', () => {
-  for (const text of ['项目与目录', 'Projects & directories', '负责飞书', 'Handles Feishu', '只运行任务', 'Runs tasks only', '添加机器', 'Add a machine', 'SSH 地址', 'SSH address']) assert.ok(html.includes(text), `missing UI copy: ${text}`);
+  for (const text of ['电脑与 AI 账号', 'Computers & AI accounts', '连接电脑', '项目文件夹', 'Project folders', 'AI 账号', 'AI accounts', '负责飞书', 'Handles Feishu', '只运行任务', 'Runs tasks only', '添加电脑', 'Add computer', 'SSH 地址', 'SSH address']) assert.ok(html.includes(text), `missing UI copy: ${text}`);
   assert.match(css, /\.machine-grid/);
   assert.match(css, /\.panel-layers/);
   assert.doesNotMatch(html, /data-node-kind/, 'one add-machine flow, no runtime/cluster choice');

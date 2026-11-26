@@ -22,7 +22,7 @@ function createSessionResolver({ metadata, selfId, nodes, owns, history, remembe
       try { return await owns(node.id, engine, id) ? { node: node.id, engine } : null; }
       catch { unavailable = true; return null; }
     })())))).filter(Boolean);
-    if (matches.length > 1) throw new Error('多个机器存在此会话，请在「机器与引擎」确认原执行机器后再切换');
+    if (matches.length > 1) throw new Error('多台电脑都有这条会话记录，请在「电脑与 AI 账号 → 连接电脑」确认运行该会话的电脑后再切换');
     if (!matches.length) {
       if (Object.keys(meta).length || hint.cwd || hint.project || unavailable) throw new Error('暂时无法确认旧会话的原执行机器；请检查原机器连接后重试，历史不会被删除');
       return null;

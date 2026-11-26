@@ -68,7 +68,7 @@ Both the installer and this start command keep your terminal proxy configuration
 
 ## Run tasks on several machines from one panel
 
-In **Devices & models → Machines → Add machine**, enter a passwordless SSH address or host alias. The panel prepares the runtime, installs the runner, and connects the device. Once it shows **Connected**, map the project’s path under **Projects & directories** and choose the device for your next conversation.
+In **Computers & AI accounts → Computers → Add computer**, enter a passwordless SSH address or host alias. The panel prepares the runtime, installs the runner, and connects the device. Once it shows **Connected**, map the project’s path under **Project folders** and choose the device for your next conversation.
 
 ![The design-kit checkout mapped to a different directory on each execution machine](https://raw.githubusercontent.com/13days/my-agents/main/docs/workspace-paths-preview.png)
 
@@ -86,7 +86,7 @@ An execution node is enough to run remote tasks. To keep receiving Feishu messag
 
 Claude Code or Codex manages the conversation, files, and tools. Your account and proxy supply the model. For example, use a fast model for a routine edit, then choose a reasoning model in the same Feishu thread for a difficult bug.
 
-1. In **Devices & models → Engines & accounts**, choose Claude Code or Codex and add a subscription or proxy account. Set **Default model for new sessions** from the available list. Each engine has its own default.
+1. In **Computers & AI accounts → AI accounts**, choose Claude Code or Codex and add a subscription or proxy account. Set **Default model for new chats** from the available list. Each engine has its own default.
 2. Send `/model` in a Feishu thread to choose the model for its next turn. Send `/model default` to restore the default. After a reply, open **详情与操作** to inspect the observed model and proxy. A fixed model mapping on the proxy can override the selection.
 3. To use a Codex subscription from Claude Code, open the Claude Code subscription proxy configuration in the Codex account pool. Use it in a separate Claude configuration directory. Claude Code still runs tools on the selected machine, while the Codex subscription handles model requests. [Configuration and supported features (Chinese)](docs/codex-subscription-proxy.md)
 

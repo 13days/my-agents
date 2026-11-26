@@ -275,7 +275,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
   // Moves this location to another machine, keeping the engine. Resumes that node's last session unless a directory is given.
   async function useNode(msg, node, dir = '') {
     const key = scope(msg), current = state.bindings[key], engine = current ? engineOf(current) : defaultEngine();
-    if (node !== 'local' && !remoteNodes().find(item => item.id === node)?.connected) throw new Error(`节点「${nodeLabel(node)}」未连接，请在「机器与引擎」检查执行通道`);
+    if (node !== 'local' && !remoteNodes().find(item => item.id === node)?.connected) throw new Error(`节点「${nodeLabel(node)}」未连接，请在「电脑与 AI 账号 → 连接电脑」查看连接状态`);
     const target = dir.replace(/^(["'])(.*)\1$/s, '$2');
     if (!target && current && nodeOf(current) === node) return currentCard(msg, current);
     rememberEngine(key, current);
