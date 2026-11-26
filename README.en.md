@@ -2,9 +2,9 @@
 
 [Quick start](#start-your-first-panel) · [User guide (Chinese)](docs/user-guide.md) · [中文](README.md)
 
-[![Play the 58-second product tour showing a terminal conversation continued in Feishu](https://raw.githubusercontent.com/13days/my-agents/main/docs/product-tour-en.png)](https://cdn.jsdelivr.net/gh/13days/my-agents@bdadbb6c08c8ef17e2872f091494e7f7a53bc1bf/docs/my-agents-intro.mp4)
+[![Play the 3 min 20 sec tour of session handoff, multi-machine tasks, model proxies and the assistant](https://raw.githubusercontent.com/13days/my-agents/main/docs/product-tour-en.png)](https://cdn.jsdelivr.net/gh/13days/my-agents@2a8d7841becf17cad868340333861091f4826f51/docs/my-agents-intro.mp4)
 
-Start a conversation in Codex or Claude Code, pick it up in Feishu on your phone, and continue in your browser or the original terminal. You can use Claude Code without access to a Claude model. Connect your own compatible gateway, or use GPT through the Codex subscription proxy with a ChatGPT subscription that includes Codex. [Download the tour (MP4)](https://raw.githubusercontent.com/13days/my-agents/main/docs/my-agents-intro.mp4)
+Start a conversation in Codex or Claude Code, pick it up in Feishu on your phone, and continue in your browser or the original terminal. You can use Claude Code without access to a Claude model. Connect your own compatible gateway, or use GPT through the Codex subscription proxy with a ChatGPT subscription that includes Codex. [Download the tour (MP4)](https://raw.githubusercontent.com/13days/my-agents/2a8d7841becf17cad868340333861091f4826f51/docs/my-agents-intro.mp4) · [Chinese and English captions (SRT)](docs/my-agents-intro.srt)
 
 ## Continue the same conversation in the terminal, chat, or browser
 

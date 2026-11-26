@@ -2,9 +2,9 @@
 
 [快速接入](#启动第一台) · [使用手册](docs/user-guide.md) · [English](README.en.md)
 
-[![播放 58 秒产品介绍：在飞书追问终端里那条产品更新](https://raw.githubusercontent.com/13days/my-agents/main/docs/product-tour-zh.png)](https://cdn.jsdelivr.net/gh/13days/my-agents@bdadbb6c08c8ef17e2872f091494e7f7a53bc1bf/docs/my-agents-intro.mp4)
+[![播放 3 分 20 秒产品介绍，从终端与飞书接续到多机执行、模型代理和助理](https://raw.githubusercontent.com/13days/my-agents/main/docs/product-tour-zh.png)](https://cdn.jsdelivr.net/gh/13days/my-agents@2a8d7841becf17cad868340333861091f4826f51/docs/my-agents-intro.mp4)
 
-在终端用 Codex 或 Claude Code 开始的对话，出门后可以在飞书接手，回到电脑也能在网页或原终端继续。没有 Claude 模型也能用 Claude Code 改文件、跑命令。你可以接入自己的兼容网关，也可以通过 Codex 订阅代理，让带 Codex 权限的 ChatGPT 订阅提供 GPT 模型。 [下载介绍视频（MP4）](https://raw.githubusercontent.com/13days/my-agents/main/docs/my-agents-intro.mp4)
+在终端用 Codex 或 Claude Code 开始的对话，出门后可以在飞书接手，回到电脑也能在网页或原终端继续。没有 Claude 模型也能用 Claude Code 改文件、跑命令。你可以接入自己的兼容网关，也可以通过 Codex 订阅代理，让带 Codex 权限的 ChatGPT 订阅提供 GPT 模型。 [下载介绍视频（MP4）](https://raw.githubusercontent.com/13days/my-agents/2a8d7841becf17cad868340333861091f4826f51/docs/my-agents-intro.mp4) · [中英字幕（SRT）](docs/my-agents-intro.srt)
 
 ## 在终端、飞书和网页接着聊
 
