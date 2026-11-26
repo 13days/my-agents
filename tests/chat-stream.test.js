@@ -54,6 +54,16 @@ test('first text delta is emitted before the assistant message or result exists'
   assert.deepEqual(h.events().filter(e => e.type === 'text').map(e => e.data.text), ['你', '好']);
 });
 
+test('only the main assistant response supplies the model for the current turn', () => {
+  const h = streamHarness();
+  h.session.submit('first', { prompt: 'hi' });
+  for (const [model, extra] of [['sub-model',{parent_tool_use_id:'tool'}], ['<synthetic>',{}], ['wrong',{error:'api_error'}], ['gpt-6.2',{}]]) {
+    h.send({type:'assistant', message:{model,content:[]}, ...extra});
+  }
+  const reports = h.events().filter(e => e.type === 'status' && e.data.kind === 'response_model');
+  assert.deepEqual(reports.map(e => [e.data.messageId, e.data.model]), [['first', 'gpt-6.2']]);
+});
+
 test('raw streaming IDs and final CLI IDs reconcile into one tool call', () => {
   const h = streamHarness();
   h.partial({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'raw-1', name: 'Bash', input: {} } });

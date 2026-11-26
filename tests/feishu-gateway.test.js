@@ -1371,6 +1371,23 @@ test('completed cards fetch execution-node route evidence and exclude a previous
  assert.doesNotMatch(JSON.stringify(f.updated.at(-1)),/gpt-6.1-sol/);
 });
 
+test('the card footer uses the response model from the same turn on a direct connection', async t => {
+  const f = await fixture(t); await f.pair();
+  f.panel.watch = (_session, listener) => {
+    const messageId = f.calls.at(-1).messageId;
+    listener('status', {messageId, kind:'response_model', model:'direct-model'});
+    listener('status', {messageId:'another-turn', kind:'response_model', model:'unrelated-model'});
+    listener('text', {messageId, text:'Done.'});
+    listener('done', {messageId});
+    return () => {};
+  };
+  await f.gateway.receive(f.msg('Use the direct connection'));
+  await f.gateway.stop();
+  const signature = f.updated.at(-1).card.body.elements.at(-1).content;
+  assert.match(signature, /Claude Code · direct-model/);
+  assert.doesNotMatch(signature, /unrelated-model/);
+});
+
 test('single-human groups can omit the mention, rechecking membership when the next message arrives', async t => {
   const f = await fixture(t); await f.pair();
   let count = '1';
@@ -1410,14 +1427,16 @@ test('shared answers refer to the original completed turn, survive restart, and 
   const f = await fixture(t); await f.pair();
   f.panel.routeObservation = async ({sessionId,since}) => ({ request: {sessionId, startedAt:new Date(since).toISOString(), model:'actual-model', effort:'high', state:'success'} });
   await f.gateway.receive(f.msg('original', { senderName: '林舟' }));
+  assert.match(f.sent.at(-1).content.card.body.elements.at(-1).content, /Claude Code · 模型待确认/);
   await new Promise(r => setTimeout(r, 50));
   const {id, card} = f.updated.at(-1);
   const {owner,key} = JSON.parse(JSON.stringify(card).match(/\{"action":"share_result"[^}]*\}/)[0]);
   const click = { messageId:id, chatId:'oc_private', operator:{openId:owner}, action:{value:{owner,key,action:'share_result',text:'untrusted'}} };
   const token = f.calls.at(-1).gatewayContext.match(/"token":"([a-f0-9]+)"/)[1];
+  await f.gateway.receive(f.msg('/codex'));
   await f.gateway.sendReply({token, card:{ schema:'2.0', body:{elements:[{tag:'markdown',content:'业务数据'}]} }});
   const signature = f.sent.at(-1).content.card.body.elements.at(-1).content;
-  assert.match(signature, /actual-model \(high\).*@林舟/);
+  assert.match(signature, /Claude Code · actual-model \(high\).*@林舟/);
   assert.equal(card.body.elements.at(-1).content,signature);
   await f.gateway.stop();
   const resumed = createFeishuGateway(f.options); await resumed.start();

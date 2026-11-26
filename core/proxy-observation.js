@@ -67,7 +67,7 @@ async function findTurnObservation({ sessionId, node, window, peers, lookup }) {
   async function requestFrom(machine) {
     const observation = await lookup(machine, sessionId, window);
     const row = observation?.request;
-    return row?.sessionId === sessionId && row.model ? withinTurn(row, window) : null;
+    return row?.sessionId === sessionId && (row.model || row.responseModel) ? withinTurn(row, window) : null;
   }
   const primary = await requestFrom(node).catch(() => null);
   if (primary) return { request: primary };

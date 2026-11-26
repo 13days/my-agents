@@ -97,6 +97,9 @@ test('task cards find a matching request on the proxy owner when the execution n
   const options = { sessionId: SID, node: 'executor', peers: ['executor', 'coordinator', 'offline', 'proxy'], window: { since, until },
     lookup: async machine => { if (machine === 'offline') throw Error('disconnected'); return records[machine]; } };
   assert.deepEqual(await findTurnObservation(options), records.proxy);
+  records.proxy.request.responseModel = 'reported-in-response';
+  delete records.proxy.request.model;
+  assert.deepEqual(await findTurnObservation(options), records.proxy);
   records.proxy = observation(SID, 601);
   assert.equal((await findTurnObservation(options)).request, null);
 });

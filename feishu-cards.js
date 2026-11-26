@@ -17,21 +17,31 @@ function card(title, elements, { subtitle = 'my-agents', template = 'grey', summ
 }
 const RESULT_SIGNATURE = 'my_agents_reply_signature';
 const SIGNATURE_DIVIDER = 'my_agents_reply_divider';
-const brandLink = '[my-agents · GitHub ↗](' + require('./package.json').homepage + ')';
+const brandLink = '[my-agents](' + require('./package.json').homepage + ')';
 function signatureText(value) {
   return clip(value, 80).replace(/\s+/g, ' ').trim().replace(/&/g, '&amp;')
     .replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/([\\`*_\[\]~|])/g, '\\$1');
 }
-function replySignature(route, name) {
+function replySignature(route, name, { engineLabel, reportedModel, requestedModel, finished = true } = {}) {
   const completed = route?.state === 'success' && (!route.childState || route.childState === 'success');
-  const model = completed && signatureText(route.responseModel || route.model);
-  const effort = model && /^(none|minimal|low|medium|high|xhigh|max|ultra)$/.test(route.effort) ? ` (${route.effort})` : '';
+  const observed = completed ? route.responseModel || route.model : '';
+  const model = signatureText(observed || (!route && reportedModel));
+  const effort = model && completed && /^(none|minimal|low|medium|high|xhigh|max|ultra)$/.test(route.effort) ? ` (${route.effort})` : '';
+  let modelText = finished ? '实际模型未记录' : '模型待确认';
+  if (model) modelText = model + effort;
+  else if (!finished && route?.state !== 'error' && (route?.childState || route?.state) === 'pending' && route.model) modelText = '调用中：' + signatureText(route.model);
+  else if (requestedModel) modelText = '请求：' + signatureText(requestedModel);
   const recipient = name && !/^(ou_|on_|oc_)/.test(name) && signatureText(name);
-  const details = [model && `**${model}${effort}**`, recipient && `发送给：@${recipient}`].filter(Boolean);
-  return details.length ? brandLink + " <font color='grey'>· " + details.join(' · ') + "</font>" : brandLink;
+  const details = [signatureText(engineLabel), modelText, recipient && `发送给：@${recipient}`].filter(Boolean);
+  return brandLink + " <font color='grey'>· " + details.join(' · ') + "</font>";
 }
-function withReplySignature(original, signature) {
+function withReplySignature(original, signature = brandLink, engineLabel) {
   if (!Array.isArray(original.body?.elements)) return original;
+  // Saved shares and interrupted cards can carry the previous linked label.
+  if (signature?.startsWith('[my-agents · GitHub ↗](')) {
+    signature = signature.replace('[my-agents · GitHub ↗]', '[my-agents]');
+    if (engineLabel) signature = signature.replace(brandLink, () => brandLink + ' · ' + signatureText(engineLabel));
+  }
   const elements = original.body.elements.filter(item => ![RESULT_SIGNATURE, SIGNATURE_DIVIDER].includes(item?.element_id));
   elements.push({ tag: 'hr', element_id: SIGNATURE_DIVIDER }, { ...markdown(signature, true), element_id: RESULT_SIGNATURE });
   return { ...original, body: { ...original.body, elements } };
@@ -40,9 +50,9 @@ function resultSnapshot(text, signature) {
   const excerpt = clip(text, 3600);
   return { text: excerpt, excerpt: excerpt !== text, signature };
 }
-function shareCard(result) {
+function shareCard(result, engineLabel) {
   const title = result.excerpt ? '任务结果 · 摘录' : '任务结果';
-  return withReplySignature(card(title, [markdown(result.text)], { subtitle: '', summary: result.text }), result.signature);
+  return withReplySignature(card(title, [markdown(result.text)], { subtitle: '', summary: result.text }), result.signature, engineLabel);
 }
 // Cards name engines through the catalog the gateway passes in (`context.engines`).
 const catalogOf = context => context.engines || engineCatalog();
@@ -272,7 +282,8 @@ function task({ binding, title, view, elapsed, nodeLabel = '', ...context }) {
     if (view.nativeAttached && !view.done) details.push(muted('断开飞书同步后，原终端的任务仍会运行。'));
     if (title) details.push(markdown('**本轮问题**\n' + escape(clip(title, 250)), true));
     const route = view.modelRoute;
-    const model = route?.model ? `${route.state === 'error' ? '尝试模型' : route.state === 'pending' ? '调用模型' : '实际调用模型'}：${escape(route.responseModel || route.model)}` : view.done ? '实际模型：未获取到本轮路由记录' : '正在选择模型…';
+    const observedModel = route?.responseModel || route?.model || view.reportedModel;
+    const model = observedModel ? `${route?.state === 'error' ? '尝试模型' : route?.state === 'pending' ? '调用模型' : '实际调用模型'}：${escape(observedModel)}` : view.done ? '实际模型：未获取到本轮路由记录' : '正在选择模型…';
     details.push(muted([
       ['会话信息', context.location, catalogOf(context).label(binding.engine || 'claude')].filter(Boolean).join(' · '),
       model, (route?.proxyName || route?.accountName) && '代理：' + escape(route.proxyName || route.accountName),
@@ -296,12 +307,12 @@ function task({ binding, title, view, elapsed, nodeLabel = '', ...context }) {
   elements.push(taskDetails(details, detailed ? '详情与操作' : '执行详情'));
   const summary = [view.phase, clip(answer || (detailed && title), 90)].filter(Boolean).join(' · ');
   const output = card(phase, elements, { showHeader: attention, subtitle: '', template: failed ? 'red' : 'orange', summary });
-  return withReplySignature(output, context.signature || replySignature(view.modelRoute));
+  return withReplySignature(output, context.signature || replySignature(view.modelRoute, '', { engineLabel: catalogOf(context).label(binding.engine || 'claude'), reportedModel: view.reportedModel, finished: view.done === true }));
 }
 
 // Stored progress cards may predate the compact layout. Keep the reply and
 // historical details, but only restore controls that still work after restart.
-function interruptedTask(original) {
+function interruptedTask(original, engineLabel) {
   const output = JSON.parse(JSON.stringify(original));
   const previous = output.body.elements;
   const signature = previous.find(item => item.element_id === RESULT_SIGNATURE)?.content || brandLink;
@@ -339,7 +350,7 @@ function interruptedTask(original) {
   output.header = { title: plain('进度同步已中断'), template: 'orange' };
   output.config.summary = { content: '网关已重启，执行结果尚未确认，请先查看最近对话' };
   output.body.elements = elements;
-  return withReplySignature(output, signature);
+  return withReplySignature(output, signature, engineLabel);
 }
 const MODE_NAMES = { manual: '手动', failover: '自动故障转移', 'round-robin': '轮询' };
 function accountState(account, selected, mode, now) {

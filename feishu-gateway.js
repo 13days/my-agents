@@ -136,13 +136,15 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     const meta = catalog().get(engine);
     return meta?.cliEnv ? `${meta.short || meta.label} 的工具环境提供 ${meta.cliEnv}；必要时运行 "$${meta.cliEnv}" --version 验证。` : '';
   }
-  const signatureFor = (msg, route) => cards.replySignature(route, inbox.userName(config.appId, msg.senderId) || msg.senderName);
+  const signatureFor = (msg, turn, route = turn.route) => cards.replySignature(route, inbox.userName(config.appId, msg.senderId) || msg.senderName, {
+    engineLabel: catalog().label(turn.engine), requestedModel: turn.requestedModel, reportedModel: turn.reportedModel, finished: turn.until != null,
+  });
   async function observedRoute(turn) {
     if (turn.since == null || !panel.routeObservation) return null;
     try {
       const request = (await panel.routeObservation(turn))?.request;
       const at = Date.parse(request?.startedAt);
-      if (request?.sessionId === turn.sessionId && request.model && at >= turn.since && at <= (turn.until ?? Infinity)) return request;
+      if (request?.sessionId === turn.sessionId && (request.model || request.responseModel) && at >= turn.since && at <= (turn.until ?? Infinity)) return request;
     } catch {}
     return null;
   }
@@ -151,7 +153,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     for (const [token, target] of replyTargets) if (target.expires <= now()) replyTargets.delete(token);
     const token = crypto.randomBytes(24).toString('hex');
     replyTargets.set(token, { turn, appId: config.appId, msg: { senderName: msg.senderName, messageId: msg.messageId, senderId: msg.senderId, chatId: msg.chatId, chatType: msg.chatType, threadId: threadOf(msg), rootId: msg.rootId }, expires: now() + 2 * 60 * 60 * 1000 });
-    const binding = state.bindings[scope(msg)], engine = binding ? engineOf(binding) : defaultEngine(), node = binding ? nodeOf(binding) : 'local';
+    const { engine, node } = turn;
     const cli = panel.engineInfo?.(engine, node);
     const where = node === 'local' ? '本机' : `远程节点「${nodeLabel(node)}」上的`;
     const runtime = cli ? `当前会话由 my-agents 直接启动${where} ${catalog().label(engine)} CLI，实际运行版本为 ${cli.version || '未检测'}，可执行文件为 ${JSON.stringify(cli.path)}。核实当前引擎版本时请以该进程信息为准，不要把 PATH 中其他安装的版本或推测的 SDK 版本当作当前版本。${cliEnvHint(engine)}` : '';
@@ -165,7 +167,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (!!input.card === (typeof input.text === 'string')) throw new Error('请提供 card 或 text 中的一项');
     if (input.card && (typeof input.card !== 'object' || Array.isArray(input.card) || input.card.schema !== '2.0')) throw new Error('请提供飞书 JSON 2.0 卡片对象');
     if (Buffer.byteLength(JSON.stringify(input.card || input.text)) > 28000) throw new Error('单条内容过大，请拆分发送');
-    const card = input.card && cards.withReplySignature(input.card, signatureFor(target.msg, await observedRoute(target.turn)));
+    const card = input.card && cards.withReplySignature(input.card, signatureFor(target.msg, target.turn, await observedRoute(target.turn) || target.turn.route));
     if (card && (target.appId !== config.appId || !allowed(target.msg) || !channel || !config.enabled || target.expires <= now())) throw new Error('原对话当前未获准发送');
     const result = await send(target.msg, card ? { card } : { text: input.text });
     return { ok: true, messageId: result?.messageId, chatId: target.msg.chatId, threadId: threadOf(target.msg) };
@@ -583,7 +585,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     if (!prompt && !images.length) throw new Error('请发送文字或图片');
     const id = msg.turnId || messageUUID(msg.messageId), view = { text: '', tools: new Map(), reasoning: new Map(), permissions: new Map(), phase: mode === 'queue' ? '已排队' : '正在处理', done: false, accepted: false };
     const startedAt = now();
-    const turn = { sessionId: binding.id, node: nodeOf(binding), since: mode === 'queue' ? null : startedAt };
+    const turn = { sessionId: binding.id, node: nodeOf(binding), engine: engineOf(binding), requestedModel: selectedModel(binding), since: mode === 'queue' ? null : startedAt };
     const watchTurn = listener => panel.watch(binding.id, (event, data = {}) => {
       if (event === 'turn' && data.id === id) {
         turn.since = Math.max(startedAt, Date.parse(data.timestamp) || startedAt);
@@ -591,6 +593,8 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       }
       if (data.messageId === id) {
         if (data.kind === 'model_session' && data.routeSessionId) turn.sessionId = data.routeSessionId;
+        if (event === 'status' && data.kind === 'response_model' && turn.until == null) turn.reportedModel = data.model;
+        if (data.kind === 'native_attachment') turn.requestedModel = '';
         if (event === 'done' && data.sessionId) turn.sessionId = data.sessionId;
         if (event === 'done' || event === 'error') turn.until ??= Date.parse(data.timestamp) || now();
       }
@@ -608,14 +612,14 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       } catch (e) { await reply.close(); throw e; }
       return;
     }
-    const progress = () => widen(msg, { card: cards.task({ signature: signatureFor(msg, view.modelRoute), replyFormat: replyFormat(msg), nodeLabel: nodeLabel(nodeOf(binding)), engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), detailed: detailed(msg), binding, title: prompt || '图片对话', view, taskMessageId: id, elapsed: now() - startedAt }) }).card;
+    const progress = () => widen(msg, { card: cards.task({ signature: signatureFor(msg, turn), replyFormat: replyFormat(msg), nodeLabel: nodeLabel(nodeOf(binding)), engines: catalog(), owner: msg.senderId, key, location: contextLabel(msg), detailed: detailed(msg), binding, title: prompt || '图片对话', view: { ...view, modelRoute: turn.route, reportedModel: turn.reportedModel }, taskMessageId: id, elapsed: now() - startedAt }) }).card;
     const sent = await send(msg, { card: progress() }); rememberCard(sent, msg, binding);
     const transport = channel;
     const saveTask = card => {
       const origin = state.cards[sent.messageId];
       if (origin) {
         origin.canContinue = view.accepted && view.done && view.phase === '失败';
-        if (view.done && view.phase === '已完成' && view.text.trim()) origin.result = cards.resultSnapshot(view.text, signatureFor(msg, view.modelRoute));
+        if (view.done && view.phase === '已完成' && view.text.trim()) origin.result = cards.resultSnapshot(view.text, signatureFor(msg, turn));
       }
       state.taskCards[sent.messageId] = { appId: config.appId, sessionId: binding.id, done: view.done, card, updatedAt: now(), owner: msg.senderId, chatId: msg.chatId, chatType: msg.chatType };
       persist();
@@ -632,7 +636,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       try {
         const terminal = view.done;
         const observation = await observedRoute(turn);
-        if (observation) view.modelRoute = observation;
+        if (observation) turn.route = observation;
         const card = progress(); saveTask(card);
         updating = transport.updateCard(sent.messageId, card);
         await updating; updateFailures = 0;
@@ -860,7 +864,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (value.action === 'share_result') {
         if (!origin?.result || origin.owner !== msg.senderId || origin.chatId !== msg.chatId || origin.key !== key) throw new Error('请在原任务卡片上生成分享卡');
         if (origin.shareMessageId) return;
-        const content = { card: cards.shareCard(origin.result) };
+        const content = { card: cards.shareCard(origin.result, catalog().label(origin.engine)) };
         const api = channel.rawClient?.im?.v1?.message;
         if (api?.reply) {
           const result = await api.reply({ path: { message_id: msg.messageId }, data: { msg_type: 'interactive',
@@ -980,7 +984,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (saved.appId !== config.appId) continue;
       let card = saved.card;
       if (!saved.done) {
-        card = cards.interruptedTask(card);
+        card = cards.interruptedTask(card, catalog().label(state.cards[messageId]?.engine));
         if (state.cards[messageId]) state.cards[messageId].canContinue = false;
       }
       try { await channel.updateCard(messageId, card); delete state.taskCards[messageId]; persist(); }

@@ -24,7 +24,7 @@ Send your bot a task like this:
 
 > /new Read this week’s merged changes and write three updates I can share with the design team.
 
-Choose a project and an engine, then submit. The task card updates as the agent works. Reply in the thread to ask for a revision. To share the answer, open **详情与操作 → 生成分享卡** at the bottom of the finished task and forward the resulting card. It contains the answer and a link back here.
+Choose a project and an engine, then submit. The task card updates as the agent works. Reply in the thread to ask for a revision. To share the answer, open **详情与操作 → 生成分享卡** at the bottom of the finished task and forward the resulting card. The footer shows the engine and, when available, the model that answered. Click **my-agents** to open this repository.
 
 ## Start your first panel
 

@@ -107,6 +107,9 @@ function openClaudeSession({ host, cli, env, cwd, sessionId, resume, model, sett
       if (ev?.type === 'content_block_delta' && ev.delta?.type === 'input_json_delta' && streamingTools.has(ev.index)) send('tool_input', { id: streamingTools.get(ev.index).id, text: ev.delta.partial_json || '' });
     } else if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
       syncToolResults();
+      if (!msg.parent_tool_use_id && !msg.error && typeof msg.message.model === 'string' && msg.message.model && msg.message.model !== '<synthetic>') {
+        send('status', { kind: 'response_model', model: msg.message.model });
+      }
       for (const block of msg.message.content) {
         if (block.type === 'text' && block.text && !turnStreamed) { sentText = true; send('text', { text: block.text }); }
         else if (block.type === 'tool_use') {
