@@ -409,3 +409,40 @@ test('model mappings are validated before saving, failed discovery preserves con
  await f.router.saveValidated({mode:'manual',selected:'a0',accounts:[{...f.accounts[0],modelMap:{'*':'valid'}}]});assert.equal(f.router.status().accounts[0].modelMap['*'],'valid');
  online=false;await assert.rejects(f.router.saveValidated({mode:'manual',selected:'a0',accounts:[{...f.accounts[0],token:'changed',modelMap:{'*':'other'}}]}),/无法验证/);assert.equal(f.router.status().accounts[0].modelMap['*'],'valid');
 });
+
+test('local /api/hello connectivity probes return 200 without hitting upstreams or cooling accounts', async t => {
+  let primaryHits = 0, backupHits = 0;
+  const f = await fixture(t, [
+    (req, res, raw) => {
+      primaryHits++;
+      if (req.url.startsWith('/api/hello')) { res.writeHead(403); res.end('forbidden'); return; }
+      reply(req, res, raw);
+    },
+    (req, res, raw) => { backupHits++; reply(req, res, raw); },
+  ]);
+  f.router.save({ mode: 'manual', selected: 'a0', accounts: f.accounts });
+
+  const headRes = await fetch(f.url + '/api/hello', { method: 'HEAD' });
+  assert.equal(headRes.status, 200);
+  assert.equal(await headRes.text(), '');
+
+  const getRes = await fetch(f.url + '/api/hello?check=1', { method: 'GET' });
+  assert.equal(getRes.status, 200);
+  assert.deepEqual(await getRes.json(), { message: 'hello' });
+
+  // Cross-origin requests remain blocked even on /api/hello.
+  const corsRes = await fetch(f.url + '/api/hello', { method: 'HEAD', headers: { origin: 'https://foreign.example' } });
+  assert.equal(corsRes.status, 403);
+
+  assert.equal(primaryHits, 0);
+  assert.equal(backupHits, 0);
+  assert.equal(f.captures.length, 0);
+  assert.equal(f.router.status().accounts[0].cooldownUntil, undefined);
+
+  // Subsequent model traffic still routes to the selected primary account.
+  const msgRes = await f.send();
+  assert.equal(msgRes.status, 200);
+  assert.equal((await msgRes.json()).id, 'Bearer secret-0');
+  assert.equal(primaryHits, 1);
+  assert.equal(backupHits, 0);
+});
