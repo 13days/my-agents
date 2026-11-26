@@ -1,0 +1,189 @@
+1
+00:00:00,550 --> 00:00:03,974
+周会前，我在项目目录打开 Codex，
+Before our weekly meeting, I open Codex in the project folder
+
+2
+00:00:04,128 --> 00:00:08,883
+请它把这周合入的改动整理成三条，发给设计组。
+and ask for three updates on this week’s changes for the design team.
+
+3
+00:00:09,545 --> 00:00:14,024
+出门后，同事问我，第二条对用户有什么影响？
+While I’m out, a colleague asks how the second change affects users.
+
+4
+00:00:14,295 --> 00:00:18,920
+我打开飞书，给机器人发「/sessions 产品更新」。
+I open Feishu and send the bot “/sessions 产品更新” to find the conversation.
+
+5
+00:00:19,170 --> 00:00:23,532
+核对项目和上次问的问题，点「切换到此会话」，
+I check the project and the last question, then select the session.
+
+6
+00:00:23,670 --> 00:00:27,635
+就能直接追问：「把第二条展开，举个例子。」
+I can ask, “Expand the second point and give me an example.”
+
+7
+00:00:27,920 --> 00:00:32,571
+如果这份更新是在 Claude Code 里写的，也能这样接着聊。
+The same handoff works if I started the update in Claude Code.
+
+8
+00:00:33,758 --> 00:00:36,852
+答复就出现在原来的飞书话题里。
+The reply appears in the original Feishu thread.
+
+9
+00:00:37,128 --> 00:00:41,928
+我打开卡片底部的「详情与操作」，点「生成分享卡」，
+I open Details & actions at the bottom of the card and choose Create share card.
+
+10
+00:00:42,045 --> 00:00:45,048
+确认正文，再转发到设计群。
+I check the text and forward it to the design group.
+
+11
+00:00:45,295 --> 00:00:51,905
+同事收到的是一张只读卡片，能看到这次的答复、使用的引擎和模型。
+My colleagues get a read-only card with the answer, the engine, and the model.
+
+12
+00:00:52,170 --> 00:00:55,833
+点底部的 my-agents，还能打开项目仓库。
+The my-agents link at the bottom opens the project repository.
+
+13
+00:00:56,503 --> 00:01:00,823
+回到电脑，我在网页的「对话」里打开刚才那一条。
+Back at my desk, I open the same session under Conversations.
+
+14
+00:01:01,087 --> 00:01:08,296
+终端里写的初稿、飞书里的追问都在，可以继续改，也可以回到原终端接着做。
+The terminal draft and Feishu follow-up are both there. I can edit here or return to my terminal.
+
+15
+00:01:09,467 --> 00:01:12,427
+这份更新里有一项改动需要验证。
+One of these changes still needs verification.
+
+16
+00:01:12,712 --> 00:01:20,205
+我在同一个面板里让 Mac 上的 Claude Code 检查代码，再让 Linux 开发机上的 Codex 跑测试。
+From one panel, I ask Claude Code on the Mac to review the code and Codex on the Linux dev machine to run the tests.
+
+17
+00:01:20,462 --> 00:01:26,410
+同一个项目，在工作站、开发机和构建机上可以放在不同目录。
+The workstation, dev machine, and build machine can each have their own checkout.
+
+18
+00:01:26,670 --> 00:01:31,390
+选好机器，任务就在那台机器的项目目录里执行。
+Once I choose a machine, the task runs in its project folder.
+
+19
+00:01:32,045 --> 00:01:35,926
+Mac 开启保活，屏幕熄了也能继续接任务。
+With keep-awake enabled, the Mac can take tasks even when the display is off.
+
+20
+00:01:36,212 --> 00:01:40,050
+如果部署了三台完整面板，即使 Mac 关机，
+With a full panel on each of three machines, the Mac can shut down.
+
+21
+00:01:40,170 --> 00:01:46,195
+只要另外两台保持在线，开发机就能接手后续发来的飞书消息。
+As long as the other two stay online, the dev machine can take over new Feishu messages.
+
+22
+00:01:47,383 --> 00:01:51,848
+如果你习惯用 Claude Code，手上有自己的模型网关，
+If you like working in Claude Code and already have a model gateway,
+
+23
+00:01:52,003 --> 00:01:59,956
+只要网关兼容 Anthropic Messages API，就可以在「AI 账号」里点「连接自定义代理」，
+choose Connect a custom proxy under AI accounts if your gateway supports the Anthropic Messages API.
+
+24
+00:02:00,087 --> 00:02:02,124
+选用网关提供的模型。
+You can use the models your gateway provides.
+
+25
+00:02:02,795 --> 00:02:10,952
+如果你已经有带 Codex 权限的 ChatGPT 订阅，这一个订阅也能给两种工具用。
+A ChatGPT subscription that includes Codex can power both coding tools.
+
+26
+00:02:11,212 --> 00:02:17,208
+登录后，既可以在 Codex 里工作，也可以选择「使用 Codex 订阅代理」，
+After signing in, use Codex directly or choose Use Codex subscription proxy.
+
+27
+00:02:17,337 --> 00:02:21,071
+让 GPT 给 Claude Code 提供回答。
+GPT can then answer in Claude Code.
+
+28
+00:02:21,337 --> 00:02:27,076
+文件还是由 Claude Code 在你选的电脑上修改，命令也在那里运行。
+Claude Code edits files and runs commands on the computer you selected.
+
+29
+00:02:27,753 --> 00:02:30,895
+你可以给两个工具分别设默认模型。
+Each tool can have its own default model.
+
+30
+00:02:31,170 --> 00:02:37,733
+想给某个飞书话题换模型，发「/model」选一个，下一轮就会用上。
+Send “/model” in a Feishu thread to choose a model for the next turn.
+
+31
+00:02:38,003 --> 00:02:42,629
+网关有固定映射时，以网关实际调用的模型为准。
+If your gateway has a fixed mapping, it determines which model handles the request.
+
+32
+00:02:43,800 --> 00:02:47,410
+周会前，设计群里又补了两条意见。
+Before the meeting, two more comments arrive in the design group.
+
+33
+00:02:47,670 --> 00:02:54,955
+接入个人飞书后，助理会结合是谁发的、后面怎么回复、现有任务做到哪一步，
+With my Feishu account connected, the assistant considers the senders, follow-ups, and progress on existing work.
+
+34
+00:02:55,087 --> 00:02:57,619
+把相关消息合成一条建议。
+It groups the related messages into one suggestion.
+
+35
+00:02:57,878 --> 00:03:05,035
+我核对后点确认，两条意见就送回刚才的会话，不用再复制一遍聊天记录。
+I review it and approve. Both comments go to the same session, saving me a copy and paste.
+
+36
+00:03:06,217 --> 00:03:11,255
+装好 Node.js 后，在终端运行屏幕上的命令，
+With Node.js installed, I run the command on screen
+
+37
+00:03:11,378 --> 00:03:13,590
+打开浏览器里的本地面板。
+and open the local panel in my browser.
+
+38
+00:03:13,837 --> 00:03:18,671
+连上飞书，就可以从手头正在做的那条对话开始。
+Once Feishu is connected, I can pick up the conversation I’m already working on.
