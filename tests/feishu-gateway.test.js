@@ -234,6 +234,48 @@ test('a transient final card update failure is retried instead of losing the com
   assert.equal(attempts, 2); assert.match(JSON.stringify(f.updated.at(-1).card), /A complete response/);
 });
 
+test('completed cards stay pending across a rejected edit and a stale Feishu readback', async t => {
+  const f = await fixture(t); await f.pair();
+  let attempts = 0, reads = 0, sentCard;
+  f.channel.rawClient = { im: { v1: { message: {
+    patch: async ({ data }) => {
+      sentCard = JSON.parse(data.content);
+      return ++attempts === 1 ? { code: 230020, msg: 'Rate limit' } : { code: 0 };
+    },
+    get: async ({ params }) => {
+      assert.equal(params.card_msg_content_type, 'user_card_content');
+      const card = ++reads === 1 ? f.sent.at(-1).content.card : sentCard;
+      return { code: 0, data: { items: [{ body: { content: JSON.stringify(card) } }] } };
+    },
+  } } } };
+  const pending = () => Object.values(JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json'))).taskCards);
+  const until = async predicate => {
+    const limit = Date.now() + 8000;
+    while (!predicate() && Date.now() < limit) await new Promise(resolve => setTimeout(resolve, 20));
+    assert.ok(predicate());
+  };
+  await f.gateway.receive(f.msg('Deliver my answer'));
+  await until(() => attempts === 1);
+  assert.equal(pending()[0].done, true);
+  await until(() => reads === 1);
+  assert.match(pending()[0].card.config.summary.content, /^已完成/);
+  await until(() => reads === 2 && !pending().length);
+  assert.equal(f.calls.length, 1);
+});
+
+test('an app with edit-only permissions can still deliver a completed card once', async t => {
+  const f = await fixture(t); await f.pair();
+  let edits = 0;
+  f.channel.rawClient = { im: { v1: { message: {
+    patch: async () => { edits++; return { code: 0 }; },
+    get: async () => { throw Object.assign(new Error('Missing read permission'), { response: { status: 403 } }); },
+  } } } };
+  await f.gateway.receive(f.msg('Reply using edit permissions'));
+  await f.gateway.stop();
+  assert.equal(edits, 1);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.dir, 'panel-feishu-state.json'))).taskCards, {});
+});
+
 test('unknown groups and senders are recorded before authorization and can then be selected explicitly', async t => {
   const f = await fixture(t);
   const group = { chatType: 'group', chatId: 'oc_discovered', senderId: 'ou_discovered', senderName: '发现的用户', mentionedBot: true };

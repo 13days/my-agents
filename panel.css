@@ -816,8 +816,15 @@ body[data-section="feishu"] #render { max-width: 1160px; }
 .gateway-side .btn { margin-top: 16px; }
 .gateway-runtime-settings { border-top: 1px solid var(--border); padding-top: 16px; }
 .gateway-runtime-settings .gateway-power { border: 0; padding-top: 6px; }
-.gateway-permission-columns { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(230px, 1fr); gap: 24px; align-items: start; }
-.gateway-access-card > summary { font-size: 15px; font-weight: 600; margin-bottom: 20px; }
+.gateway-permission-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+#render .gateway-policy > h3 { margin-bottom: 8px; }
+#render .gateway-policy .gateway-rule { margin: 0 0 15px; font-size: 13px; line-height: 1.6; }
+#render .gateway-policy h4 { margin: 18px 0 6px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 13px; }
+.gateway-policy .gateway-check { margin: 8px 0; }
+.gateway-policy .gateway-check input { flex: none; }
+.gateway-access-card .gateway-access > label { margin: 12px 0; }
+.gateway-permission-columns .chart { min-width: 0; margin: 0; }
+.gateway-access-card .gateway-contact-toolbar { margin-top: 16px; }
 .gateway-access-card label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
 .gateway-access-card .gateway-check { display: flex; align-items: center; gap: 8px; color: var(--text); }
 .gateway-access-card textarea { width: 100%; min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--text); font: 11px var(--mono); }

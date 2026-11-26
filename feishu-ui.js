@@ -39,26 +39,38 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
         <label>${esc(rt('默认执行机器', 'Default execution machine'))}<select id="feishu-default-machine">${(data.execution?.machines || []).map(machine => `<option value="${esc(machine.id)}">${esc(machine.label)} (${esc(machine.id)})</option>`).join('') || `<option value="local">${esc(rt('当前机器', 'This machine'))}</option>`}</select><small>${esc(rt('默认项目的目录属于这台机器，切换 IM 主节点时不会改变。', 'The default project belongs to this machine, independent of the IM leader.'))}</small></label><label>${esc(rt('Claude Code 模型（选填）', 'Claude Code model (optional)'))}<input id="feishu-model" value="${esc(c.model)}" placeholder="${esc(rt('沿用 Claude Code 默认模型', 'Use Claude Code default'))}"></label>
         <label>${esc(rt('默认项目', 'Default project'))}<div class="gateway-project"><input id="feishu-project" value="${esc(c.defaultProject)}" placeholder="${esc(rt('填写所选执行机器上的目录，或在飞书用 /new 选择', 'Enter a directory on the execution machine, or use /new in IM'))}"><button type="button" class="btn" id="feishu-project-pick">${esc(rt('选择文件夹', 'Choose folder'))}</button></div></label>
         <label class="gateway-check"><input type="checkbox" id="feishu-worktree" ${c.worktree !== false ? 'checked' : ''}>${esc(rt('新会话使用独立 Git worktree，避免并发任务修改同一目录', 'Use an isolated Git worktree for new sessions'))}</label><p class="route-muted">${esc(rt('从当前提交创建分支，未提交改动不带入；已有会话继续原目录。普通文件夹使用原目录。', 'Branches from the current commit without uncommitted changes. Existing sessions and non-Git folders retain their directory.'))}</p>
-        <details id="feishu-access" class="gateway-access" open><summary>${esc(rt('访问权限 · 自动发现的用户与群', 'Access · discovered users and groups'))}</summary>
-          <label class="gateway-check"><input type="checkbox" id="feishu-all-users" ${c.allowAllUsers ? 'checked' : ''}>${esc(rt('放行所有私聊用户（无需配对）', 'Allow all private-chat users (no pairing required)'))}</label>
-          <p class="gateway-access-warning">${esc(rt('私聊答复发在原消息的话题内。禁用用户会同时停用群聊和私聊。', 'Direct replies stay in the original message thread. Disabling a user blocks both group and direct chats.'))}</p>
-          <div id="feishu-known-users" class="gateway-contact-list"></div>
-          <label class="gateway-check"><input type="checkbox" id="feishu-paired-groups" ${c.pairedInGroups !== false ? 'checked' : ''}>${esc(rt('已配对用户可以在新群使用机器人', 'Let paired users use the bot in new groups'))}</label>
-          <label class="gateway-check"><input type="checkbox" id="feishu-all-groups" ${c.allowAllGroups ? 'checked' : ''}>${esc(rt('放行所有群', 'Allow all groups'))}</label>
-          <p class="route-muted">${esc(rt('开启后所有群可使用简洁模式：普通文字回复，处理时在原消息上显示思考表情，结束后移除。下方逐项勾选的群显示会话按钮和详细工具调用。群内任何人 @机器人即可使用，已禁用用户除外。群里只有一位真人时可以直接发消息。', 'Open groups receive plain text replies with a temporary thinking reaction. Individually selected groups also show session controls and detailed tool calls. Anyone can @mention the bot in allowed groups, except disabled users. The only human in a group can message without a mention.'))}</p>
-          ${c.appId ? `<p class="route-muted">${esc(rt('单人群免 @ 需要飞书应用开通「获取群组中所有消息」并发布版本。', 'Unmentioned messages require a published app with the group message permission.'))} <a href="${c.domain === 'lark' ? 'https://open.larksuite.com' : 'https://open.feishu.cn'}/app/${encodeURIComponent(c.appId)}/auth" target="_blank" rel="noreferrer">${esc(rt('管理飞书应用权限', 'Manage app permissions'))}</a></p>` : ''}
-          <div id="feishu-known-groups" class="gateway-contact-list"></div>
-          <p class="route-muted">${esc(rt('用户和群会在机器人收到消息后自动出现；未放行的消息也会记录，但不会执行任务。权限勾选自动保存，对后续新消息生效；旧消息不会自动重放。', 'Users and groups appear after the bot receives a message. Blocked messages are logged without running tasks. Access selections save automatically for new messages; old messages are not replayed.'))}</p>
-          <p id="feishu-access-result" class="route-muted" role="status" aria-live="polite"></p>
+        <section id="feishu-access" class="gateway-access-card">
+          <div class="gateway-permission-columns">
+            <section class="chart gateway-policy" aria-labelledby="feishu-group-heading">
+              <h3 id="feishu-group-heading">${esc(rt('群聊', 'Group chats'))}</h3>
+              <p class="gateway-rule" id="feishu-group-rule" aria-live="polite"></p>
+              <label class="gateway-check"><input type="checkbox" id="feishu-paired-groups" ${c.pairedInGroups !== false ? 'checked' : ''}>${esc(rt('允许已授权账号在任意群使用', 'Allow authorized accounts in any group'))}</label>
+              <label class="gateway-check"><input type="checkbox" id="feishu-all-groups" ${c.allowAllGroups ? 'checked' : ''}>${esc(rt('允许所有群的成员使用', 'Allow members of every group'))}</label>
+              <p class="route-muted">${esc(rt('多人群须直接 @机器人。只有一位真人时，获准使用的人可直接发消息。群主也遵循同一规则。', 'In groups, mention the bot directly. An authorized user can send without a mention when they are the only human. Group owners follow the same rules.'))}</p>
+              ${c.appId ? `<p class="route-muted">${esc(rt('单人群免 @ 需要已发布的群消息和群信息读取权限。', 'To reply without a mention, the published app needs group message and chat information permissions.'))} <a href="${c.domain === 'lark' ? 'https://open.larksuite.com' : 'https://open.feishu.cn'}/app/${encodeURIComponent(c.appId)}/auth" target="_blank" rel="noreferrer">${esc(rt('查看飞书权限', 'View app permissions'))}</a></p>` : ''}
+              <h4>${esc(rt('向全群开放的详细卡片', 'Groups with detailed cards'))}</h4>
+              <p class="route-muted">${esc(rt('勾选一个群，群内成员都可使用机器人和会话按钮。其他获准的群使用文字回复。', 'Select a group to give its members access and enable session controls. Other eligible groups receive text replies.'))}</p>
+              <div id="feishu-known-groups" class="gateway-contact-list"></div>
+            </section>
+            <section class="chart gateway-policy" aria-labelledby="feishu-dm-heading">
+              <h3 id="feishu-dm-heading">${esc(rt('私聊与账号授权', 'Direct messages and accounts'))}</h3>
+              <p class="gateway-rule" id="feishu-dm-rule" aria-live="polite"></p>
+              <label class="gateway-check"><input type="checkbox" id="feishu-all-users" ${c.allowAllUsers ? 'checked' : ''}>${esc(rt('允许所有人私聊，无需配对', 'Allow anyone to message the bot directly'))}</label>
+              <h4>${esc(rt('授权账号', 'Authorized accounts'))}</h4>
+              <p class="route-muted">${esc(rt('配对或勾选即可授权。禁用账号会同时阻止私聊和群聊。', 'Pair an account or select it below to authorize it. Disabling an account blocks both direct and group chats.'))}</p>
+              <div id="feishu-known-users" class="gateway-contact-list"></div>
+            </section>
+          </div>
+          <div class="gateway-contact-toolbar"><button type="button" class="btn" id="feishu-contact-refresh" ${contactNamesSupported ? '' : 'disabled'}>${esc(rt('同步飞书名称', 'Sync Feishu names'))}</button><p id="feishu-contact-sync-result" class="route-muted" role="status"></p><p id="feishu-access-result" class="route-muted" role="status">${esc(rt('勾选后自动保存，对新消息生效。', 'Selections save automatically and apply to new messages.'))}</p><button type="button" class="btn" id="feishu-access-retry" hidden>${esc(rt('重新保存', 'Retry save'))}</button></div>
           <details class="gateway-access"><summary>${esc(rt('手动添加或检查 ID（可选）', 'Edit IDs manually (optional)'))}</summary><label>${esc(rt('允许的用户 Open ID', 'Allowed user Open IDs'))}<textarea id="feishu-users" rows="3">${esc(c.allowedUserIds.join('\n'))}</textarea></label><label>${esc(rt('禁用的用户 Open ID', 'Disabled user Open IDs'))}<textarea id="feishu-disabled-users" rows="2">${esc((c.disabledUserIds || []).join('\n'))}</textarea></label><label>${esc(rt('允许的群 Chat ID', 'Allowed group chat IDs'))}<textarea id="feishu-chats" rows="2">${esc(c.allowedChatIds.join('\n'))}</textarea></label></details>
-        </details>
+        </section>
         <label class="gateway-check"><input type="checkbox" id="feishu-native-auto-accept" ${c.nativeAutoAccept ? 'checked' : ''}>${esc(rt('原终端自动接收消息，无需回电脑确认', 'Accept messages in the original terminal without desktop confirmation'))}</label>
         <p class="route-muted">${esc(rt('启用 Claude Code 用户级跨会话自动接收；其他本机跨会话消息也会自动接收。飞书用户和群授权仍按上方配置检查；不更改原窗口的工具权限。关闭后还原面板改动前的接收设置。', 'Enables the Claude Code user-level cross-session receive policy, including other local peer messages. Feishu access rules and terminal tool permissions still apply. Turning this off restores the prior receive setting.'))}</p>
         ${data.runtime.nativeInbox?.error ? `<p class="gateway-access-warning">${esc(data.runtime.nativeInbox.error)}</p>` : ''}
         <div class="gateway-power"><label class="gateway-check gateway-online"><input type="checkbox" id="feishu-online" ${c.keepAwake && data.runtime.autoStart ? 'checked' : ''} ${data.runtime.supported ? '' : 'disabled'}><span><strong>${esc(rt('保持在线', 'Stay online'))}</strong> · ${esc(rt('防止 Mac 睡眠，并在登录后自动启动面板', 'Keep the Mac awake and start the panel at login'))}</span></label><div hidden><label class="gateway-check"><input type="checkbox" id="feishu-awake" ${c.keepAwake ? 'checked' : ''} ${data.runtime.supported ? '' : 'disabled'}>${esc(rt('防止 Mac 闲置睡眠（合盖仍可能睡眠）', 'Prevent idle sleep (closing the lid may still force sleep)'))}</label><label class="gateway-check"><input type="checkbox" id="feishu-autostart" ${data.runtime.autoStart ? 'checked' : ''} ${data.runtime.supported ? '' : 'disabled'}>${esc(rt('登录后自动启动（下次登录生效）', 'Start automatically at login (effective next login)'))}</label></div><p class="route-muted">${esc(rt('需保持网络与供电。合盖、手动睡眠或关机时无法保证在线。飞书任务默认跳过 Claude Code 工具权限确认。', 'Keep the network and power connected. Closing the lid, forcing sleep or shutting down can take the gateway offline. Tasks skip Claude Code tool permission prompts by default.'))}</p></div>
         <div class="gateway-form-footer"><span id="feishu-save-result" role="status"></span><button class="btn primary" type="submit" id="feishu-save">${esc(rt('保存配置', 'Save configuration'))}</button></div>
       </form></section>
-      <div class="gateway-side"><section class="chart"><h3>${esc(rt('配对你的飞书账号', 'Pair your Feishu account'))}</h3><p class="route-muted">${esc(rt('连接后，在本机生成一次配对命令，私聊机器人发送。私聊需配对或勾选放行；放行群内任何人 @机器人即可使用。禁用用户在所有位置均不可用。', 'After connecting, generate a pairing command here and send it privately to the bot. Private chats require pairing or explicit permission. Anyone can @mention the bot in allowed groups. Disabled users cannot use it anywhere.'))}</p><button type="button" class="btn" id="feishu-pair">${esc(rt('生成配对命令', 'Generate pairing command'))}</button><div id="feishu-pair-result" hidden><input id="feishu-pair-command" readonly aria-label="Pairing command"><button class="btn" id="feishu-copy-pair">${esc(rt('复制', 'Copy'))}</button><p class="route-muted">${esc(rt('10 分钟有效；使用一次或重启 Panel 后失效。', 'Expires after 10 minutes, one use, or a Panel restart.'))}</p></div><p class="route-muted" id="feishu-paired-count"></p></section>
+      <div class="gateway-side"><section class="gateway-pair-card"><h4>${esc(rt('通过配对命令授权', 'Authorize with a pairing command'))}</h4><p class="route-muted">${esc(rt('生成一次性命令，让要授权的人在飞书私聊中发给机器人。', 'Generate a one-time command for the person to send to the bot in a direct message.'))}</p><button type="button" class="btn" id="feishu-pair">${esc(rt('生成配对命令', 'Generate pairing command'))}</button><div id="feishu-pair-result" hidden><input id="feishu-pair-command" readonly aria-label="Pairing command"><button class="btn" id="feishu-copy-pair">${esc(rt('复制', 'Copy'))}</button><p class="route-muted">${esc(rt('10 分钟有效；使用一次或重启 Panel 后失效。', 'Expires after 10 minutes, one use, or a Panel restart.'))}</p></div><p class="route-muted" id="feishu-paired-count"></p></section>
       <section class="chart"><h3>${esc(rt('在飞书里使用', 'Use it in Feishu'))}</h3><div class="gateway-command-list"><code>/sessions</code><span>${esc(rt('查看并点击切换会话', 'Browse and switch sessions'))}</span><code>/new</code><span>${esc(rt('在默认项目新建会话', 'Create a session in the default project'))}</span><code>/switch 2</code><span>${esc(rt('按列表序号切换', 'Switch by list number'))}</span><code>/model</code><span>${esc(rt('查看模型，下拉选择或输入 ID 切换', 'View and switch this session’s model'))}</span><code>/history</code><span>${esc(rt('查看最近对话', 'View recent messages'))}</span><code>/queue 内容</code><span>${esc(rt('排队执行', 'Queue a follow-up'))}</span><code>/steer 内容</code><span>${esc(rt('引导当前任务', 'Steer the current task'))}</span><code>/stop</code><span>${esc(rt('停止当前 Panel 任务', 'Stop the current panel task'))}</span></div><p class="route-muted">${esc(rt('私聊、各群、群内每个话题分别绑定会话；群和话题内已授权用户共用绑定。普通回复沿用当前位置的绑定。/sessions 切换绑定；/new 使用默认项目新建；/projects 选择其他项目。', 'Private chats, groups and individual topics have separate bindings, shared by allowed users within each group or topic. Replies use the current binding. Use /sessions to switch, /new for the default project, or /projects to choose another project.'))}</p></section></div></div>
     <section class="chart gateway-inbox"><div class="route-heading"><h3>${esc(rt('收到的消息', 'Received messages'))}</h3><span id="feishu-inbox-count" class="route-muted"></span><button class="btn" type="button" id="feishu-inbox-refresh">${esc(rt('刷新记录', 'Refresh log'))}</button></div>
       <p class="route-muted">${esc(rt('在本机完整保存飞书实际推送给机器人的消息、发送人和群信息，包括被权限拦截的消息。不会补采历史聊天；内容仅在此 Mac 保存。', 'Stores complete messages actually delivered to the bot on this Mac, including blocked messages. It does not fetch past chat history.'))}</p>
@@ -82,14 +94,8 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
   connection.querySelector('h3').innerHTML = `<span class="gateway-step">01</span>${esc(rt('连接机器人', 'Connect your bot'))}`;
   const side = columns.querySelector('.gateway-side');
   const pairing = side.firstElementChild;
-  pairing.classList.add('gateway-pair-card');
-  pairing.querySelector('h3').innerHTML = `<span class="gateway-step">02</span>${esc(rt('配对与授权', 'Pair your account'))}`;
-  const access = $('#feishu-access'); access.classList.add('chart', 'gateway-access-card');
-  access.querySelector(':scope > summary').textContent = rt('访问控制', 'Access control');
-  const contactToolbar = document.createElement('div'); contactToolbar.className = 'gateway-contact-toolbar';
-  contactToolbar.innerHTML = `<p class="route-muted">${esc(contactNamesSupported ? rt('显示飞书姓名和群名；获取不到时可添加本机备注。', 'Shows Feishu names. Add a local label when a name is unavailable.') : rt('重启面板后可同步姓名、群名和添加备注。', 'Restart the panel to sync names and add labels.'))}</p><button type="button" class="btn" id="feishu-contact-refresh" ${contactNamesSupported ? '' : 'disabled'}>${esc(rt('同步名称', 'Sync names'))}</button><p id="feishu-contact-sync-result" class="route-muted" role="status" aria-live="polite"></p>`;
-  access.querySelector(':scope > summary').after(contactToolbar);
-  const permissions = document.createElement('div'); permissions.className = 'gateway-permission-columns'; permissions.append(access, pairing);
+  const access = $('#feishu-access');
+  $('#feishu-known-users').after(pairing);
   const power = canvas.querySelector('.gateway-power');
   const powerDetails = document.createElement('details'); powerDetails.className = 'gateway-runtime-settings';
   const powerSummary = document.createElement('summary'); powerSummary.textContent = rt('运行与启动设置', 'Runtime & startup'); power.before(powerDetails); powerDetails.append(powerSummary, power);
@@ -110,7 +116,7 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
   const inbox = canvas.querySelector('.gateway-inbox');
   const help = canvas.querySelector('.gateway-setup'); help.open = false;
   const connectionPanel = document.createElement('section'); connectionPanel.append(columns, help);
-  const accessPanel = document.createElement('section'); accessPanel.append(permissions);
+  const accessPanel = document.createElement('section'); accessPanel.append(access);
   const messagesPanel = document.createElement('section'); messagesPanel.append(inbox);
   const tablist = document.createElement('div'); tablist.className = 'gateway-tabs'; tablist.setAttribute('role', 'tablist'); tablist.setAttribute('aria-label', rt('网关管理', 'Gateway management'));
   const panels = [['connection', rt('连接设置', 'Connection'), connectionPanel], ['access', rt('访问权限', 'Access'), accessPanel], ['messages', rt('消息记录', 'Messages'), messagesPanel]];
@@ -148,7 +154,7 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
     try { const spaces = await api('GET', 'workspaces'); if ($('#feishu-default-machine')?.value === id) $('#feishu-project').value = spaces.machines.find(machine => machine.id === id)?.defaultDirectory || ''; } catch (error) { toast(error.message, false); }
   }; syncProjectPicker();
   let setupWasActive = ['starting', 'waiting', 'completing'].includes(cliSetup.phase), hasCredentials = c.hasSecret, recoverExisting = false, callbackReady = !!c.cardCallbacksReady;
-  let autoStart = data.runtime.autoStart, owners = c.allowedUserIds.join('\n');
+  let autoStart = data.runtime.autoStart;
   const secretInput = $('#feishu-app-secret'), secretToggle = $('#feishu-secret-toggle');
   let secretDirty = false, loadedSavedSecret = false, secretRevision = 0;
   const hideSecret = () => {
@@ -209,24 +215,34 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
   };
   let contactsSignature = '', knownContacts = { users: [], groups: [] }, logCursor, logBusy = false;
   const ids = selector => new Set($(selector).value.split(/[\s,]+/).filter(Boolean));
-  let accessSave = Promise.resolve(), accessRevision = 0;
+  let accessSave = Promise.resolve(), accessRevision = 0, accessUnsaved = false;
+  const accessFields = { allowAllUsers: '#feishu-all-users', allowAllGroups: '#feishu-all-groups', pairedInGroups: '#feishu-paired-groups', allowedUserIds: '#feishu-users', disabledUserIds: '#feishu-disabled-users', allowedChatIds: '#feishu-chats' };
+  const accessInput = () => Object.fromEntries(Object.entries(accessFields).map(([key, selector]) =>
+    [key, $(selector).type === 'checkbox' ? $(selector).checked : [...ids(selector)]]));
+  let lastAccess = accessInput();
   const saveAccess = () => {
     const revision = ++accessRevision;
-    const input = { worktree: $('#feishu-worktree').checked, allowAllUsers: $('#feishu-all-users').checked, allowAllGroups: $('#feishu-all-groups').checked, pairedInGroups: $('#feishu-paired-groups').checked, allowedUserIds: [...ids('#feishu-users')], disabledUserIds: [...ids('#feishu-disabled-users')], allowedChatIds: [...ids('#feishu-chats')] };
+    const input = accessInput();
+    accessUnsaved = true;
+    $('#feishu-access-retry').hidden = true;
     $('#feishu-access-result').textContent = rt('正在保存权限…', 'Saving access…');
     accessSave = accessSave.then(async () => {
       try {
         const result = await api('PUT', 'feishu', input);
         if (!activeView() || !$('#feishu-access-result') || revision !== accessRevision) return;
-        owners = result.config.allowedUserIds.join('\n');
+        lastAccess = input; accessUnsaved = false;
         paint(result);
         $('#feishu-access-result').textContent = rt('权限已保存，新消息立即生效', 'Access saved. Applies to new messages immediately.');
       } catch (error) {
-        if (activeView() && $('#feishu-access-result') && revision === accessRevision) $('#feishu-access-result').textContent = rt('权限未保存：', 'Access not saved: ') + error.message + rt('。请重试或点击“保存配置”。', '. Retry or use Save configuration.');
+        if (activeView() && $('#feishu-access-result') && revision === accessRevision) {
+          $('#feishu-access-result').textContent = rt('权限未保存：', 'Access not saved: ') + error.message;
+          $('#feishu-access-retry').hidden = false;
+        }
       }
     });
     return accessSave;
   };
+  $('#feishu-access-retry').onclick = saveAccess;
   const editContactLabel = item => {
     const dialog = document.createElement('dialog'); dialog.className = 'contact-label-dialog';
     dialog.innerHTML = `<form><h3>${esc(rt('备注名称', 'Contact label'))}</h3><p class="route-muted">${esc(item.name || item.id)}</p><label>${esc(rt('本机备注', 'Local label'))}<input maxlength="80" autocomplete="off" spellcheck="false" placeholder="${esc(rt('例如：张三、产品讨论群', 'e.g. Alex, Product team'))}"></label><p class="route-muted">${esc(rt('仅在此面板显示，不修改飞书名称。清空后恢复显示飞书名称。', 'Used only in this panel. Clear it to show the Feishu name again.'))}</p><p class="contact-label-error" role="alert"></p><footer><button class="btn" type="button">${esc(rt('取消', 'Cancel'))}</button><button class="btn primary" type="submit">${esc(rt('保存', 'Save'))}</button></footer></form>`;
@@ -244,10 +260,20 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
   };
   const paintContacts = inbox => {
     if (inbox) knownContacts = inbox;
-    const signature = JSON.stringify([knownContacts, $('#feishu-users').value, $('#feishu-chats').value, $('#feishu-disabled-users').value, $('#feishu-all-users').checked, $('#feishu-all-groups').checked]);
+    const allGroups = $('#feishu-all-groups').checked, pairedGroups = $('#feishu-paired-groups').checked;
+    const allUsers = $('#feishu-all-users').checked, disabled = ids('#feishu-disabled-users');
+    const hasGroups = ids('#feishu-chats').size > 0;
+    const groupRule = allGroups ? rt('机器人加入的所有群，成员都可以使用。', 'Members of every group the bot has joined can use it.')
+      : pairedGroups ? rt('已授权账号可在机器人加入的任意群使用，无需逐群勾选。其他成员仅可在下方勾选的群使用。', 'Authorized accounts can use the bot in any group it has joined. Other members can use it in the selected groups below.')
+      : hasGroups ? rt('仅下方勾选的群允许成员使用。', 'Only members of the groups selected below can use the bot in a group.')
+      : rt('当前没有向成员开放的群。', 'Group access is currently closed.');
+    $('#feishu-group-rule').textContent = groupRule;
+    $('#feishu-dm-rule').textContent = allUsers ? rt('所有未禁用的账号都可私聊；跨群权限单独按授权名单判断。', 'Anyone except disabled accounts can send a direct message. Account-based group access uses the authorization list.')
+      : rt('只有已授权且未禁用的账号可以私聊机器人。', 'Only authorized accounts that are not disabled can send direct messages.');
+    const signature = JSON.stringify([knownContacts, $('#feishu-users').value, $('#feishu-chats').value, $('#feishu-disabled-users').value, $('#feishu-all-users').checked, $('#feishu-all-groups').checked, pairedGroups]);
     if (signature === contactsSignature) return;
     contactsSignature = signature;
-    for (const [kind, selector, hostId, allId] of [['users', '#feishu-users', '#feishu-known-users', '#feishu-all-users'], ['groups', '#feishu-chats', '#feishu-known-groups', '#feishu-all-groups']]) {
+    for (const [kind, selector, hostId] of [['users', '#feishu-users', '#feishu-known-users'], ['groups', '#feishu-chats', '#feishu-known-groups']]) {
       const selected = ids(selector), entries = new Map((knownContacts[kind] || []).map(item => [item.id, item]));
       for (const id of new Set([...selected, ...(kind === 'users' ? ids('#feishu-disabled-users') : [])])) if (!entries.has(id)) entries.set(id, { id, name: '', count: 0 });
       const host = $(hostId); host.replaceChildren();
@@ -255,14 +281,21 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
       for (const item of entries.values()) {
         const label = document.createElement('label'); label.className = 'gateway-contact';
         const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.dataset.contactId = item.id;
-        checkbox.checked = (kind === 'users' && $(allId).checked) || selected.has(item.id); checkbox.disabled = kind === 'users' && ($(allId).checked || ids('#feishu-disabled-users').has(item.id)); checkbox.title = kind === 'users' ? rt('允许私聊', 'Allow private chat') : ''; 
+        const blocked = kind === 'users' && disabled.has(item.id);
+        checkbox.checked = selected.has(item.id) && !blocked;
+        checkbox.disabled = blocked;
+        checkbox.setAttribute('aria-label', (kind === 'users' ? rt('授权账号', 'Authorize account') : rt('向全群开放详细卡片', 'Allow this group and enable detailed cards')) + ' ' + (item.displayName || item.name || item.id));
         const info = document.createElement('span'), name = document.createElement('strong'), detail = document.createElement('small');
         name.textContent = item.displayName || item.alias || item.name || (kind === 'groups' ? rt('未获取群名', 'Unnamed group') : rt('未获取姓名', 'Unnamed user')) + ' · ' + item.id.slice(-6);
         const title = document.createElement('span'); title.className = 'gateway-contact-title';
-        const source = document.createElement('span'); source.className = 'gateway-contact-source'; source.textContent = item.alias ? rt('备注', 'Label') : item.name ? rt('飞书', 'Feishu') : rt('名称待获取', 'Name unavailable'); title.append(name, source);
-        const contactId = document.createElement('span'); contactId.className = 'gateway-contact-id'; contactId.textContent = item.id; contactId.title = item.id;
-        const activity = document.createElement('span'); activity.className = 'gateway-contact-meta'; activity.textContent = [(item.count ? `${item.count} ${rt('条消息', 'messages')}` : ''), (item.mentionCount ? `@ ${item.mentionCount} ${rt('次', 'times')}` : ''), (kind === 'users' ? rt('勾选允许私聊', 'Select to allow private chat') : '')].filter(Boolean).join(' · ');
-        detail.append(contactId, activity);
+        title.append(name);
+        if (item.alias) { const source = document.createElement('span'); source.className = 'gateway-contact-source'; source.textContent = rt('备注', 'Label'); title.append(source); }
+        const activity = document.createElement('span'); activity.className = 'gateway-contact-meta';
+        const scope = kind === 'groups' ? (checkbox.checked ? rt('全群可用 · 详细卡片', 'All members · Detailed cards') : allGroups ? rt('全群可用 · 文字回复', 'All members · Text replies') : pairedGroups ? rt('限已授权账号', 'Authorized accounts only') : rt('未开放', 'Closed'))
+          : blocked ? rt('已禁用', 'Disabled') : checkbox.checked ? rt('已授权', 'Authorized') : allUsers ? rt('可私聊 · 未单独授权', 'Direct messages allowed · Not individually authorized') : rt('未授权', 'Not authorized');
+        activity.textContent = [scope, item.count ? `${item.count} ${rt('条消息', 'messages')}` : ''].filter(Boolean).join(' · ');
+        name.title = item.id;
+        detail.append(activity);
         if (item.alias && item.name && item.alias !== item.name) { const official = document.createElement('span'); official.className = 'gateway-contact-official'; official.textContent = rt('飞书名称：', 'Feishu name: ') + item.name; detail.prepend(official); }
         info.append(title, detail); label.append(checkbox, info); host.append(label);
         const actions = document.createElement('span'); actions.className = 'gateway-contact-actions';
@@ -273,11 +306,10 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
           block.type = 'button'; block.className = 'btn'; block.dataset.disableUser = item.id;
           block.textContent = disabled ? rt('解除禁用', 'Enable user') : rt('禁用', 'Disable');
           block.setAttribute('aria-pressed', String(disabled));
-          if (disabled) { name.textContent += rt(' · 已禁用', ' · Disabled'); checkbox.checked = false; }
           block.onclick = event => { event.preventDefault(); const current = ids('#feishu-disabled-users'); if (disabled) current.delete(item.id); else current.add(item.id); $('#feishu-disabled-users').value = [...current].join('\n'); paintContacts(); saveAccess(); };
           actions.append(block);
         }
-        checkbox.onchange = () => { const current = ids(selector); if (checkbox.checked) current.add(item.id); else current.delete(item.id); $(selector).value = [...current].join('\n'); saveAccess(); };
+        checkbox.onchange = () => { const current = ids(selector); if (checkbox.checked) current.add(item.id); else current.delete(item.id); $(selector).value = [...current].join('\n'); paintContacts(); saveAccess(); };
       }
     }
     for (const [selector, entries, placeholder] of [['#feishu-log-user', knownContacts.users || [], rt('所有用户', 'All users')], ['#feishu-log-chat', knownContacts.groups || [], rt('所有私聊和群', 'All chats')]]) {
@@ -331,8 +363,18 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
     $('#feishu-connection-note').textContent = leaderNote + (d.phase !== 'connected' && d.lastError ? connectionError : (d.bot ? `${d.bot} · ${rt('长连接接入', 'Long connection')}` : rt(`连接后，可在飞书接续 ${ENGINES.map(engine => engine.label).join(' 与 ')} 会话。`, `Connect to continue ${ENGINES.map(engine => engine.label).join(' and ')} sessions from Feishu.`)));
     $('#feishu-runtime').title = d.runtime.claudeCli || '';
     $('#feishu-runtime').textContent = `${d.runtime.claudeVersion ? 'Claude Code ' + d.runtime.claudeVersion + ' · ' : ''}${d.runtime.keepAwake ? (d.runtime.lidSleepDisabled ? rt('Mac 保活中（含合盖）', 'Mac kept awake, lid included') : rt('Mac 保活中（合盖仍会睡眠：终端运行 sudo pmset -a disablesleep 1 可关闭）', 'Mac kept awake (closing the lid still sleeps)')) : rt('未启用保活', 'Keep-awake off')} · ${d.runtime.autoStart ? rt('已配置登录启动', 'Login startup configured') : rt('未配置登录启动', 'Login startup off')}${d.runtime.backgroundService ? ' · ' + rt('后台服务运行中', 'Background service running') : ''}`;
-    $('#feishu-paired-count').textContent = d.config.allowAllUsers ? rt('当前放行所有私聊用户（禁用账号除外）', 'All private-chat users allowed except disabled accounts') : `${rt('已授权账号：', 'Allowed accounts: ')}${d.config.allowedUserIds.length}`;
-    if ($('#feishu-users').value === owners) { owners = d.config.allowedUserIds.join('\n'); $('#feishu-users').value = owners; }
+    const blocked = new Set(d.config.disabledUserIds || []);
+    $('#feishu-paired-count').textContent = rt('已授权账号 ', 'Authorized accounts: ') + d.config.allowedUserIds.filter(id => !blocked.has(id)).length;
+    if (!accessUnsaved) {
+      const current = accessInput();
+      for (const [key, selector] of Object.entries(accessFields)) {
+        if (JSON.stringify(current[key]) !== JSON.stringify(lastAccess[key]) || document.activeElement === $(selector)) continue;
+        const input = $(selector);
+        if (input.type === 'checkbox') input.checked = key === 'pairedInGroups' ? d.config[key] !== false : !!d.config[key];
+        else input.value = (d.config[key] || []).join('\n');
+        lastAccess[key] = input.type === 'checkbox' ? input.checked : [...ids(selector)];
+      }
+    }
     $('#feishu-inbox-count').textContent = `${d.inbox?.messageCount || 0} ${rt('条已保存', 'saved messages')}`;
     paintContacts(d.inbox);
   };
@@ -368,12 +410,12 @@ async function renderFeishuGateway(revision = ++imRenderRevision) {
       await accessSave;
       const input = { worktree: $('#feishu-worktree').checked, allowAllUsers: $('#feishu-all-users').checked, allowAllGroups: $('#feishu-all-groups').checked, pairedInGroups: $('#feishu-paired-groups').checked, enabled: $('#feishu-enabled').checked, appId: $('#feishu-app-id').value, appSecret: secretDirty ? secretInput.value : '', domain: $('#feishu-domain').value, defaultProject: $('#feishu-project').value, defaultMachine: $('#feishu-default-machine').value, defaultEngine: $('#feishu-default-engine').value, model: $('#feishu-model').value, keepAwake: $('#feishu-awake').checked, nativeAutoAccept: $('#feishu-native-auto-accept').checked, allowedUserIds: $('#feishu-users').value.split(/[\s,]+/).filter(Boolean), disabledUserIds: [...ids('#feishu-disabled-users')], allowedChatIds: $('#feishu-chats').value.split(/[\s,]+/).filter(Boolean) };
       if ($('#feishu-autostart').checked !== autoStart) input.autoStart = $('#feishu-autostart').checked;
-      const result = await api('PUT', 'feishu', input); autoStart = result.runtime.autoStart; owners = result.config.allowedUserIds.join('\n'); paint(result); $('#feishu-save-result').textContent = rt('已保存', 'Saved');
+      const result = await api('PUT', 'feishu', input); autoStart = result.runtime.autoStart; lastAccess = accessInput(); accessUnsaved = false; paint(result); $('#feishu-save-result').textContent = rt('已保存', 'Saved');
       $('#feishu-app-secret').placeholder = result.config.hasSecret ? rt('已保存，留空保持不变', 'Saved; leave blank to keep it') : '';
     } catch (error) { $('#feishu-save-result').textContent = error.message; }
     finally { secretInput.value = ''; secretDirty = false; hideSecret(); button.disabled = false; }
   };
   $('#feishu-pair').onclick = async () => { try { const result = await api('POST', 'feishu/pairing', {}); $('#feishu-pair-result').hidden = false; $('#feishu-pair-command').value = result.command; } catch (e) { toast(e.message, false); } };
   $('#feishu-copy-pair').onclick = async () => { try { await navigator.clipboard.writeText($('#feishu-pair-command').value); toast(rt('已复制', 'Copied')); } catch { $('#feishu-pair-command').select(); } };
-  feishuStatusTimer = setInterval(async () => { if (!activeView()) { stopFeishuPolling(); return; } try { paint(await api('GET', 'feishu')); } catch {} }, 3000);
+  feishuStatusTimer = setInterval(async () => { if (!activeView()) { stopFeishuPolling(); return; } const revision = accessRevision; try { const status = await api('GET', 'feishu'); if (revision === accessRevision) paint(status); } catch {} }, 3000);
 }

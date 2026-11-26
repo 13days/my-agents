@@ -6,7 +6,7 @@
 
 ![在飞书发任务、跟进进度并生成分享卡](https://raw.githubusercontent.com/13days/my-agents/main/docs/feishu-share.gif)
 
-*虚构任务演示，飞书部分按实际生成的卡片数据预览。*
+*动图录自网关生成的飞书卡片的本地预览。下面的截图来自真实面板，使用示例账号、项目和对话。*
 
 ## 在终端、飞书和网页接着聊
 
@@ -24,7 +24,7 @@
 
 > /new 帮我看一下这个项目本周合入的改动，整理三条给团队看的更新。
 
-选好项目和引擎，提交任务。完成后，卡片直接展示写好的三条更新。展开底部的「详情与操作」可以看工具记录。想改口吻，直接在话题里说「改成发给设计同学的版本」。想发到周会群，点 **详情与操作 → 生成分享卡**，预览正文，再用飞书转发。转发后，收件人能在卡片底部看到本轮使用的引擎和已确认的模型，点「my-agents」就能打开这个项目。
+选好项目和引擎，提交任务。完成后，卡片直接展示写好的三条更新。展开底部的「详情与操作」可以看工具记录。想改口吻，直接在话题里说「改成发给设计同学的版本」。想发到周会群，任务发起人可以在已完成的任务卡上点 **详情与操作 → 生成分享卡**，确认正文后用飞书转发。转发后，收件人能在卡片底部看到本轮使用的引擎和已确认的模型，点「my-agents」就能打开这个项目。
 
 ## 启动第一台
 
@@ -46,6 +46,10 @@ curl -fsSL https://raw.githubusercontent.com/13days/my-agents/main/install.sh | 
 2. **接上飞书。** 打开「聊天软件」，点「扫码创建机器人」。如果已有机器人，也可以填入应用凭证。跟随页面完成配对和卡片按钮授权。
 3. **发第一条任务。** 私聊机器人，发送上面的 `/new` 示例。执行进度和结果都会回到飞书。 [飞书卡片与命令](docs/feishu-interaction.md)
 
+在「聊天软件 → 飞书 → 访问权限」，可以直接看到谁能私聊、哪些群需要单独授权。图中林舟已配对，可以在机器人加入的任意多人群直接 @ 它。设计协作群单独勾选后，小榆也能在该群使用。
+
+![飞书访问权限，群聊规则和单独授权的账号并排显示](https://raw.githubusercontent.com/13days/my-agents/main/docs/feishu-access-preview.png)
+
 <details>
 <summary>已经有开发环境，想从源码运行</summary>
 
@@ -64,6 +68,8 @@ MY_AGENTS_NO_PROXY_SETUP=1 npm start
 
 在「设备与模型 → 机器 → 添加机器」填入平时使用的免密 SSH 地址，例如 `devbox`。面板会检查环境、准备运行时、安装执行程序并建立连接。设备显示「已连接」后，在「项目与目录」填写项目在那台机器上的真实路径。下一次新建对话就能选它。
 
+![同一个 design-kit 项目在设计工作站和 Linux 开发机上分别指定目录](https://raw.githubusercontent.com/13days/my-agents/main/docs/workspace-paths-preview.png)
+
 SSH 连不进去，但开发机能访问面板时，展开「其他接入方式」，复制接入命令到开发机运行即可。
 
 比如，你想让笔记本上的 Claude Code 检查前端，同时让 Linux 开发机上的 Codex 跑测试。打开两个对话，各选自己的机器和项目目录，就可以在同一个面板看两边的进度。
@@ -80,9 +86,13 @@ Claude Code 或 Codex 负责读文件、跑命令和维护会话。回答问题�
 2. **给当前会话换模型。** 在飞书话题发 `/model`，从列表选一个，下一轮生效。发 `/model default` 恢复默认。任务结束后，展开「详情与操作」查看本轮记录到的实际模型和代理。若代理设置了固定模型映射，最终模型由该规则决定。
 3. **在 Claude Code 里用 Codex 订阅。** 在 Codex 账号池打开「Claude Code 使用订阅代理」，按提示把配置放入独立的 Claude 配置目录。此后 Claude Code 仍在选定机器执行工具，模型请求交给 Codex 订阅池。 [配置示例和支持范围](docs/codex-subscription-proxy.md)
 
+![在 Claude Code 账号池选择新会话的默认模型，下拉框列出示例网关提供的模型](https://raw.githubusercontent.com/13days/my-agents/main/docs/engine-models-preview.png)
+
 ## 让助理替你留意消息
 
 在「助理」里连接个人飞书账号，选择读取范围，开启同步。助理会汇总相关私聊和群聊，结合发送人、后续回复和已有任务，建议哪些消息适合一起交给哪个会话。你可以调整归属、忽略或确认执行。确认记录能给下次判断作参考。
+
+![助理把设计群里的两条消息合为一项周会建议，在右侧等待确认执行](https://raw.githubusercontent.com/13days/my-agents/main/docs/assistant-review-preview.png)
 
 消息同步和模型分析分别有开关，模型分析可以设置每日预算。 [助理设置与审批](docs/heartflow.md)
 

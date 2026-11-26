@@ -48,6 +48,33 @@ function errorMessage(value, seen = new Set()) {
   return typeof value.code === 'string' || typeof value.code === 'number' ? '飞书请求失败（' + value.code + '）' : '';
 }
 
+async function updateTaskCard(transport, messageId, card, terminal) {
+  const messages = transport.rawClient?.im?.v1?.message;
+  if (!messages?.patch) return transport.updateCard(messageId, card);
+  const path = { message_id: messageId };
+  // LarkChannel.updateCard discards the business status returned by message.patch.
+  const result = await messages.patch({ path, data: { content: JSON.stringify(card) } });
+  if (result?.code !== 0 && result?.code !== '0') {
+    throw new Error(`飞书卡片更新失败（${result?.code ?? '未知'}）：${result?.msg || '未确认更新'}`);
+  }
+  const expected = card.config?.summary?.content;
+  if (!terminal || !expected || !messages.get) return;
+  // An edit can be accepted while the message still serves the old progress card.
+  let summary;
+  try {
+    const read = await messages.get({ path, params: { card_msg_content_type: 'user_card_content' } });
+    if (read?.code === 0 || read?.code === '0') {
+      summary = JSON.parse(read.data?.items?.[0]?.body?.content || '{}').config?.summary?.content;
+    }
+  } catch {
+    // Apps with edit-only scopes can still deliver; the explicit patch acknowledgment stands.
+    return;
+  }
+  if (typeof summary === 'string' && summary.split(' · ')[0] !== expected.split(' · ')[0]) {
+    throw new Error('飞书仍显示旧的任务状态，正在重新同步卡片');
+  }
+}
+
 function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '', leadership = null, now = Date.now, files = {}, inboxDir = dir }) {
   // Additional bots keep their own config, state and inbox; the primary bot keeps the original names.
   const configFile = path.join(dir, files.config || 'panel-feishu.json'), stateFile = path.join(dir, files.state || 'panel-feishu-state.json');
@@ -626,7 +653,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
     };
     saveTask(progress());
     try { await submit(binding, { prompt, images, messageId: id, mode, gatewayContext: deliveryContext(msg, turn), ...(proposed ? { allowFailover: false } : {}) }); }
-    catch (e) { turn.until ??= now(); view.phase = '失败'; view.text = errorText(e); view.done = true; saveTask(progress()); if (await transport.updateCard(sent.messageId, progress()).then(() => true, () => false)) { delete state.taskCards[sent.messageId]; persist(); e.reported = true; } throw e; }
+    catch (e) { turn.until ??= now(); view.phase = '失败'; view.text = errorText(e); view.done = true; saveTask(progress()); if (await updateTaskCard(transport, sent.messageId, progress(), true).then(() => true, () => false)) { delete state.taskCards[sent.messageId]; persist(); e.reported = true; } throw e; }
     view.accepted = true;
     let timer, heartbeat, unsub, updating, shuttingDown = false, dirty = false, busy = false, closed = false, updateFailures = 0;
     const finish = () => { if (closed) return; closed = true; if (waiting.get(binding.id)?.taskMessageId === id) waiting.delete(binding.id); clearTimeout(timer); clearInterval(heartbeat); unsub?.(); monitors.delete(shutdownMonitor); };
@@ -634,11 +661,13 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (closed || busy) { dirty = true; return; }
       busy = true; dirty = false;
       try {
-        const terminal = view.done;
         const observation = await observedRoute(turn);
+        if (shuttingDown) return;
+        const terminal = view.done;
+        dirty = false;
         if (observation) turn.route = observation;
         const card = progress(); saveTask(card);
-        updating = transport.updateCard(sent.messageId, card);
+        updating = updateTaskCard(transport, sent.messageId, card, terminal);
         await updating; updateFailures = 0;
         if (terminal && !shuttingDown) { delete state.taskCards[sent.messageId]; persist(); }
       }
@@ -666,7 +695,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       try {
         // A previously sent thinking update must finish before the terminal update.
         await updating?.catch(rememberError);
-        await transport.updateCard(sent.messageId, card);
+        await updateTaskCard(transport, sent.messageId, card, true);
         delete state.taskCards[sent.messageId]; persist();
       } catch (error) { rememberError(error); }
       finally { finish(); }
@@ -987,7 +1016,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
         card = cards.interruptedTask(card, catalog().label(state.cards[messageId]?.engine));
         if (state.cards[messageId]) state.cards[messageId].canContinue = false;
       }
-      try { await channel.updateCard(messageId, card); delete state.taskCards[messageId]; persist(); }
+      try { await updateTaskCard(channel, messageId, card, true); delete state.taskCards[messageId]; persist(); }
       catch (error) { rememberError(error); }
     }
   }
