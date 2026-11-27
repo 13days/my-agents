@@ -74,7 +74,7 @@
 └──────────────────────────────┼─────────────────────────────────────────┘
                                │
               ┌────────────────┴────────────────┐
-        LocalNode（进程内）               RemoteNode（开发机上的 my-agents node）
+        LocalNode（进程内）               RemoteNode（远程电脑上的 my-agents node）
         Host = 本机 fs/spawn             Host = WebSocket RPC，CLI 在远端跑
         ├ claude adapter                 ├ claude adapter
         ├ codex adapter                  ├ codex adapter
@@ -293,7 +293,7 @@ tests/
 | **P2 Registry 驱动前端** | `/api/v2/engines`；前端拆模块；能力驱动替换约 70 处分支；统一 i18n；统一消息渲染 | 加引擎时前端零改动 |
 | **P3 渠道核心** | 从飞书抽出 bindings/commands/locks/view-reducer；Web 聊天也走 ConversationRouter；渠道上下文改为系统注入或 MCP 工具 | 加 Slack 等渠道只需写 transport + renderer |
 | **P4 Host 抽象 + 数据目录** | 所有 fs/spawn 改走 Host；资源、历史、统计改为 Provider；数据迁移到 `~/.my-agents`；Upstream 注册表 | 为远程化铺路 |
-| **P5 远程节点** | `my-agents node` 守护 + RemoteHost + 节点管理 UI + 抓包代理回连 | 连接开发机上的 Claude Code / Codex |
+| **P5 远程节点** | `my-agents node` 守护 + RemoteHost + 节点管理 UI + 抓包代理回连 | 连接远程电脑上的 Claude Code / Codex |
 | **P6 权限** | 权限代理打通，支持按渠道 `ask` 策略（引擎支持时） | 飞书和网页上真正可用的授权确认 |
 
 ### 关于"服务重启任务中断"
@@ -336,12 +336,12 @@ P1 的事件日志能保证重启后**看得到**完整进度。要让任务**�
 ### 6.3 远程节点用法
 
 ```bash
-# 方式一：开发机主动连 Hub（Hub 需监听非 loopback：MY_AGENTS_BIND=0.0.0.0）
+# 方式一：远程电脑主动连 Hub（Hub 需监听非 loopback：MY_AGENTS_BIND=0.0.0.0）
 my-agents node --hub ws://<hub 地址>:4321 --token <Hub 数据目录下 panel-token 的内容> --id devbox
 
 # 方式二：Hub 通过 SSH 启动（要求免密登录，且远端 PATH 中有 my-agents）
 curl -X POST localhost:4321/api/nodes -H 'Content-Type: application/json' \
-  -d '{"id":"devbox","label":"云端开发机","ssh":"me@devbox"}'
+  -d '{"id":"devbox","label":"Linux 服务器","ssh":"me@devbox"}'
 ```
 
 - `GET /api/nodes` 列出本机、在线节点和已保存的 SSH 节点（含状态和最近错误）；`DELETE /api/nodes/:id`；`POST /api/nodes/:id/reconnect`。

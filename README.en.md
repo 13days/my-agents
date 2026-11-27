@@ -1,12 +1,20 @@
 # <img src="https://raw.githubusercontent.com/13days/my-agents/main/assets/my-agents.png" width="42" height="42" alt=""> my-agents
 
-[Quick start](#start-your-first-panel) · [User guide (Chinese)](docs/user-guide.md) · [中文](README.md)
+**Start a Codex or Claude Code session in your terminal. Ask a follow-up in Feishu from your phone, then open the same conversation in your browser.**
 
-![Feishu, WeCom and the web share a my-agents cluster running Claude Code, Codex or DeepSeek Harness, with optional custom gateway and Codex subscription proxies](https://raw.githubusercontent.com/13days/my-agents/main/docs/my-agents-overview.gif)
+On a Mac or Linux machine with Node.js 18+ and npm, run
 
-[![Play the 3 min 20 sec tour of session handoff, multi-machine tasks, model proxies and the assistant](https://raw.githubusercontent.com/13days/my-agents/main/docs/product-tour-en.png)](https://cdn.jsdelivr.net/gh/13days/my-agents@2a8d7841becf17cad868340333861091f4826f51/docs/my-agents-intro.mp4)
+```sh
+npx --yes @wuchupeng/my-agents@latest
+```
 
-Start a conversation in Codex or Claude Code, pick it up in Feishu on your phone, and continue in your browser or the original terminal. You can use Claude Code without access to a Claude model. Connect your own compatible gateway, or use GPT through the Codex subscription proxy with a ChatGPT subscription that includes Codex. [Download the tour (MP4)](https://raw.githubusercontent.com/13days/my-agents/2a8d7841becf17cad868340333861091f4826f51/docs/my-agents-intro.mp4) · [Chinese and English captions (SRT)](docs/my-agents-intro.srt)
+Open **[localhost:4321](http://localhost:4321)**, choose a CLI you’ve signed in to, and send your first message. To keep working with your laptop closed, run the panel and the session on an always-on Linux server. If the panel is on the server, run `ssh -L 4321:127.0.0.1:4321 user@server` on your own computer (use your SSH address), then open the link above.
+
+[Connect Feishu](#try-it-in-a-chat) · [Connect WeCom](#send-tasks-from-wecom) · [Run on several machines](#run-tasks-on-several-machines-from-one-panel) · [User guide (Chinese)](docs/user-guide.md) · [中文](README.md)
+
+[![30-second demo of one Codex session, from the terminal to a follow-up in Feishu and the reply in the web panel](https://raw.githubusercontent.com/13days/my-agents/main/docs/session-handoff.gif)](https://github.com/13days/my-agents/releases/download/v0.18.0/my-agents-handoff.mp4)
+
+[Play the 30-second demo with English subtitles](https://github.com/13days/my-agents/releases/download/v0.18.0/my-agents-handoff.mp4). The footage uses the example project design-kit.
 
 ## Continue the same conversation in the terminal, chat, or browser
 
@@ -34,12 +42,6 @@ Choose a project and an engine, then submit. The task card updates as the agent 
 
 ## Start your first panel
 
-With Node.js 18+ and npm, start the panel with:
-
-```sh
-npx --yes @wuchupeng/my-agents@latest
-```
-
 On a fresh Mac or Linux host with Git and curl, use the source installer:
 
 ```sh
@@ -62,7 +64,7 @@ Create an **intelligent bot** in WeCom, select **API mode → Long connection**,
 
 The first sender becomes the bot owner automatically. Other members can DM for their UserID and be added under **Additional member UserIDs**. Installation includes `lark-cli` and `wecom-cli`. Authorized members can send a text task privately or mention the bot in a group. The answer returns to that chat and is available in the web conversation. Follow-ups reuse the same conversation per member and chat. Send `/new` on its own to start another. Feishu share cards and the assistant’s personal-history source are configured separately. [WeCom setup (Chinese)](docs/im-channels.md)
 
-![WeCom setup with bot credentials, allowed members and project defaults (Chinese UI)](docs/wecom-setup-preview.png)
+![WeCom setup with bot credentials, allowed members and project defaults (Chinese UI)](https://raw.githubusercontent.com/13days/my-agents/main/docs/wecom-setup-preview.png)
 
 ### DeepSeek Harness
 
@@ -85,6 +87,8 @@ Both the installer and this start command keep your terminal proxy configuration
 
 ## Run tasks on several machines from one panel
 
+![Feishu, WeCom and the web share a my-agents cluster running Claude Code, Codex or DeepSeek Harness, with optional custom gateway and Codex subscription proxies](https://raw.githubusercontent.com/13days/my-agents/main/docs/my-agents-overview.gif)
+
 In **Computers & AI accounts → Computers → Add computer**, enter a passwordless SSH address or host alias. The panel prepares the runtime, installs the runner, and connects the device. On the same page, choose the default machine for new tasks. Use **Choose folder** on a computer card to browse its local or remote directories, or use **Project folders → Add** on the card to create a project or link its existing checkout on this machine. Existing sessions keep their execution machine.
 
 ![The design-kit checkout mapped to a different directory on each execution machine](https://raw.githubusercontent.com/13days/my-agents/main/docs/workspace-paths-preview.png)
@@ -93,7 +97,7 @@ The remote device does not need my-agents preinstalled. For password or MFA logi
 
 For example, open one conversation with Claude Code on your laptop to review the frontend and another with Codex on a Linux machine to run tests. Both report progress in the same panel.
 
-In Feishu, send `/node` to list machines. If your development machine is named `devbox` and the project lives at `~/repos/web`, send `/node devbox ~/repos/web`, then ask it to run the tests in that thread. Commands run against the checkout on the selected machine.
+In Feishu, send `/node` to list machines. If your Linux server is named `linux-server` and the project lives at `~/repos/web`, send `/node linux-server ~/repos/web`, then ask it to run the tests in that thread. Commands run against the checkout on the selected machine.
 
 On a Mac, turn on keep-awake under the Feishu connection’s runtime settings to keep receiving messages while the computer is idle.
 
@@ -122,4 +126,12 @@ Connect your personal Feishu account under **Assistant**, choose which chats to 
 
 Model analysis has its own switch and daily budget. [Assistant settings (Chinese)](docs/heartflow.md)
 
-[Issues](https://github.com/13days/my-agents/issues) · [MIT license](LICENSE)
+## Full product tour
+
+[![Play the 3 min 20 sec tour of session handoff, multi-machine tasks, model proxies and the assistant](https://raw.githubusercontent.com/13days/my-agents/main/docs/product-tour-en.png)](https://cdn.jsdelivr.net/gh/13days/my-agents@v0.18.0/docs/my-agents-intro.mp4)
+
+The 3 min 20 sec tour also covers multi-machine execution, the Codex subscription proxy, and the Feishu assistant. [Download the video](https://raw.githubusercontent.com/13days/my-agents/v0.18.0/docs/my-agents-intro.mp4) · [Chinese and English captions](docs/my-agents-intro.srt)
+
+If you use my-agents to pick up a terminal session from chat, a [GitHub star](https://github.com/13days/my-agents) helps others find it. If a handoff fails, tell us which two clients you switched between in an issue.
+
+[Releases](https://github.com/13days/my-agents/releases) · [Issues](https://github.com/13days/my-agents/issues) · [MIT license](LICENSE)

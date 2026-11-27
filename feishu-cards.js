@@ -177,7 +177,7 @@ function projectList({ rows, total, page, defaultProject, engine = 'claude', nod
   const at = remote ? { node } : {};
   const elements = [muted(`${escape(nodeLabel)} · 选择项目，新建 ${engines.label(engine)} 会话 · ${page + 1} / ${pages}`)];
   rows.forEach((cwd, index) => elements.push(row(`${page * PAGE_SIZE + index + 1}. ${escape(path.posix.basename(cwd) || cwd)}`, cwd === defaultProject ? '默认项目' : escape(clip(path.posix.dirname(cwd), 80)), button('新建会话', action(context, { action: context.forms ? 'new_form' : 'new', cwd, engine, ...at })))));
-  if (!rows.length) elements.push(markdown(remote ? `${escape(nodeLabel)}上还没有用过的项目。发送 /node ${node} 开发机上的绝对路径 开始。` : '还没有可用项目。发送 /new 绝对路径 指定本机已有目录，或在 Panel 选择默认项目。'));
+  if (!rows.length) elements.push(markdown(remote ? `${escape(nodeLabel)}上还没有用过的项目。发送 /node ${node} ~/projects/app 开始，把示例路径换成远程电脑上的项目目录。` : '还没有可用项目。发送 /new 绝对路径 指定本机已有目录，或在 Panel 选择默认项目。'));
   const navigation = [];
   if (page > 0) navigation.push(button('← 上一页', action(context, { action: 'projects', page: page - 1, engine, ...at })));
   if (page + 1 < pages) navigation.push(button('下一页 →', action(context, { action: 'projects', page: page + 1, engine, ...at })));

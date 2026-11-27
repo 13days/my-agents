@@ -286,7 +286,7 @@ function createFeishuGateway({ dir, panel, runtime, channelFactory, replyURL = '
       if (!directory) throw new Error('项目目录不存在或不是文件夹');
       if (!state.projects.includes(cwd)) state.projects.push(cwd);
     } else {
-      if (cwd && !cwd.startsWith('/') && cwd !== '~' && !cwd.startsWith('~/')) throw new Error('请使用开发机上的绝对路径或 ~/ 开头的路径');
+      if (cwd && !cwd.startsWith('/') && cwd !== '~' && !cwd.startsWith('~/')) throw new Error('请使用远程电脑上的绝对路径或 ~/ 开头的路径');
       if (!cwd) return projectsCard(msg, 0, engine, node);
     }
     bind(key, { id: crypto.randomUUID(), cwd, engine, ...(panel.workspaces && current ? { sourceSessionId: current.id } : {}), ...(node !== 'local' ? { node } : {}) });

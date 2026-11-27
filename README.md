@@ -1,12 +1,20 @@
 # <img src="https://raw.githubusercontent.com/13days/my-agents/main/assets/my-agents.png" width="42" height="42" alt=""> my-agents
 
-[快速接入](#启动第一台) · [使用手册](docs/user-guide.md) · [English](README.en.md)
+**在终端里用 Codex 或 Claude Code 开始工作，出门后用飞书追问，回到网页接着做。三个入口共享同一条会话。**
 
-![飞书、企业微信和网页通过 my-agents 集群在 Mac 或 Linux 上运行 Claude Code、Codex、DeepSeek Harness，可接自定义网关或 Codex 订阅代理](https://raw.githubusercontent.com/13days/my-agents/main/docs/my-agents-overview-zh.gif)
+在装好 Node.js 18+ 和 npm 的 Mac 或 Linux 电脑上运行
 
-[![播放 3 分 20 秒产品介绍，从终端与飞书接续到多机执行、模型代理和助理](https://raw.githubusercontent.com/13days/my-agents/main/docs/product-tour-zh.png)](https://cdn.jsdelivr.net/gh/13days/my-agents@2a8d7841becf17cad868340333861091f4826f51/docs/my-agents-intro.mp4)
+```sh
+npx --yes @wuchupeng/my-agents@latest
+```
 
-在终端用 Codex 或 Claude Code 开始的对话，出门后可以在飞书接手，回到电脑也能在网页或原终端继续。没有 Claude 模型也能用 Claude Code 改文件、跑命令。你可以接入自己的兼容网关，也可以通过 Codex 订阅代理，让带 Codex 权限的 ChatGPT 订阅提供 GPT 模型。 [下载介绍视频（MP4）](https://raw.githubusercontent.com/13days/my-agents/2a8d7841becf17cad868340333861091f4826f51/docs/my-agents-intro.mp4) · [中英字幕（SRT）](docs/my-agents-intro.srt)
+打开 **[localhost:4321](http://localhost:4321)**，选择已登录的引擎，发第一条消息。要合上笔记本后继续执行，可以把面板和会话放在常开的 Linux 服务器上。如果面板装在远端，在自己电脑上运行 `ssh -L 4321:127.0.0.1:4321 user@server`（换成你的 SSH 地址），再打开上面的网页。
+
+[连接飞书](#从飞书里用一次) · [连接企业微信](#用企业微信发任务) · [多机执行](#一个终端启动多台机器分头工作) · [使用手册](docs/user-guide.md) · [English](README.en.md)
+
+[![30 秒演示：在 Codex 终端整理三条更新，到飞书追问第二条，再从网页查看这次追问和答复](https://raw.githubusercontent.com/13days/my-agents/main/docs/session-handoff.gif)](https://github.com/13days/my-agents/releases/download/v0.18.0/my-agents-handoff.mp4)
+
+[播放 30 秒演示（中文旁白 · 中英字幕）](https://github.com/13days/my-agents/releases/download/v0.18.0/my-agents-handoff.mp4)。画面使用示例项目 design-kit。
 
 ## 在终端、飞书和网页接着聊
 
@@ -34,13 +42,7 @@
 
 ## 启动第一台
 
-已安装 Node.js 18+ 和 npm 的机器，可以用一条命令启动：
-
-```sh
-npx --yes @wuchupeng/my-agents@latest
-```
-
-新 Mac 或 Linux 开发机上只有 Git 和 curl？使用源码安装命令，它会在需要时自动下载并校验 Node.js 24 LTS（Intel / ARM 64 位）。
+新 Mac 或 Linux 服务器上只有 Git 和 curl？使用源码安装命令，它会在需要时自动下载并校验 Node.js 24 LTS（Intel / ARM 64 位）。
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/13days/my-agents/main/install.sh | sh
@@ -68,7 +70,7 @@ curl -fsSL https://raw.githubusercontent.com/13days/my-agents/main/install.sh | 
 
 安装时自动检查并补装 `lark-cli` 和 `wecom-cli`。企业微信的成员名单与飞书独立。飞书的分享卡片和助理读取个人聊天仍通过飞书配置。 [企业微信接入说明](docs/im-channels.md)
 
-![企业微信接入页，机器人连接、可执行任务的成员和新对话默认项目](docs/wecom-setup-preview.png)
+![企业微信接入页，机器人连接、可执行任务的成员和新对话默认项目](https://raw.githubusercontent.com/13days/my-agents/main/docs/wecom-setup-preview.png)
 
 <details>
 <summary>已经有开发环境，想从源码运行</summary>
@@ -86,15 +88,17 @@ MY_AGENTS_NO_PROXY_SETUP=1 npm start
 
 ## 一个终端启动，多台机器分头工作
 
-在「电脑与 AI 账号 → 连接电脑 → 添加电脑」填入平时使用的免密 SSH 地址，例如 `devbox`。面板会检查环境、准备运行时、安装执行程序并建立连接。在同页选择「新任务默认执行机器」。点电脑卡片上的「选择目录」浏览本机或远程文件夹。在卡片内的「项目文件夹」点「添加」，可新建项目或为已有项目关联这台电脑上的目录。已有会话沿用其执行机器。
+![飞书、企业微信和网页通过 my-agents 集群在 Mac 或 Linux 上运行 Claude Code、Codex、DeepSeek Harness，可接自定义网关或 Codex 订阅代理](https://raw.githubusercontent.com/13days/my-agents/main/docs/my-agents-overview-zh.gif)
 
-![同一个 design-kit 项目在设计工作站和 Linux 开发机上分别指定目录](https://raw.githubusercontent.com/13days/my-agents/main/docs/workspace-paths-preview.png)
+在「电脑与 AI 账号 → 连接电脑 → 添加电脑」填入平时使用的免密 SSH 地址，例如 `linux-server`。面板会检查环境、准备运行时、安装执行程序并建立连接。在同页选择「新任务默认执行机器」。点电脑卡片上的「选择目录」浏览本机或远程文件夹。在卡片内的「项目文件夹」点「添加」，可新建项目或为已有项目关联这台电脑上的目录。已有会话沿用其执行机器。
 
-远端无需预装 my-agents。SSH 需要密码或验证码时，用你平时的方式登录开发机，选同一页的「在远端终端接入」，把命令粘贴到远端运行，并保留该进程。开发机需要能访问面板的内网地址。如果面板只监听本机，页面会提示如何开启内网监听。两种方式都需要在执行机器上准备对应的引擎 CLI 和可用账号。
+![同一个 design-kit 项目在设计工作站和 Linux 服务器上分别指定目录](https://raw.githubusercontent.com/13days/my-agents/main/docs/workspace-paths-preview.png)
 
-比如，你想让笔记本上的 Claude Code 检查前端，同时让 Linux 开发机上的 Codex 跑测试。打开两个对话，各选自己的机器和项目目录，就可以在同一个面板看两边的进度。
+远端无需预装 my-agents。SSH 需要密码或验证码时，用你平时的方式登录远程电脑，选同一页的「在远端终端接入」，把命令粘贴到远端运行，并保留该进程。远程电脑需要能访问面板的内网地址。如果面板只监听本机，页面会提示如何开启内网监听。两种方式都需要在执行机器上准备对应的引擎 CLI 和可用账号。
 
-在飞书里，发 `/node` 查看在线机器。假设开发机名为 `devbox`、项目已在 `~/repos/web`，发 `/node devbox ~/repos/web`，然后在同一话题发「跑一下项目的测试」。命令和文件操作都会在开发机的这份代码上执行。
+比如，你想让笔记本上的 Claude Code 检查前端，同时让 Linux 服务器上的 Codex 跑测试。打开两个对话，各选自己的机器和项目目录，就可以在同一个面板看两边的进度。
+
+在飞书里，发 `/node` 查看在线机器。假设服务器名为 `linux-server`、项目已在 `~/repos/web`，发 `/node linux-server ~/repos/web`，然后在同一话题发「跑一下项目的测试」。命令和文件操作都会在服务器的这份代码上执行。
 
 如果希望 Mac 待机时继续接单，可以在飞书连接的「运行与启动设置」开启保活，避免空闲休眠。
 
@@ -123,6 +127,14 @@ Claude Code 和 Codex 可以分别设置「新对话默认模型」。要为当�
 
 消息同步和模型分析分别有开关，模型分析可以设置每日预算。 [助理设置与审批](docs/heartflow.md)
 
+## 完整产品介绍
+
+[![播放 3 分 20 秒产品介绍，从终端与飞书接续到多机执行、模型代理和助理](https://raw.githubusercontent.com/13days/my-agents/main/docs/product-tour-zh.png)](https://cdn.jsdelivr.net/gh/13days/my-agents@v0.18.0/docs/my-agents-intro.mp4)
+
+3 分 20 秒了解会话接续、多机执行、Codex 订阅代理和飞书助理。[下载视频](https://raw.githubusercontent.com/13days/my-agents/v0.18.0/docs/my-agents-intro.mp4) · [中英字幕](docs/my-agents-intro.srt)
+
 ## 项目
 
-[报告问题](https://github.com/13days/my-agents/issues) · [MIT 许可证](LICENSE)
+如果你也在终端和聊天软件之间切换，欢迎给 [my-agents](https://github.com/13days/my-agents) 点个 Star。遇到接续失败，可以在 Issue 里写下你从哪个入口切到了哪个入口。
+
+[查看版本更新](https://github.com/13days/my-agents/releases) · [报告问题](https://github.com/13days/my-agents/issues) · [MIT 许可证](LICENSE)

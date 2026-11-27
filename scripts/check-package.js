@@ -14,7 +14,8 @@ async function freePort() {
     const packed = JSON.parse(execFileSync('npm', ['pack', '--json', '--pack-destination', temp], { encoding: 'utf8' }))[0];
     execFileSync('tar', ['-xzf', path.join(temp, packed.filename), '-C', temp]);
     const cwd = path.join(temp, 'package');
-    for (const asset of ['assets/my-agents.png', 'vendor/qr.js', 'scripts/ensure-node.sh']) {
+    for (const asset of ['assets/my-agents.png', 'vendor/qr.js', 'scripts/ensure-node.sh',
+      'wecom-ui.js', 'directory-browser.js', 'engines/deepseek/index.js', 'engines/deepseek/history.js']) {
       if (!fs.statSync(path.join(cwd, asset)).size) throw Error('Missing packaged asset: ' + asset);
     }
     execFileSync('npm', ['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd, stdio: 'pipe', timeout: 180000 });
@@ -29,15 +30,25 @@ async function freePort() {
     child.stderr.on('data', b => { output = (output + b).slice(-8000); });
     for (let i = 0; i < 60; i++) {
       if (child.exitCode !== null) throw Error('Packaged server exited: ' + output);
-      try {
-        const response = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(1000) });
-        if (response.ok && (await response.json()).ready) {
-          const initial = await (await fetch(`http://127.0.0.1:${port}/api/heartflow`)).json();
-          const unchanged = await (await fetch(`http://127.0.0.1:${port}/api/heartflow?revision=${encodeURIComponent(initial.revision)}`)).json();
-          if (!initial.revision || !unchanged.unchanged || unchanged.messages || !unchanged.runtime) throw Error('Assistant revision polling failed');
-          console.log('Published package installs, starts and serves incremental assistant status successfully'); return;
+      const base = `http://127.0.0.1:${port}`;
+      const ready = await fetch(base + '/api/health', { signal: AbortSignal.timeout(1000) })
+        .then(r => r.ok ? r.json() : null).catch(() => null);
+      if (ready?.ready) {
+        const read = async pathname => {
+          const response = await fetch(base + pathname);
+          if (!response.ok) throw Error(`Packaged panel returned ${response.status} for ${pathname}`);
+          return response.json();
+        };
+        const [engines, wecom, folders, initial] = await Promise.all([
+          read('/api/engines'), read('/api/wecom'), read('/api/workspaces/directories?machineId=local&path=~'), read('/api/heartflow'),
+        ]);
+        if (!engines.engines.some(engine => engine.id === 'deepseek') || !wecom.config || !Array.isArray(folders.directories)) {
+          throw Error('Packaged engine, WeCom or directory browser unavailable');
         }
-      } catch {}
+        const unchanged = await read('/api/heartflow?revision=' + encodeURIComponent(initial.revision));
+        if (!initial.revision || !unchanged.unchanged || unchanged.messages || !unchanged.runtime) throw Error('Assistant revision polling failed');
+        console.log('Packaged panel serves the engines, WeCom, directory browser and incremental assistant status'); return;
+      }
       await new Promise(resolve => setTimeout(resolve, 500));
     }
     throw Error('Packaged server failed health check: ' + output);

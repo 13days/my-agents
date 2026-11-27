@@ -74,116 +74,116 @@ The terminal draft and Feishu follow-up are both there. I can edit here or retur
 One of these changes still needs verification.
 
 16
-00:01:12,712 --> 00:01:20,205
-我在同一个面板里让 Mac 上的 Claude Code 检查代码，再让 Linux 开发机上的 Codex 跑测试。
-From one panel, I ask Claude Code on the Mac to review the code and Codex on the Linux dev machine to run the tests.
+00:01:12,712 --> 00:01:20,112
+我在同一个面板里让 Mac 上的 Claude Code 检查代码，再让 Linux 服务器上的 Codex 跑测试。
+From one panel, I ask Claude Code on the Mac to review the code and Codex on the Linux server to run the tests.
 
 17
-00:01:20,462 --> 00:01:26,410
-同一个项目，在工作站、开发机和构建机上可以放在不同目录。
-The workstation, dev machine, and build machine can each have their own checkout.
+00:01:20,378 --> 00:01:26,268
+同一个项目，在工作站、服务器和构建机上可以放在不同目录。
+The workstation, server, and build machine can each have their own checkout.
 
 18
-00:01:26,670 --> 00:01:31,390
+00:01:26,545 --> 00:01:31,265
 选好机器，任务就在那台机器的项目目录里执行。
 Once I choose a machine, the task runs in its project folder.
 
 19
-00:01:32,045 --> 00:01:35,926
+00:01:31,920 --> 00:01:35,801
 Mac 开启保活，屏幕熄了也能继续接任务。
 With keep-awake enabled, the Mac can take tasks even when the display is off.
 
 20
-00:01:36,212 --> 00:01:40,050
+00:01:36,087 --> 00:01:39,925
 如果部署了三台完整面板，即使 Mac 关机，
 With a full panel on each of three machines, the Mac can shut down.
 
 21
-00:01:40,170 --> 00:01:46,195
-只要另外两台保持在线，开发机就能接手后续发来的飞书消息。
-As long as the other two stay online, the dev machine can take over new Feishu messages.
+00:01:40,045 --> 00:01:46,012
+只要另外两台保持在线，服务器就能接手后续发来的飞书消息。
+As long as the other two stay online, the server can take over new Feishu messages.
 
 22
-00:01:47,383 --> 00:01:51,848
+00:01:47,175 --> 00:01:51,640
 如果你习惯用 Claude Code，手上有自己的模型网关，
 If you like working in Claude Code and already have a model gateway,
 
 23
-00:01:52,003 --> 00:01:59,956
+00:01:51,795 --> 00:01:59,747
 只要网关兼容 Anthropic Messages API，就可以在「AI 账号」里点「连接自定义代理」，
 choose Connect a custom proxy under AI accounts if your gateway supports the Anthropic Messages API.
 
 24
-00:02:00,087 --> 00:02:02,124
+00:01:59,878 --> 00:02:01,916
 选用网关提供的模型。
 You can use the models your gateway provides.
 
 25
-00:02:02,795 --> 00:02:10,952
+00:02:02,587 --> 00:02:10,744
 如果你已经有带 Codex 权限的 ChatGPT 订阅，这一个订阅也能给两种工具用。
 A ChatGPT subscription that includes Codex can power both coding tools.
 
 26
-00:02:11,212 --> 00:02:17,208
+00:02:11,003 --> 00:02:17,000
 登录后，既可以在 Codex 里工作，也可以选择「使用 Codex 订阅代理」，
 After signing in, use Codex directly or choose Use Codex subscription proxy.
 
 27
-00:02:17,337 --> 00:02:21,071
+00:02:17,128 --> 00:02:20,862
 让 GPT 给 Claude Code 提供回答。
 GPT can then answer in Claude Code.
 
 28
-00:02:21,337 --> 00:02:27,076
+00:02:21,128 --> 00:02:26,868
 文件还是由 Claude Code 在你选的电脑上修改，命令也在那里运行。
 Claude Code edits files and runs commands on the computer you selected.
 
 29
-00:02:27,753 --> 00:02:30,895
+00:02:27,545 --> 00:02:30,686
 你可以给两个工具分别设默认模型。
 Each tool can have its own default model.
 
 30
-00:02:31,170 --> 00:02:37,733
+00:02:30,962 --> 00:02:37,525
 想给某个飞书话题换模型，发「/model」选一个，下一轮就会用上。
 Send “/model” in a Feishu thread to choose a model for the next turn.
 
 31
-00:02:38,003 --> 00:02:42,629
+00:02:37,795 --> 00:02:42,420
 网关有固定映射时，以网关实际调用的模型为准。
 If your gateway has a fixed mapping, it determines which model handles the request.
 
 32
-00:02:43,800 --> 00:02:47,410
+00:02:43,592 --> 00:02:47,202
 周会前，设计群里又补了两条意见。
 Before the meeting, two more comments arrive in the design group.
 
 33
-00:02:47,670 --> 00:02:54,955
+00:02:47,462 --> 00:02:54,747
 接入个人飞书后，助理会结合是谁发的、后面怎么回复、现有任务做到哪一步，
 With my Feishu account connected, the assistant considers the senders, follow-ups, and progress on existing work.
 
 34
-00:02:55,087 --> 00:02:57,619
+00:02:54,878 --> 00:02:57,411
 把相关消息合成一条建议。
 It groups the related messages into one suggestion.
 
 35
-00:02:57,878 --> 00:03:05,035
+00:02:57,670 --> 00:03:04,826
 我核对后点确认，两条意见就送回刚才的会话，不用再复制一遍聊天记录。
 I review it and approve. Both comments go to the same session, saving me a copy and paste.
 
 36
-00:03:06,217 --> 00:03:11,255
+00:03:06,008 --> 00:03:11,046
 装好 Node.js 后，在终端运行屏幕上的命令，
 With Node.js installed, I run the command on screen
 
 37
-00:03:11,378 --> 00:03:13,590
+00:03:11,170 --> 00:03:13,381
 打开浏览器里的本地面板。
 and open the local panel in my browser.
 
 38
-00:03:13,837 --> 00:03:18,671
+00:03:13,628 --> 00:03:18,463
 连上飞书，就可以从手头正在做的那条对话开始。
 Once Feishu is connected, I can pick up the conversation I’m already working on.
