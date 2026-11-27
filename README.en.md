@@ -1,56 +1,53 @@
-# <img src="https://raw.githubusercontent.com/13days/my-agents/main/assets/my-agents.png" width="40" height="40" alt=""> my-agents
+# <img src="https://raw.githubusercontent.com/13days/my-agents/main/assets/my-agents.png" width="40" height="40" alt="Three connected nodes"> my-agents
 
-**Start a coding session in your terminal, ask a follow-up from your phone, and pick up the same conversation in your browser.**
+**Start in Codex or Claude Code. Ask a follow-up in Feishu or WeCom. Open the web panel and the conversation is already there.**
 
-my-agents is a self-hosted panel that connects Feishu / Lark, WeCom and the web to your own Codex, Claude Code or DeepSeek Harness. Files and commands stay on the Mac or Linux machine you choose for the task.
+my-agents is a self-hosted workspace for your coding agents. Use a Mac and a Linux server from one panel, choose where each task runs, and use a Codex subscription or a compatible model gateway with Claude Code. DeepSeek Harness is also available as an engine.
 
-[中文](README.md) · [Quick start](#quick-start) · [Connect a chat app](#connect-a-chat-app) · [Tour and guides](#tour-and-guides)
-
-[![Sketchbook demo of a terminal conversation continuing in Feishu and the browser](https://raw.githubusercontent.com/13days/my-agents/main/docs/session-handoff.gif)](https://cdn.jsdelivr.net/gh/13days/my-agents@c649f281ab28fba819469a0ad8400c5220aa55a1/docs/session-handoff.mp4)
-
-*Select the animation to play the 30-second narrated clip with English subtitles. The demo uses a sample project called design-kit and locally rendered Feishu cards.*
+[中文](README.md) · [Connect a chat app](#connect-a-chat-app) · [Model accounts and proxies](#choose-the-engine-and-the-model-separately) · [Watch the full tour](#tour-and-guides)
 
 ## Quick start
 
-On a **Mac or Linux machine** with Git and curl, run the source installer to try the Sketchbook interface and WeCom settings shown here. On first install it prepares Node.js and starts the panel.
+On a **Mac or Linux machine with Git and curl**, run the installer. It checks for Node.js, installs it if needed, and starts the panel.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/13days/my-agents/main/install.sh | sh
 ```
 
-1. Install at least one engine, such as Codex or Claude Code, on the computer that will run your tasks. Sign in or connect a model gateway you already use.
-2. Open **[localhost:4321](http://localhost:4321)**. Under **Conversations → New conversation**, choose a project folder and an engine. Select **Appearance → Sketchbook** in the top-right corner for the style shown here.
-3. Ask “How do I run this project?” Once you have a reply, you can resume that conversation from a chat app.
+1. On the computer where you want to work, install [Codex](https://developers.openai.com/codex/cli/) or [Claude Code](https://code.claude.com/docs/en/quickstart) and sign in, or configure your model gateway.
+2. Open **[localhost:4321](http://localhost:4321)**, choose **Conversations → New conversation** and select an engine and a Git project. Ask “Summarize the last few commits in three bullets.” The reply appears in that conversation.
+3. To continue on your phone, connect a chat app below. The clip follows one example project, `design-kit`, from a terminal draft to a follow-up about the second bullet.
 
-<details>
-<summary>Use the npm release, or open a remote panel from your laptop</summary>
+[![A terminal drafts three project updates, a Feishu card selects that session, and the web panel shows the follow-up](https://raw.githubusercontent.com/13days/my-agents/main/docs/session-handoff-en.gif)](https://cdn.jsdelivr.net/gh/13days/my-agents@c649f281ab28fba819469a0ad8400c5220aa55a1/docs/session-handoff.mp4)
 
-With Node.js 18+ and npm installed, run the published build below. New features arrive with npm releases.
+*Play the 30-second clip with Chinese narration and English subtitles. The example uses the Sketchbook theme and a locally rendered Feishu card. Find Sketchbook under Appearance in the panel.*
 
-```sh
-npx --yes @wuchupeng/my-agents@latest
-```
+### npm or remote access
 
-For a panel hosted on a server, run this on your laptop. Replace `user@server` with your SSH address, then open localhost on port 4321.
+- **Use npm.** With Node.js 18+ and npm, run `npx --yes @wuchupeng/my-agents@latest`. The screenshots on this page follow the GitHub main branch. [View the npm release](https://www.npmjs.com/package/@wuchupeng/my-agents)
+- **Open a server from your laptop.** Run the command below on your laptop with your own SSH address in place of `user@server`. Then open localhost on port 4321. [Installation and startup services](docs/agent-install.md)
 
 ```sh
 ssh -N -L 4321:127.0.0.1:4321 user@server
 ```
 
-[Install Codex](https://developers.openai.com/codex/cli/) · [Install Claude Code](https://code.claude.com/docs/en/quickstart) · [Installation and persistent services](docs/agent-install.md)
-
-</details>
-
 ## Connect a chat app
 
-| App | Set it up once | Continue the work |
-| --- | --- | --- |
-| **Feishu / Lark** | In **Chat apps → Feishu**, scan the setup QR code or enter an existing app’s credentials. Follow the pairing steps. | DM `/sessions design-kit`, select **切换** (Switch), then ask “Expand the second point.” Use `/new` for a fresh task. |
-| **WeCom** | Create an **intelligent bot**, select **API mode → Long connection**, and enter its Bot ID and Secret in the panel. Have the intended owner send the first DM, `/whoami`. | Use `/sessions keyword` to find a session, `/use 1` to select the first result and `/status` to check progress. Send text, voice or a quoted follow-up. Mention the bot in groups. |
+### Feishu / Lark
 
-WeCom normally lists a member’s own sessions in the current chat. To pick up terminal and web sessions, first verify the paired owner, then enable owner session access in DMs. The setup page also lets you choose a machine, directory, engine, model and optional Git worktree for new conversations. In Feishu, the task author can create a read-only share card under **Details & actions** and forward the result. [Chat app setup](docs/im-channels.md) · [Feishu commands and cards](docs/feishu-interaction.md) · [Share card animation](https://raw.githubusercontent.com/13days/my-agents/main/docs/feishu-share.gif)
+1. In **Chat apps → Feishu**, scan the setup QR code or enter an existing app’s credentials. Follow the pairing instructions.
+2. Send the bot `/sessions design-kit` in a DM, replacing `design-kit` with your project. Select **切换** (Switch) and ask “Can you give me an example for the second bullet?” Use `/new` to start a separate session.
+3. To send a result to a colleague, open **Details & actions** on your completed card, generate a read-only share card and forward it. [Feishu commands and cards](docs/feishu-interaction.md) · [Share card preview](https://raw.githubusercontent.com/13days/my-agents/main/docs/feishu-share.gif)
 
-![WeCom settings for the execution machine, directory, engine, model and optional Git worktree](https://raw.githubusercontent.com/13days/my-agents/main/docs/wecom-defaults.png)
+### WeCom
+
+1. Create an intelligent bot, choose **API mode → Long connection**, and enter its Bot ID and Secret in **Chat apps → WeCom**. When the panel shows **Connected**, the intended owner should send the first DM, `/whoami`.
+2. To continue an existing **terminal or web** conversation, enable owner access to panel and terminal sessions in DMs on the setup page. Send `/sessions design-kit` to the bot, select the first result with `/use 1` and send your follow-up. In the default configuration, the bot lists your own sessions in the current chat.
+3. For a new session, set the default machine, folder and engine on the same page. You can also choose a model and a separate Git worktree. Use `/status` to check progress. The bot accepts text, voice and quoted messages, and responds to mentions in groups. [WeCom setup and permissions](docs/im-channels.md)
+
+![WeCom defaults for the execution machine, folder, engine, model and optional Git worktree](https://raw.githubusercontent.com/13days/my-agents/main/docs/wecom-defaults.png)
+
+### Back in the browser or terminal
 
 Back at your desk, **⌘K** (or **Ctrl+K** on Windows and Linux) opens search. Switch projects, find an answer inside a conversation, or filter tasks by status. Press Enter to open a result. To resume from a terminal, run `codex resume <session-id>` or `claude --resume <session-id>` on the original machine. [Terminal handoff requirements](docs/user-guide.md)
 
