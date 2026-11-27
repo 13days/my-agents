@@ -1,139 +1,94 @@
-# <img src="https://raw.githubusercontent.com/13days/my-agents/main/assets/my-agents.png" width="42" height="42" alt=""> my-agents
+# <img src="https://raw.githubusercontent.com/13days/my-agents/main/assets/my-agents.png" width="40" height="40" alt=""> my-agents
 
-**Start a Codex or Claude Code session in your terminal. Ask a follow-up in Feishu from your phone, then open the same conversation in your browser.**
+**Start a coding session in your terminal, ask a follow-up from your phone, and pick up the same conversation in your browser.**
 
-On a Mac or Linux machine with Node.js 18+ and npm, run
+my-agents is a self-hosted panel that connects Feishu / Lark, WeCom and the web to your own Codex, Claude Code or DeepSeek Harness. Files and commands stay on the Mac or Linux machine you choose for the task.
 
-```sh
-npx --yes @wuchupeng/my-agents@latest
-```
+[中文](README.md) · [Quick start](#quick-start) · [Connect a chat app](#connect-a-chat-app) · [Tour and guides](#tour-and-guides)
 
-Open **[localhost:4321](http://localhost:4321)**, choose a CLI you’ve signed in to, and send your first message. To keep working with your laptop closed, run the panel and the session on an always-on Linux server. If the panel is on the server, run `ssh -L 4321:127.0.0.1:4321 user@server` on your own computer (use your SSH address), then open the link above.
+[![Sketchbook demo of a terminal conversation continuing in Feishu and the browser](https://raw.githubusercontent.com/13days/my-agents/main/docs/session-handoff.gif)](https://cdn.jsdelivr.net/gh/13days/my-agents@c649f281ab28fba819469a0ad8400c5220aa55a1/docs/session-handoff.mp4)
 
-[Connect Feishu](#try-it-in-a-chat) · [Connect WeCom](#send-tasks-from-wecom) · [Run on several machines](#run-tasks-on-several-machines-from-one-panel) · [User guide (Chinese)](docs/user-guide.md) · [中文](README.md)
+*Select the animation to play the 30-second narrated clip with English subtitles. The demo uses a sample project called design-kit and locally rendered Feishu cards.*
 
-[![24-second demo of one Codex session, from the terminal to a follow-up in Feishu and the reply in the web panel](https://raw.githubusercontent.com/13days/my-agents/main/docs/session-handoff.gif)](https://github.com/13days/my-agents/releases/download/v0.18.1/my-agents-handoff.mp4)
+## Quick start
 
-[Play the 24-second demo with English subtitles](https://github.com/13days/my-agents/releases/download/v0.18.1/my-agents-handoff.mp4). The footage uses the example project design-kit.
-
-## Continue the same conversation in the terminal, chat, or browser
-
-1. **Start in the terminal.** In your project directory, ask Codex or Claude Code, “Which product updates landed this week?” Each engine keeps its own sessions. Pick that same session when you change where you chat.
-2. **Pick it up on your phone.** Send your Feishu bot `/sessions product updates`. Find the conversation by its machine, project, and last question, then select **切换** (Switch) on the row. Expand **会话详情** for the branch and prompts, or send `/help` for Find session and New task. Ask “Expand the second update for the design team.” The agent has the list you were discussing.
-3. **Continue at your desk.** Open the same session under **Conversations** in the web panel. Your follow-up from Feishu and the reply are there, and you can keep editing. You can also continue in the original terminal. If you closed it, run `codex resume <session-id>` or `claude --resume <session-id>` in the project directory on the original machine.
-
-![Feishu session list and /help card layout preview with sample data](https://raw.githubusercontent.com/13days/my-agents/main/docs/feishu-session-help-preview.png)
-
-To continue in a terminal window that is still open, the Codex daemon on that machine must have the session loaded, or the Claude Code window must allow incoming session messages. [Terminal handoff details (Chinese)](docs/user-guide.md)
-
-![Continue the product-update conversation in the web panel](https://raw.githubusercontent.com/13days/my-agents/main/docs/conversation-preview.png)
-
-Press **⌘K / Ctrl+K** on the web to switch projects, find a question or answer, or open the conversation behind a task. Choose Light, Dark, or Sketchbook in the toolbar.
-
-## Try it in a chat
-
-Send your bot a task like this:
-
-> /new Read this week’s merged changes and write three updates I can share with the design team.
-
-Choose a project and an engine, then submit. The task card updates as the agent works. Reply in the thread to ask for a revision. The task footer ends with **详情与操作** (Details & actions). Expand it to check the execution machine or, as the task author, select **生成分享卡** to create a card you can forward. The footer shows the engine and, when available, the model that answered. Click **my-agents** to open this repository.
-
-![Send a task in Feishu, read the reply and forward a share card](https://raw.githubusercontent.com/13days/my-agents/main/docs/feishu-share.gif)
-
-*The animation uses a local preview of cards generated by the gateway. Panel screenshots use sample accounts, projects, and conversations.*
-
-## Start your first panel
-
-On a fresh Mac or Linux host with Git and curl, use the source installer:
+On a **Mac or Linux machine** with Git and curl, run the source installer to try the Sketchbook interface and WeCom settings shown here. On first install it prepares Node.js and starts the panel.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/13days/my-agents/main/install.sh | sh
 ```
 
-The installer uses your existing Node.js 18+ and npm when available. On Intel and ARM 64-bit systems it can download a checksum-verified Node.js 24 LTS runtime into your home directory. The source lives in `~/.local/share/my-agents/source`. The panel runs in the foreground. Use the same command to start it again.
-
-1. Open **[localhost:4321](http://localhost:4321)**. Install Codex or Claude Code on the machine that will run your task. Sign in with your account, or connect Claude Code through one of the two proxies below. Open **Conversations** and ask how to run your project. Use the controls above the composer to change its folder or execution machine. [Install Codex](https://developers.openai.com/codex/cli/) · [Install Claude Code](https://code.claude.com/docs/en/quickstart)
-2. Under **Chat apps**, scan the setup QR code or enter an existing bot’s credentials. Follow the pairing and card-button authorization prompts.
-3. Send the bot the `/new` example above. You can follow its progress in the thread. [Feishu cards and commands (Chinese)](docs/feishu-interaction.md)
-
-Under **Chat apps → Feishu → Access**, the group and direct-message rules appear side by side. In this example, the paired account can mention the bot in any group it has joined. Selecting the design group also grants its members access there.
-
-![Feishu group access, detailed cards, and individually authorized accounts](https://raw.githubusercontent.com/13days/my-agents/main/docs/feishu-access-preview.png)
-
-### Send tasks from WeCom
-
-Create an **intelligent bot** in WeCom, select **API mode → Long connection**, and copy its Bot ID and Secret. Under **Chat apps → WeCom**, enter the credentials, select the engine and project for new conversations, then choose **Save and connect**. Only an outbound connection is required.
-
-The first sender becomes the bot owner automatically. Other members can DM for their UserID and be added under **Additional member UserIDs**. Installation includes `lark-cli` and `wecom-cli`. Authorized members can send text or voice, or quote a message and ask a follow-up. Answers return to the chat and the web conversation. Send `/sessions keyword` to find a conversation, `/use 1` to switch, `/status` to check progress, or `/new Run the tests` to start a fresh task. Enable owner session access in the panel to resume terminal and web sessions in the owner’s DM. Feishu share cards and the assistant’s personal-history source are configured separately. [WeCom setup (Chinese)](docs/im-channels.md)
-
-![WeCom setup with bot credentials, allowed members and project defaults (Chinese UI)](https://raw.githubusercontent.com/13days/my-agents/main/docs/wecom-setup-preview.png)
-
-### DeepSeek Harness
-
-Select **DeepSeek Harness** for a new conversation on a machine with `dsh` installed. It can reuse Claude Code proxy accounts, models and routing. To connect a standalone Harness UI on the same machine, open the DeepSeek Harness tab under AI accounts and copy the local endpoint and proxy key into a custom **Anthropic Messages** provider. [Setup guide (Chinese)](docs/deepseek-harness.md)
-
+1. Install at least one engine, such as Codex or Claude Code, on the computer that will run your tasks. Sign in or connect a model gateway you already use.
+2. Open **[localhost:4321](http://localhost:4321)**. Under **Conversations → New conversation**, choose a project folder and an engine. Select **Appearance → Sketchbook** in the top-right corner for the style shown here.
+3. Ask “How do I run this project?” Once you have a reply, you can resume that conversation from a chat app.
 
 <details>
-<summary>Run a source checkout</summary>
+<summary>Use the npm release, or open a remote panel from your laptop</summary>
+
+With Node.js 18+ and npm installed, run the published build below. New features arrive with npm releases.
 
 ```sh
-git clone https://github.com/13days/my-agents.git
-cd my-agents
-npm install
-MY_AGENTS_NO_PROXY_SETUP=1 npm start
+npx --yes @wuchupeng/my-agents@latest
 ```
 
-Both the installer and this start command keep your terminal proxy configuration intact. For a persistent install, enable login startup in the macOS panel or install a Linux user service. [Installation and services (Chinese)](docs/agent-install.md)
+For a panel hosted on a server, run this on your laptop. Replace `user@server` with your SSH address, then open localhost on port 4321.
+
+```sh
+ssh -N -L 4321:127.0.0.1:4321 user@server
+```
+
+[Install Codex](https://developers.openai.com/codex/cli/) · [Install Claude Code](https://code.claude.com/docs/en/quickstart) · [Installation and persistent services](docs/agent-install.md)
 
 </details>
 
-## Run tasks on several machines from one panel
+## Connect a chat app
 
-![Feishu, WeCom and the web share a my-agents cluster running Claude Code, Codex or DeepSeek Harness, with optional custom gateway and Codex subscription proxies](https://raw.githubusercontent.com/13days/my-agents/main/docs/my-agents-overview.gif)
+| App | Set it up once | Continue the work |
+| --- | --- | --- |
+| **Feishu / Lark** | In **Chat apps → Feishu**, scan the setup QR code or enter an existing app’s credentials. Follow the pairing steps. | DM `/sessions design-kit`, select **切换** (Switch), then ask “Expand the second point.” Use `/new` for a fresh task. |
+| **WeCom** | Create an **intelligent bot**, select **API mode → Long connection**, and enter its Bot ID and Secret in the panel. Have the intended owner send the first DM, `/whoami`. | Use `/sessions keyword` to find a session, `/use 1` to select the first result and `/status` to check progress. Send text, voice or a quoted follow-up. Mention the bot in groups. |
 
-In **Computers & AI accounts → Computers → Add computer**, enter a passwordless SSH address or host alias. The panel prepares the runtime, installs the runner, and connects the device. On the same page, choose the default machine for new tasks. Use **Choose folder** on a computer card to browse its local or remote directories, or use **Project folders → Add** on the card to create a project or link its existing checkout on this machine. Existing sessions keep their execution machine.
+WeCom normally lists a member’s own sessions in the current chat. To pick up terminal and web sessions, first verify the paired owner, then enable owner session access in DMs. The setup page also lets you choose a machine, directory, engine, model and optional Git worktree for new conversations. In Feishu, the task author can create a read-only share card under **Details & actions** and forward the result. [Chat app setup](docs/im-channels.md) · [Feishu commands and cards](docs/feishu-interaction.md) · [Share card animation](https://raw.githubusercontent.com/13days/my-agents/main/docs/feishu-share.gif)
 
-![The design-kit checkout mapped to a different directory on each execution machine](https://raw.githubusercontent.com/13days/my-agents/main/docs/workspace-paths-preview.png)
+![WeCom settings for the execution machine, directory, engine, model and optional Git worktree](https://raw.githubusercontent.com/13days/my-agents/main/docs/wecom-defaults.png)
 
-The remote device does not need my-agents preinstalled. For password or MFA logins, sign in yourself, choose **Connect from the remote terminal**, run the generated command and keep the process running. The device needs to reach the panel on your trusted network. Both methods require the selected engine CLI and a usable account on the execution machine.
+Back at your desk, **⌘K** (or **Ctrl+K** on Windows and Linux) opens search. Switch projects, find an answer inside a conversation, or filter tasks by status. Press Enter to open a result. To resume from a terminal, run `codex resume <session-id>` or `claude --resume <session-id>` on the original machine. [Terminal handoff requirements](docs/user-guide.md)
 
-For example, open one conversation with Claude Code on your laptop to review the frontend and another with Codex on a Linux machine to run tests. Both report progress in the same panel.
+![Project switcher and conversation, transcript and task search in the Sketchbook theme](https://raw.githubusercontent.com/13days/my-agents/main/docs/conversation-finder.png)
 
-In Feishu, send `/node` to list machines. If your Linux server is named `linux-server` and the project lives at `~/repos/web`, send `/node linux-server ~/repos/web`, then ask it to run the tests in that thread. Commands run against the checkout on the selected machine.
+## One panel for several machines
 
-On a Mac, turn on keep-awake under the Feishu connection’s runtime settings to keep receiving messages while the computer is idle.
+Have Claude Code review the frontend on your Mac while Codex runs tests on Linux. Each conversation has its own execution machine and project directory. Both report progress to the same panel.
 
-An execution node is enough to run remote tasks. To keep receiving Feishu messages when your laptop goes offline, run three persistent full panels. The other two can form a majority and elect a new receiver. [Cluster setup and failover (Chinese)](docs/cluster-setup.md)
+![How chat, web and terminal conversations reach Mac and Linux machines, agent engines and model proxies](https://raw.githubusercontent.com/13days/my-agents/main/docs/my-agents-overview.gif)
 
-## Use Claude Code without a Claude model
+- **Connect a machine.** Open **Computers & AI accounts → Computers**. Add a passwordless SSH host or alias to install the remote runner automatically. For password or MFA logins, sign in yourself and run the connection command shown in the panel.
+- **Map the project.** Browse folders on each computer card. The same project can point to `~/src/design-kit` on the Mac and `/srv/repos/design-kit` on Linux. Each machine works in its own checkout.
+- **Keep receiving messages.** macOS supports idle-sleep prevention and login startup. For reception when a laptop goes offline, deploy three full panels. Two online panels can elect a new message receiver. An existing CLI process stays on the machine that started it. [Project paths and worktrees](docs/execution-workspaces.md) · [Cluster setup and takeover](docs/cluster-setup.md)
 
-Open **Computers & AI accounts → AI accounts → Claude Code** and choose the model access you already have. With either option, Claude Code reads and edits project files and runs commands on the computer you select.
+## Choose the engine and the model separately
 
-| What you have | How to connect |
+**You can use Claude Code’s tools with a GPT model.** Set up a model source under **Computers & AI accounts → AI accounts**. The engine runs commands and edits files on your computer. The account or gateway supplies the model.
+
+| Model access you have | How to use it |
 | --- | --- |
-| A gateway compatible with the Anthropic Messages API | Choose **Connect a custom proxy**. Paste the Claude Code configuration from your gateway, or enter its URL and token. Save the account, then open **Choose model** to see the models your gateway offers. |
-| A ChatGPT subscription that includes Codex | Sign in under **AI accounts → Codex → Add account → Sign in with a subscription**. Once the subscription is in the pool, choose **Use Codex subscription proxy → Set up a Claude Code account**, review the model, and save. Claude Code can now use GPT through your subscription. |
+| A ChatGPT subscription that includes Codex | Sign in under **Codex**, then choose **Use Codex subscription proxy → Set up a Claude Code account**. One subscription can serve both Codex and Claude Code. |
+| An Anthropic Messages-compatible gateway | Choose **Connect a custom proxy** under Claude Code, enter the gateway configuration and select an available model. DeepSeek Harness can reuse this proxy on machines with `dsh` installed. |
 
-Set the saved account as preferred in the panel, or send `/route` in a Feishu thread to see and select accounts. To use the same subscription in a standalone terminal, the proxy dialog also provides a separate Claude Code configuration and its launch command. [Terminal setup and supported features (Chinese)](docs/codex-subscription-proxy.md)
+Set the default model for new conversations per engine. In a Feishu thread, use `/model` to select the model and `/route` to choose the account. If a gateway maps model names, check the observed model under **Details & actions** on the completed card. [Codex subscription proxy](docs/codex-subscription-proxy.md) · [DeepSeek Harness setup](docs/deepseek-harness.md)
 
-![Claude Code account settings with both the custom proxy and Codex subscription proxy options](https://raw.githubusercontent.com/13days/my-agents/main/docs/engine-models-preview.png)
+## Let the assistant follow a conversation
 
-Claude Code and Codex each have a **Default model for new chats** setting. Send `/model` in a Feishu thread to choose the model for its next turn, or `/model default` to restore the default. A fixed mapping on your gateway can override this selection. Open **详情与操作** on the completed reply to see the recorded model and proxy.
+Authorize your personal Feishu account under **Assistant** and select the chats to read. For example, a colleague can ask for a change in a group and clarify it later in a DM. The assistant considers the senders, follow-ups and existing tasks, then suggests which messages belong together and which session should receive them. Approve, change the destination or dismiss the suggestion. Reviews can inform later decisions.
 
-## Let the assistant follow your chats
+![Two messages about a design review grouped into one suggestion for approval](https://raw.githubusercontent.com/13days/my-agents/main/docs/assistant-review-preview.png)
 
-Connect your personal Feishu account under **Assistant**, choose which chats to read, and turn on sync. Review suggested actions based on senders, follow-up replies, and work already in progress. You can change the target conversations, approve an action, or dismiss it. Past reviews can inform future suggestions.
+Message sync and model analysis have separate switches. Model analysis also supports a daily budget. [Assistant access, review and budget](docs/heartflow.md)
 
-![Two messages from the design group lead to a single weekly-update suggestion awaiting approval](https://raw.githubusercontent.com/13days/my-agents/main/docs/assistant-review-preview.png)
+## Tour and guides
 
-Model analysis has its own switch and daily budget. [Assistant settings (Chinese)](docs/heartflow.md)
+[![Play the 2 minute 40 second Sketchbook tour of session handoff, remote machines, model proxies and the assistant](https://raw.githubusercontent.com/13days/my-agents/main/docs/product-tour-en.png)](https://cdn.jsdelivr.net/gh/13days/my-agents@c649f281ab28fba819469a0ad8400c5220aa55a1/docs/my-agents-intro.mp4)
 
-## Full product tour
+**2 min 40 sec · Chinese narration · English and Chinese captions.** The tour follows a project from terminal to chat, then covers parallel tasks, model gateways and assistant approvals. [Download the MP4](https://raw.githubusercontent.com/13days/my-agents/c649f281ab28fba819469a0ad8400c5220aa55a1/docs/my-agents-intro.mp4) · [Download captions](docs/my-agents-intro.srt)
 
-[![Play the 2 min 40 sec tour of session handoff, multi-machine tasks, model proxies and the assistant](https://raw.githubusercontent.com/13days/my-agents/main/docs/product-tour-en.png)](https://cdn.jsdelivr.net/gh/13days/my-agents@v0.18.1/docs/my-agents-intro.mp4)
-
-The 2 min 40 sec tour also covers multi-machine execution, the Codex subscription proxy, and the Feishu assistant. [Download the video](https://raw.githubusercontent.com/13days/my-agents/v0.18.1/docs/my-agents-intro.mp4) · [Chinese and English captions](docs/my-agents-intro.srt)
-
-If you use my-agents to pick up a terminal session from chat, a [GitHub star](https://github.com/13days/my-agents) helps others find it. If a handoff fails, tell us which two clients you switched between in an issue.
-
-[Releases](https://github.com/13days/my-agents/releases) · [Issues](https://github.com/13days/my-agents/issues) · [MIT license](LICENSE)
+[User guide](docs/user-guide.md) · [Releases](https://github.com/13days/my-agents/releases) · [Report an issue](https://github.com/13days/my-agents/issues) · [MIT license](LICENSE)
