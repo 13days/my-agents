@@ -12,9 +12,9 @@ npx --yes @wuchupeng/my-agents@latest
 
 [连接飞书](#从飞书里用一次) · [连接企业微信](#用企业微信发任务) · [多机执行](#一个终端启动多台机器分头工作) · [使用手册](docs/user-guide.md) · [English](README.en.md)
 
-[![30 秒演示：在 Codex 终端整理三条更新，到飞书追问第二条，再从网页查看这次追问和答复](https://raw.githubusercontent.com/13days/my-agents/main/docs/session-handoff.gif)](https://github.com/13days/my-agents/releases/download/v0.18.0/my-agents-handoff.mp4)
+[![24 秒演示：在 Codex 终端整理三条更新，到飞书追问第二条，再从网页查看这次追问和答复](https://raw.githubusercontent.com/13days/my-agents/main/docs/session-handoff.gif)](https://github.com/13days/my-agents/releases/download/v0.18.1/my-agents-handoff.mp4)
 
-[播放 30 秒演示（中文旁白 · 中英字幕）](https://github.com/13days/my-agents/releases/download/v0.18.0/my-agents-handoff.mp4)。画面使用示例项目 design-kit。
+[播放 24 秒演示（中文旁白 · 中英字幕）](https://github.com/13days/my-agents/releases/download/v0.18.1/my-agents-handoff.mp4)。画面使用示例项目 design-kit。
 
 ## 在终端、飞书和网页接着聊
 
@@ -129,9 +129,9 @@ Claude Code 和 Codex 可以分别设置「新对话默认模型」。要为当�
 
 ## 完整产品介绍
 
-[![播放 3 分 20 秒产品介绍，从终端与飞书接续到多机执行、模型代理和助理](https://raw.githubusercontent.com/13days/my-agents/main/docs/product-tour-zh.png)](https://cdn.jsdelivr.net/gh/13days/my-agents@v0.18.0/docs/my-agents-intro.mp4)
+[![播放 2 分 40 秒产品介绍，从终端与飞书接续到多机执行、模型代理和助理](https://raw.githubusercontent.com/13days/my-agents/main/docs/product-tour-zh.png)](https://cdn.jsdelivr.net/gh/13days/my-agents@v0.18.1/docs/my-agents-intro.mp4)
 
-3 分 20 秒了解会话接续、多机执行、Codex 订阅代理和飞书助理。[下载视频](https://raw.githubusercontent.com/13days/my-agents/v0.18.0/docs/my-agents-intro.mp4) · [中英字幕](docs/my-agents-intro.srt)
+2 分 40 秒了解会话接续、多机执行、Codex 订阅代理和飞书助理。[下载视频](https://raw.githubusercontent.com/13days/my-agents/v0.18.1/docs/my-agents-intro.mp4) · [中英字幕](docs/my-agents-intro.srt)
 
 ## 项目
 

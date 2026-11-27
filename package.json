@@ -1,6 +1,6 @@
 {
   "name": "@wuchupeng/my-agents",
-  "version": "0.18.0",
+  "version": "0.18.1",
   "description": "Continue Claude Code and Codex terminal sessions from Feishu or the web. Self-hosted workspace with WeCom bots, remote execution and model proxies.",
   "main": "server.js",
   "bin": {

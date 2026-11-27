@@ -12,9 +12,9 @@ Open **[localhost:4321](http://localhost:4321)**, choose a CLI you’ve signed i
 
 [Connect Feishu](#try-it-in-a-chat) · [Connect WeCom](#send-tasks-from-wecom) · [Run on several machines](#run-tasks-on-several-machines-from-one-panel) · [User guide (Chinese)](docs/user-guide.md) · [中文](README.md)
 
-[![30-second demo of one Codex session, from the terminal to a follow-up in Feishu and the reply in the web panel](https://raw.githubusercontent.com/13days/my-agents/main/docs/session-handoff.gif)](https://github.com/13days/my-agents/releases/download/v0.18.0/my-agents-handoff.mp4)
+[![24-second demo of one Codex session, from the terminal to a follow-up in Feishu and the reply in the web panel](https://raw.githubusercontent.com/13days/my-agents/main/docs/session-handoff.gif)](https://github.com/13days/my-agents/releases/download/v0.18.1/my-agents-handoff.mp4)
 
-[Play the 30-second demo with English subtitles](https://github.com/13days/my-agents/releases/download/v0.18.0/my-agents-handoff.mp4). The footage uses the example project design-kit.
+[Play the 24-second demo with English subtitles](https://github.com/13days/my-agents/releases/download/v0.18.1/my-agents-handoff.mp4). The footage uses the example project design-kit.
 
 ## Continue the same conversation in the terminal, chat, or browser
 
@@ -128,9 +128,9 @@ Model analysis has its own switch and daily budget. [Assistant settings (Chinese
 
 ## Full product tour
 
-[![Play the 3 min 20 sec tour of session handoff, multi-machine tasks, model proxies and the assistant](https://raw.githubusercontent.com/13days/my-agents/main/docs/product-tour-en.png)](https://cdn.jsdelivr.net/gh/13days/my-agents@v0.18.0/docs/my-agents-intro.mp4)
+[![Play the 2 min 40 sec tour of session handoff, multi-machine tasks, model proxies and the assistant](https://raw.githubusercontent.com/13days/my-agents/main/docs/product-tour-en.png)](https://cdn.jsdelivr.net/gh/13days/my-agents@v0.18.1/docs/my-agents-intro.mp4)
 
-The 3 min 20 sec tour also covers multi-machine execution, the Codex subscription proxy, and the Feishu assistant. [Download the video](https://raw.githubusercontent.com/13days/my-agents/v0.18.0/docs/my-agents-intro.mp4) · [Chinese and English captions](docs/my-agents-intro.srt)
+The 2 min 40 sec tour also covers multi-machine execution, the Codex subscription proxy, and the Feishu assistant. [Download the video](https://raw.githubusercontent.com/13days/my-agents/v0.18.1/docs/my-agents-intro.mp4) · [Chinese and English captions](docs/my-agents-intro.srt)
 
 If you use my-agents to pick up a terminal session from chat, a [GitHub star](https://github.com/13days/my-agents) helps others find it. If a handoff fails, tell us which two clients you switched between in an issue.
 
