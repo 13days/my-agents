@@ -28,6 +28,8 @@ To continue in a terminal window that is still open, the Codex daemon on that ma
 
 ![Continue the product-update conversation in the web panel](https://raw.githubusercontent.com/13days/my-agents/main/docs/conversation-preview.png)
 
+Press **⌘K / Ctrl+K** on the web to switch projects, find a question or answer, or open the conversation behind a task. Choose Light, Dark, or Sketchbook in the toolbar.
+
 ## Try it in a chat
 
 Send your bot a task like this:
@@ -62,7 +64,7 @@ Under **Chat apps → Feishu → Access**, the group and direct-message rules ap
 
 Create an **intelligent bot** in WeCom, select **API mode → Long connection**, and copy its Bot ID and Secret. Under **Chat apps → WeCom**, enter the credentials, select the engine and project for new conversations, then choose **Save and connect**. Only an outbound connection is required.
 
-The first sender becomes the bot owner automatically. Other members can DM for their UserID and be added under **Additional member UserIDs**. Installation includes `lark-cli` and `wecom-cli`. Authorized members can send a text task privately or mention the bot in a group. The answer returns to that chat and is available in the web conversation. Follow-ups reuse the same conversation per member and chat. Send `/new` on its own to start another. Feishu share cards and the assistant’s personal-history source are configured separately. [WeCom setup (Chinese)](docs/im-channels.md)
+The first sender becomes the bot owner automatically. Other members can DM for their UserID and be added under **Additional member UserIDs**. Installation includes `lark-cli` and `wecom-cli`. Authorized members can send text or voice, or quote a message and ask a follow-up. Answers return to the chat and the web conversation. Send `/sessions keyword` to find a conversation, `/use 1` to switch, `/status` to check progress, or `/new Run the tests` to start a fresh task. Enable owner session access in the panel to resume terminal and web sessions in the owner’s DM. Feishu share cards and the assistant’s personal-history source are configured separately. [WeCom setup (Chinese)](docs/im-channels.md)
 
 ![WeCom setup with bot credentials, allowed members and project defaults (Chinese UI)](https://raw.githubusercontent.com/13days/my-agents/main/docs/wecom-setup-preview.png)
 

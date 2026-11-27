@@ -38,6 +38,7 @@ test('WeCom long connection authenticates, fences membership and resumes only th
   const gateway = createWecom({
     dir, canStart: () => isLeader, connect: opts => connectWecom({ ...opts, url }),
     panel: {
+      validateTarget: async () => ({cwd: '/project'}),
       async submit(input) {
         const sessionId = input.sessionId || 'session-' + (sessions.size + 1);
         if (!sessions.has(sessionId)) sessions.set(sessionId, createChatJob({sessionId}));
@@ -69,8 +70,8 @@ test('WeCom long connection authenticates, fences membership and resumes only th
 
   gateway.start();
   assert.equal(gateway.status().phase, 'disabled');
-  assert.throws(() => gateway.configure({allowedUsers:[' * ']}));
-  gateway.configure({enabled:true, botId:'bot-1', secret:'fixture-secret', engine:'claude', allowedUsers:['teammate'], workspaceId:'design'});
+  await assert.rejects(() => gateway.configure({allowedUsers:[' * ']}));
+  await gateway.configure({enabled:true, botId:'bot-1', secret:'fixture-secret', engine:'claude', allowedUsers:['teammate'], workspaceId:'design'});
   await until(() => gateway.status().phase === 'connected');
   assert.equal(gateway.status().config.hasSecret, true);
   assert.ok(!JSON.stringify(gateway.status()).includes('fixture-secret'));
@@ -108,7 +109,7 @@ test('WeCom long connection authenticates, fences membership and resumes only th
   finish(group,'答'.repeat(9000));
   const clipped = (await final('c')).body.stream.content;
   assert.ok(Buffer.byteLength(clipped)<=20480); assert.match(clipped,/完整结果/);
-  gateway.configure({allowedUsers:[]}); finish(other,'private answer');
+  await gateway.configure({allowedUsers:[]}); finish(other,'private answer');
   send('new','/new'); await final('new'); send('e','fresh');
   const fresh = await waitTurn('fresh'); assert.notEqual(fresh.sessionId,one.sessionId);
   assert.ok(!frames('d').some(f=>f.body.stream.finish));
@@ -130,9 +131,9 @@ test('WeCom long connection authenticates, fences membership and resumes only th
   await until(()=>subscriptions>before && gateway.status().phase==='connected');
   ws.send(JSON.stringify({cmd:'aibot_event_callback',headers:{req_id:'kick'},body:{event:{eventtype:'disconnected_event'}}}));
   await until(()=>gateway.status().phase==='error');
-  rejectAuth=true; gateway.configure({enabled:true});
+  rejectAuth=true; await gateway.configure({enabled:true});
   await until(()=>gateway.status().phase==='error' && gateway.status().lastError.includes('40013'));
-  gateway.configure({enabled:false}); assert.equal(gateway.status().phase,'disabled');
+  await gateway.configure({enabled:false}); assert.equal(gateway.status().phase,'disabled');
 });
 
 test('owner survives restart, is scoped to the bot, and migrates a single historical sender', async t => {
@@ -143,9 +144,9 @@ test('owner survives restart, is scoped to the bot, and migrates a single histor
   let connection, leader=true;
   const gateway=createWecom({dir, panel:{}, canStart:()=>leader, connect: opts=>{ connection=opts; return {close(){}}; }});
   const use=botId=>gateway.configure({enabled:true,botId,secret:'test-secret'});
-  use('old');
+  await use('old');
   assert.equal(gateway.status().ownerUserId,'past');
-  use('__proto__');
+  await use('__proto__');
   const message={aibotid:'__proto__',msgid:'one',from:{userid:'new-owner'},chattype:'single',msgtype:'text',text:{content:'/whoami'}};
   const replies=[];
   const reply=async (...args)=>{replies.push(args);};
@@ -157,8 +158,98 @@ test('owner survives restart, is scoped to the bot, and migrates a single histor
   connection.onMessage({...message,msgid:'two',from:{userid:'another'}},reply);
   await until(()=>replies.length===2);
   assert.equal(gateway.status().ownerUserId,'new-owner');
-  use('old'); gateway.stop(); gateway.reload(); gateway.start();
+  await use('old'); gateway.stop(); gateway.reload(); gateway.start();
   assert.equal(gateway.status().ownerUserId,'past');
-  use('__proto__'); assert.equal(gateway.status().ownerUserId,'new-owner');
+  await use('__proto__'); assert.equal(gateway.status().ownerUserId,'new-owner');
   gateway.stop();
+});
+
+test('WeCom voice, quotes, session handoff and status respect the bot, member and chat', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wecom-handoff-'));
+  const turns = [], catalogQueries = [];
+  const terminal = {id:'terminal-session', title:'Review design-kit', engine:'codex', machineId:'linux', project:'/projects/design-kit'};
+  let connection, seq = 0, permitResume = true;
+  const gateway = createWecom({
+    dir, canStart: () => true,
+    connect(opts) { connection = opts; return {close() {}}; },
+    panel: {
+      engines: () => [{id:'codex', label:'Codex'}],
+      machineLabel: () => 'Linux 服务器',
+      validateTarget: async ({machineId, cwd}) => {
+        if (machineId !== 'linux' || cwd !== '/project') throw Error('机器或目录不可用');
+        return {cwd};
+      },
+      models: async () => ({models:[{id:'allowed-model'}]}),
+      async sessionCatalog({query}) {
+        catalogQueries.push(query);
+        return {sessions: permitResume && (!query || terminal.id.includes(query) || terminal.title.includes(query)) ? [terminal] : [], unavailable: []};
+      },
+      async resolveSession(id, row) { assert.deepEqual(row, terminal); return row; },
+      sessionStatus(id) { assert.equal(id, terminal.id); return '正在执行'; },
+      async submit(input) {
+        if (input.prompt === 'fail submission') throw Error('offline');
+        const sessionId = input.sessionId || 'chat-' + seq;
+        turns.push({...input, sessionId}); return {sessionId, engine:'codex', machineId:'linux'};
+      },
+      watch(id, notify) {
+        const {messageId} = turns.at(-1);
+        notify('done', {messageId}); return () => {};
+      },
+    },
+  });
+  t.after(() => { gateway.stop(); fs.rmSync(dir,{recursive:true,force:true}); });
+  const send = (text, fields = {}) => new Promise(resolve => {
+    connection.onMessage({
+      aibotid:'working', msgid:String(++seq), chattype:'single', from:{userid:'owner'}, msgtype:'text', text:{content:text}, ...fields,
+    }, async (_, content, final) => { if (final) resolve(content); });
+  });
+  await gateway.configure({enabled:true, botId:'working', secret:'fixture', allowedUsers:['colleague']});
+  await assert.rejects(() => gateway.configure({ownerSessionCatalog:true}), /Owner/);
+  await send('/whoami');
+  assert.match(await send('/status'), /没有可用会话/);
+  assert.match(await send('/sessions'), /没有会话/);
+  assert.deepEqual(catalogQueries, []);
+  await assert.rejects(gateway.configure({cwd:'/project'}), /指定一台/);
+  await assert.rejects(gateway.configure({machineId:'wrong', cwd:'/project'}), /不可用/);
+  await assert.rejects(gateway.configure({machineId:'linux', cwd:'/project', model:'missing'}), /模型/);
+  assert.equal(gateway.status().config.machineId, '');
+  await gateway.configure({machineId:'linux', cwd:'/project', model:'allowed-model', worktree:true});
+  await send('', {msgtype:'voice', voice:{content:'Prepare release notes'}, quote:{msgtype:'text', text:{content:'Mention design-kit'}}});
+  const first = turns.at(-1);
+  assert.deepEqual([first.machineId, first.cwd, first.model, first.worktree], ['linux','/project','allowed-model',true]);
+  assert.equal(gateway.status().receipts[0].sender, 'owner');
+  await until(() => gateway.status().receipts[0].stage === 'replied');
+  assert.equal(first.prompt, 'Prepare release notes'); assert.match(first.gatewayContext, /Mention design-kit/);
+  assert.match(await send('/new fail submission'), /offline/);
+  await gateway.configure({model:'', worktree:false});
+  await send('still here');
+  assert.deepEqual([turns.at(-1).model, turns.at(-1).cwd, turns.at(-1).worktree], ['allowed-model', undefined, undefined]); assert.equal(turns.at(-1).sessionId,first.sessionId);
+  await send('/new run tests'); assert.equal(turns.at(-1).prompt,'run tests'); assert.notEqual(turns.at(-1).sessionId, first.sessionId);
+  assert.match(await send('/sessions Prepare'), /1\. Prepare release notes/);
+  const count=turns.length; assert.match(await send('/use 1'), /已切换/); assert.equal(turns.length,count);
+  await send('follow up', {quote:{msgtype:'voice',voice:{content:'Ship Friday'}}});
+  assert.equal(turns.at(-1).sessionId,first.sessionId); assert.match(turns.at(-1).gatewayContext,/Ship Friday/);
+  assert.match(await send('/new'), /下一条/);
+  gateway.stop(); gateway.reload(); gateway.start();
+  assert.match(await send('/use 1'), /先发/); assert.match(await send('/sessions Prepare'), /Prepare release/);
+
+  await gateway.configure({ownerSessionCatalog:true});
+  const group={chattype:'group',chatid:'design'}, other={from:{userid:'colleague'}};
+  assert.match(await send('/sessions', group), /没有会话/);
+  assert.match(await send('/sessions', other), /没有会话/);
+  assert.deepEqual(catalogQueries, []);
+  assert.match(await send('/sessions design-kit'), /Review design-kit/);
+  assert.match(await send('/use 1', other), /先发/);
+  assert.match(await send('/use 1', group), /先发/);
+  permitResume=false; assert.match(await send('/use 1'), /暂时无法接续/);
+  permitResume=true; assert.match(await send('/use 1'), /已切换/);
+  assert.match(await send('/status'), /Linux 服务器[\s\S]*正在执行/);
+  await send('Continue the review'); assert.equal(turns.at(-1).sessionId, terminal.id);
+  await gateway.configure({ownerSessionCatalog:false});
+  const beforeRevoke=turns.length;
+  assert.match(await send('after revoke'), /访问已关闭/);
+  assert.equal(turns.length,beforeRevoke);
+  assert.match(await send('/sessions design-kit'), /没有匹配/);
+  assert.match(await send('/status'), /没有可用会话/);
+  await send('/new use local history'); assert.notEqual(turns.at(-1).sessionId,terminal.id);
 });

@@ -1149,6 +1149,14 @@ const searchTranscripts = createTranscriptSearch({
   ],
   claudeUserText: transcriptUserText,
   metadata: () => sessionStore.read(),
+  harnessSessions: () => {
+    const rows = new Map(Object.values(conversations.read()).filter(row => row.engine === 'deepseek' && (!row.machineId || row.machineId === 'local' || row.machineId === machineId())).map(row => [row.id, row]));
+    try {
+      for (const id of fs.readdirSync(path.join(DATA_DIR, 'dsh-sessions'))) if (!rows.has(id)) rows.set(id, { id });
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    return [...rows.values()];
+  },
+  harnessHistory: (id, page) => readHarnessHistory(id, page),
 });
 
 // ---------- 会话回放 ----------
@@ -2090,6 +2098,11 @@ async function submitIMTurn({ gatewayContext, ...input }) {
   const { sessionId, run: started } = await manager.start({ ...input, context: gatewayContext });
   return { sessionId, engine: started.job.meta.engine, cwd: started.job.meta.cwd, machineId: started.job.meta.machineId, handoff: started.job.meta.handoff, workspaceId: started.job.meta.workspaceId, worktree: started.job.meta.worktree };
 }
+function imModels({ engine, sessionId, refresh, node = 'local' }) {
+  if (node === 'local' || node === machineId()) return engine === 'codex' ? codexPoolModels({sessionId, refresh}) : accountRouter.models({sessionId, refresh});
+  if (!clusterNetwork?.peer(node)) throw new Error('无法读取这台执行机器的账号模型列表，可以沿用引擎默认模型');
+  return clusterNetwork.call(node, 'accounts.models', {engine, sessionId, refresh}, {timeout: 10000});
+}
 const feishuGateway = require('./feishu-bots').createFeishuBots({
   dir: DATA_DIR, runtime: macRuntime, replyURL: `http://127.0.0.1:${PORT}/api/feishu/reply`, leadership: clusterLeadership,
   panel: {
@@ -2117,13 +2130,7 @@ const feishuGateway = require('./feishu-bots').createFeishuBots({
     engine: id => sessionEngine(id),
     engines: () => registry.list().map(engine => ({ id: engine.id, ...engine.meta, capabilities: engine.capabilities })),
     engineInfo: (engine, node = 'local') => registry.adapter(engine, node)?.detect?.() || {},
-    models: ({ engine, sessionId, refresh, node = 'local' }) => {
-      if(node!=='local'&&node!==machineId()){
-        if(!clusterNetwork)throw new Error('无法连接执行机器验证模型，请恢复连接后重试');
-        return clusterNetwork.call(node,'accounts.models',{engine,sessionId,refresh},{timeout:10000});
-      }
-      return engine==='codex'?codexPoolModels({sessionId,refresh}):accountRouter.models({sessionId,refresh});
-    },
+    models: imModels,
     validModel: (engine, model, node = 'local') => !!(registry.adapter(engine, node) || registry.get(engine))?.validModel(model),
     defaultModel: engine => accountPool?.defaultModels()[engine === 'deepseek' ? 'claude' : engine] || '',
     setDefaultModel: async (engine, model) => { if (!accountPool) throw new Error('账号池未就绪'); return setValidatedDefaultModel(engine, model); },
@@ -2161,9 +2168,36 @@ const wecom = require('./channels/wecom').createWecom({
   dir: DATA_DIR, canStart: clusterLeadership.canStart,
   panel: {
     engines: () => registry.list().map(engine => ({ id: engine.id, label: engine.meta.label })),
-    submit: submitIMTurn, watch: (id, listener) => manager.watch(id, listener),
+    submit(input) {
+      const run = input.sessionId && manager.get(input.sessionId);
+      const model = run && !run.job.closed ? run.job.meta.requestedModel ?? run.job.meta.model : undefined;
+      return submitIMTurn({ ...input, model: model ?? input.model });
+    },
+    watch: (id, listener) => manager.watch(id, listener),
+    sessionCatalog: options => sessionDirectory.list(options),
+    resolveSession: resolveSessionReference,
+    sessionStatus(id) {
+      if (manager.busy(id)) return manager.pendingPermissions(id).length ? '等待工具授权，请在网页「对话」处理。' : '正在执行';
+      const task = runStore.find(id);
+      return ({ preparing: '正在准备', preparing_workspace: '正在准备项目目录', running: '正在执行', completed: '已完成', cancelled: '已停止', failed: '执行失败', unknown: '结果待核对' })[task?.state] || '暂无面板任务记录';
+    },
     machineLabel: id => executionMachines().find(machine => machine.id === id)?.label || id,
-    validateWorkspace: workspaceId => workspaceStore.resolve({ workspaceId }),
+    machineId,
+    defaultMachine: () => workspaceStore.read().defaultMachine || machineId(),
+    async validateTarget(input) {
+      const target = workspaceStore.resolve({...input, allowFailover: false});
+      const host = registry.node(target.node)?.host;
+      if (!host) throw Error('执行机器未连接');
+      return { cwd: await host.resolveDir(target.cwd) };
+    },
+    async models({engine, machineId: id, refresh = false}) {
+      if (!registry.get(engine)) throw Error('请选择已接入的引擎');
+      const node = id || workspaceStore.read().defaultMachine || machineId();
+      const catalog = await imModels({engine, node, refresh});
+      const adapter = registry.adapter(engine, node === machineId() ? 'local' : node);
+      if (!adapter || catalog.available === false || !catalog.models) throw Error('当前无法验证模型，请沿用引擎默认或检查 AI 账号');
+      return { models: catalog.models.filter(item => adapter.validModel(item.id)).map(({id, name}) => ({id, name})) };
+    },
   },
 });
 const imGateways = {
@@ -2254,8 +2288,13 @@ const server = http.createServer(async (req, res) => {
       // 静态页面
       if (auth.login(req, res, url)) { res.writeHead(302, { Location: '/' }); return res.end(); }
       if (!auth.pageAllowed(req)) { res.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('需要访问令牌：请用启动日志中的链接打开面板'); }
+      // A missing script must never receive the SPA document during a rolling update.
+      if (/\.(?:js|mjs|css|woff2?|png|svg|ico|map)$/i.test(url.pathname) && (parts.length === 1 || ['assets', 'vendor'].includes(parts[0]))) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+        return res.end('Asset not found');
+      }
       const html = fs.readFileSync(path.join(__dirname, 'index.html'));
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
       return res.end(html);
     }
 
@@ -2319,6 +2358,29 @@ const server = http.createServer(async (req, res) => {
       } catch (error) { return sendJSON(res, error.status || 400, { error: error.message }); }
     }
 
+    if (type === 'wecom' && parts[2] === 'models' && parts.length === 3 && req.method === 'GET') {
+      res.setHeader('Cache-Control', 'no-store');
+      try { return sendJSON(res, 200, await sharedGateway('models', { engine: url.searchParams.get('engine'), machineId: url.searchParams.get('machineId') || '' }, 'wecom')); }
+      catch (error) { return sendJSON(res, 400, {error: error.message}); }
+    }
+    if (type === 'im-runtime' && parts.length === 2) {
+      res.setHeader('Cache-Control', 'no-store');
+      try {
+        if (req.method !== 'GET' && req.method !== 'PUT') return sendJSON(res, 405, { error: '运行设置仅支持 GET / PUT' });
+        if (req.method === 'PUT') {
+          if (!String(req.headers['content-type'] || '').startsWith('application/json')) return sendJSON(res, 415, { error: '需要 application/json' });
+          const input = JSON.parse(await readBody(req, 2048));
+          if (!input || typeof input !== 'object' || Array.isArray(input) || Object.entries(input).some(([key, val]) => !['nativeAutoAccept','keepAwake','autoStart'].includes(key) || typeof val !== 'boolean')) throw Error('运行设置无效');
+          if ('autoStart' in input && !macRuntime.status().supported) throw Error('登录自动启动仅适用于 macOS');
+          const {autoStart, ...shared} = input;
+          if (Object.keys(shared).length) await sharedGateway('configure', shared);
+          if (autoStart !== undefined) macRuntime.setAutoStart(autoStart);
+        }
+        const shared = await sharedGateway('status'), local = macRuntime.status();
+        return sendJSON(res, 200, { receiver: shared.execution.selfId, local: machineId(), autoStartSupported: local.supported, autoStart: local.autoStart,
+          keepAwakeSupported: shared.runtime.supported, keepAwake: shared.config.keepAwake, nativeAutoAccept: shared.config.nativeAutoAccept, nativeError: shared.runtime.nativeInbox?.error });
+      } catch (error) { return sendJSON(res, 400, {error: error.message}); }
+    }
     if (type === 'wecom' && parts.length === 2) {
       res.setHeader('Cache-Control', 'no-store');
       if (req.method === 'GET') return sendJSON(res, 200, await sharedGateway('status', undefined, 'wecom'));
@@ -2675,7 +2737,7 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store');
       const q = (url.searchParams.get('q') || '').trim();
       const engine = url.searchParams.get('engine') || 'all', before = url.searchParams.get('before') || '';
-      if (!q || q.length > 512 || before.length > 256 || !['all', 'claude', 'codex'].includes(engine)) return sendJSON(res, 400, { error: 'Invalid search query' });
+      if (!q || q.length > 512 || before.length > 256 || !['all', 'claude', 'codex', 'deepseek'].includes(engine)) return sendJSON(res, 400, { error: 'Invalid search query' });
       const sources = executionMachines().filter(machine => !clusterConfig?.members?.find(member => member.id === machine.id)?.witness).map(machine => ({
         ...machine,
         search: input => machine.id === machineId() ? historyWorker.read('search', input)
@@ -2805,7 +2867,7 @@ const server = http.createServer(async (req, res) => {
           name: (s.title || s.id).slice(0, 80),
           key: s.id,
           description: `${s.machineId} · ${path.basename(s.repository || s.project || '') || '?'}${s.gitBranch ? ' · ' + s.gitBranch : ''}${s.workspaceLabel ? ' · ' + s.workspaceLabel : ''} · ${s.last ? new Date(s.last).toISOString().slice(0, 16).replace('T',' ') : '?'}${s.latestPrompt ? ' · ' + s.latestPrompt.slice(0, 100) : ''}`,
-          machineId: s.machineId, cwd: s.project, running: s.running, gitBranch: s.gitBranch, sessionName: s.sessionName,
+          machineId: s.machineId, cwd: s.project, repository: s.repository, running: s.running, gitBranch: s.gitBranch, sessionName: s.sessionName,
           origin: 'user',
           titleSource: s.titleSource,
           engine: s.engine,
@@ -3124,7 +3186,7 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
   });
   clusterNetwork.handle('wecom.invoke', async (_, { method, input }) => {
     if (!cluster.canStart()) throw new Error('当前节点没有 IM 主节点租约');
-    if (!['status', 'configure'].includes(method)) throw new Error('未知企业微信操作');
+    if (!['status', 'configure', 'models'].includes(method)) throw new Error('未知企业微信操作');
     return wecom[method](input);
   });
   clusterNetwork.handle('gateway.invoke', async (_, { method, input }) => {
@@ -3190,10 +3252,10 @@ const stopPanel = async () => {
 process.once('SIGTERM', stopPanel);
 process.once('SIGINT', stopPanel);
 
-if (HISTORY_WORKER) parentPort.on('message', ({ id, type, input }) => {
+if (HISTORY_WORKER) parentPort.on('message', async ({ id, type, input }) => {
   try {
     const handlers = { stats: readStats, usage: usageCounts, wrapped: wrappedStats, live: liveSnapshot, search: searchTranscripts, captureOwners, sessionPreviews: readSessionPreviews, sessionUserPage: readSessionUserPage };
     if (!Object.hasOwn(handlers, type)) throw new Error('Unknown history operation');
-    parentPort.postMessage({ id, value: handlers[type](input) });
+    parentPort.postMessage({ id, value: await handlers[type](input) });
   } catch (error) { parentPort.postMessage({ id, error: error.message }); }
 });

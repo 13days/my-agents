@@ -73,6 +73,13 @@ test('search finds visible Claude and Codex questions and answers, including lat
   assert.deepEqual((await search('blue')).map(hit => [hit.engine, hit.role]), [
     ['codex', 'assistant'], ['codex', 'user'], ['claude', 'assistant'], ['claude', 'user'],
   ]);
+  const harnessId = 'df3f1e35-ec3e-41a8-8c54-372ccc13b336';
+  fs.writeFileSync(path.join(panel, 'panel-conversations.json'), JSON.stringify({
+    [harnessId]: { id:harnessId, engine:'deepseek', project:'/harness', messages:[{role:'assistant',text:'Harness checkpoint note',timestamp:'2026-11-04T01:00:00Z'}] },
+  }));
+  const [harness] = await search('checkpoint', 'deepseek');
+  assert.equal(harness.session, harnessId); assert.equal(harness.project, '/harness');
+  assert.equal((await search('checkpoint'))[0].engine,'deepseek');
   const [reply] = await search('完整 blue', 'codex');
   assert.equal(reply.session, codexId); assert.equal(reply.project, '/project'); assert.match(reply.snippet, /完整回答/);
   append(rollout, codexRow('user', '新增的后续问题'));

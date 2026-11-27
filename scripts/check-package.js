@@ -45,6 +45,12 @@ async function freePort() {
         if (!engines.engines.some(engine => engine.id === 'deepseek') || !wecom.config || !Array.isArray(folders.directories)) {
           throw Error('Packaged engine, WeCom or directory browser unavailable');
         }
+        const page = await fetch(base + '/sessions/example');
+        if (!page.ok || !(await page.text()).includes('function createConversationSearch()')) throw Error('Conversation page is missing its bundled finder');
+        const missing = await fetch(base + '/missing-panel-script.js');
+        if (missing.status !== 404 || missing.headers.get('content-type')?.includes('html')) throw Error('Missing scripts must not receive an HTML fallback');
+        const runtime = await read('/api/im-runtime');
+        if (typeof wecom.config.worktree !== 'boolean' || typeof runtime.nativeAutoAccept !== 'boolean') throw Error('Packaged IM settings unavailable');
         const unchanged = await read('/api/heartflow?revision=' + encodeURIComponent(initial.revision));
         if (!initial.revision || !unchanged.unchanged || unchanged.messages || !unchanged.runtime) throw Error('Assistant revision polling failed');
         console.log('Packaged panel serves the engines, WeCom, directory browser and incremental assistant status'); return;

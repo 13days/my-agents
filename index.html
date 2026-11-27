@@ -9,8 +9,9 @@
 const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
 let themePreference;
 function applyTheme(preference) {
-  themePreference = preference === 'dark' || preference === 'light' ? preference : null;
-  document.documentElement.dataset.theme = themePreference || (systemTheme.matches ? 'dark' : 'light');
+  themePreference = ['dark', 'light', 'paper'].includes(preference) ? preference : null;
+  document.documentElement.dataset.skin = themePreference || 'system';
+  document.documentElement.dataset.theme = preference === 'paper' ? 'light' : themePreference || (systemTheme.matches ? 'dark' : 'light');
 }
 try { themePreference = localStorage.getItem('panel-theme'); } catch {}
 applyTheme(themePreference);
@@ -22,7 +23,8 @@ applyTheme(themePreference);
 <aside id="navrail" aria-label="主导航"><div id="logo"><button class="panel-toggle" id="navToggle" type="button" aria-label="收起导航" aria-controls="navMenu" aria-expanded="true"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3.5"/><path d="M9 4.5v15"/></svg></button><img class="brand-mark" src="/assets/my-agents.png?v=b892636c45" width="30" height="30" alt=""><span class="brand-name">my-agents</span></div><div id="navMenu"><nav id="tabs"><div class="nav-group-label" data-nav-group="工作空间">工作空间</div><button type="button" class="tab" data-type="stats" title="stats"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V5m0 14h16M8 15v-4m5 4V7m5 8v-6"/></svg><span class="nav-label">stats</span><span class="cnt"></span></button><button type="button" class="tab" data-type="proxy" title="proxy"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01M12 10v4"/></svg><span class="nav-label">proxy</span><span class="cnt"></span></button><button type="button" class="tab" data-type="heartflow" title="助理"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65"><path d="M4 5h16v11H9l-5 4V5Z"/><path d="M8 9h8M8 12h5"/></svg><span class="nav-label">助理</span><span class="cnt"></span></button><button type="button" class="tab" data-type="im" title="IM 接入"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v12H9l-5 4V4Z"/></svg><span class="nav-label">IM 接入</span><span class="cnt"></span></button><button type="button" class="tab" data-type="sessions" title="sessions"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z"/></svg><span class="nav-label">sessions</span><span class="cnt"></span></button><button type="button" class="tab" data-type="inspector" title="inspector"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg><span class="nav-label">inspector</span><span class="cnt"></span></button><button type="button" class="tab" data-type="voyage" title="voyage"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 17 9 4 9-4M5 15l7-3 7 3M12 3v9M12 3l7 6h-7M5 15v3m14-3v3"/></svg><span class="nav-label">voyage</span><span class="cnt"></span></button><div class="nav-group-label" data-nav-group="资源管理">资源管理</div><button type="button" class="tab" data-type="commands" title="commands"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 6 6 6-6 6M13 18h6"/></svg><span class="nav-label">commands</span><span class="cnt"></span></button><button type="button" class="tab" data-type="skills" title="skills"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4L12 3Z"/></svg><span class="nav-label">skills</span><span class="cnt"></span></button><button type="button" class="tab" data-type="agents" title="agents"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="14" rx="3"/><path d="M12 3v4M8 12h.01M16 12h.01M9 17h6M1 12v5m22-5v5"/></svg><span class="nav-label">agents</span><span class="cnt"></span></button><button type="button" class="tab" data-type="plugins" title="plugins"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v4m6-4v4M7 7h10v5a5 5 0 0 1-10 0V7Zm5 10v4"/></svg><span class="nav-label">plugins</span><span class="cnt"></span></button><button type="button" class="tab" data-type="workflows" title="workflows"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="5" rx="1"/><rect x="2" y="17" width="7" height="5" rx="1"/><rect x="15" y="17" width="7" height="5" rx="1"/><path d="M12 7v5M5.5 17v-5h13v5"/></svg><span class="nav-label">workflows</span><span class="cnt"></span></button><button type="button" class="tab" data-type="config" title="config"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6m8 4v6"/></svg><span class="nav-label">config</span><span class="cnt"></span></button></nav><div id="navUtilities"><button type="button" class="tab" data-type="guide" title="使用指南"><svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v16M12 5C9 3 5 3 3 4v15c3-1 6-1 9 2 3-3 6-3 9-2V4c-2-1-6-1-9 1Z"/></svg><span class="nav-label">使用指南</span><span class="cnt"></span></button></div><div id="navFooter"><strong><span class="status-dot"></span><span id="localLabel">本地工作区</span></strong><p>PRIVATE BY DESIGN</p></div></div></aside>
 <aside id="sidebar"><div class="library-header"><span id="libraryTitle">资源</span><span id="libraryCount"></span><button type="button" id="libraryCollapse" class="panel-toggle" aria-label="收起列表" title="收起列表"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 6-6 6 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
   <div id="projbar"><select id="projSel"></select></div>
-  <div id="searchbox"><input id="search" type="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="搜索名称 / 描述…"></div>
+  <div id="searchbox"><input id="search" type="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="搜索名称 / 描述…"><button type="button" id="conversation-search-open" aria-haspopup="dialog"><span></span><kbd></kbd></button></div>
+  <button type="button" id="search-project-clear" hidden></button>
   <div id="session-engines" hidden></div>
   <div id="capture-filters" hidden></div>
   <div id="filterbar">
@@ -50,12 +52,7 @@ applyTheme(themePreference);
     <button class="btn primary" id="saveBtn" style="display:none">保存</button>
     <button class="btn" id="cancelBtn" style="display:none">取消</button>
     <button class="btn danger" id="delBtn" disabled>删除</button>
-    <button type="button" id="themeToggle" class="panel-toggle" aria-label="切换主题">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <g class="theme-sun"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></g>
-        <path class="theme-moon" d="M20.5 14a8.5 8.5 0 0 1-10.6-10.5A8.6 8.6 0 1 0 20.5 14Z"/>
-      </svg>
-    </button>
+    <select id="themeSelect" aria-label="主题"></select>
     <select id="langSel" title="Language"></select>
   </div>
   <div id="content">
@@ -137,8 +134,12 @@ function userGuideSections() {
     ], target: 'sessions', action: copy('查看会话', 'View sessions') },
     { id: 'im', title: copy('飞书与 Lark', 'Feishu and Lark'), lead: copy('发送 /help 可打开「找会话」和「新建任务」。简洁群仅显示该群可用的文字命令。', 'Send /help for Find session and New task. Basic groups receive commands for their access level.'), groups: feishuHelp(ENGINES.map(engine => engine.id), { copy }), note: copy('首次连接时在面板生成配对码，再私聊机器人发送 /pair 配对码。权限和回复格式按聊天生效。', 'For first-time pairing, generate a code in the panel and DM /pair CODE to the bot. Chat access and reply format apply per chat.'), target: 'im', channel: 'feishu', action: copy('打开聊天软件', 'Open chat apps') },
     { id: 'wecom', title: copy('企业微信', 'WeCom'), lead: copy('在「聊天软件 → 企业微信」填写智能机器人的 Bot ID 和 Secret，保存并连接。成员可以私聊，或在群里 @机器人。', 'Enter the intelligent bot’s Bot ID and Secret in Chat apps → WeCom, then save and connect. Members can DM the bot or mention it in a group.'), rows: [
+      [copy('新对话设置', 'New conversation settings'), copy('选择默认执行机器，浏览该机的目录或使用已映射的项目，再选择引擎、可用模型和独立 Git 工作区。已有会话沿用原设置。', 'Choose the execution machine, browse its folders or select a mapped project, then choose an engine, available model and optional Git worktree. Existing conversations keep their settings.')],
+      [copy('收信与运行', 'Deliveries and runtime'), copy('最近收信与回复列出发送人、执行机器和投递结果。「运行与启动」注明终端自动接收、Mac 保活和登录自启各自生效的电脑。', 'Recent deliveries show the sender, execution machine and reply status. Runtime settings identify the computer affected by terminal acceptance, Mac wake and login startup.')],
       ['/whoami', copy('查看自己的 UserID 和身份。首位发消息的成员自动成为 Owner，其他成员可由管理员添加。', 'Get your UserID and role. The first sender becomes the owner. An administrator can add other members.')],
-      ['/new', copy('下一条文字开始新对话。直接发文字会继续当前对话。', 'Start a new session on the next message. Ordinary text continues the current conversation.')],
+      ['/new [任务]', copy('直接开始一项新任务，或单独发 /new 后再发文字或语音。引用消息提问时会带上被引用的文字或语音转写。', 'Start a fresh task now, or send /new and then a text or voice message. Quoted text and voice transcripts are included with your question.')],
+      ['/sessions [关键词] · /use 1', copy('查找本人在当前聊天用过的会话，按列表序号切换。面板可允许 Owner 在私聊里查找并接手终端和网页会话。', 'Find sessions you used in this chat and switch by list number. The panel can allow the owner to resume terminal and web sessions in a DM.')],
+      ['/status', copy('查看当前会话、执行机器和面板记录的任务状态。', 'See the current session, execution machine and task status recorded by the panel.')],
       ['/help', copy('查看企业微信文字命令。完整执行记录和授权在网页对话中。', 'Show WeCom text commands. Open the web conversation for full output and approvals.')],
     ], target: 'im', channel: 'wecom', action: copy('打开聊天软件', 'Open chat apps') },
     { id: 'diagnostics', title: copy('没有回应、目录报错和节点离线', 'Troubleshoot missing replies, paths and offline nodes'), lead: copy('先分清失败发生在哪一层，再决定是否需要切换。', 'Identify the failing layer before deciding what to switch.'), rows: [
@@ -181,6 +182,234 @@ function renderUserGuide() {
 <script src="/feishu-help.js"></script>
 <script src="/wecom-ui.js"></script>
 <script src="/conversation-state.js"></script>
+<script>
+// The dialog reads the same session directory, transcripts and task records as the chat panel.
+function createConversationSearch() {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'conversation-finder';
+  dialog.innerHTML = `<div class="finder-input"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 6 6"/></svg><input type="search" role="combobox" aria-autocomplete="list" aria-controls="finder-list" aria-expanded="true" maxlength="512" autocomplete="off"><button type="button" data-close>Esc</button></div>
+    <div class="finder-toolbar"><div data-tabs></div><button type="button" data-scope hidden></button></div>
+    <div class="finder-states" data-states hidden></div><div class="finder-results"><div id="finder-list" role="listbox"></div><p class="finder-note" role="status"></p></div>
+    <footer><span data-key-help></span></footer>`;
+  document.body.append(dialog);
+  const get = selector => dialog.querySelector(selector), input = get('input'), list = get('[role=listbox]');
+  const trigger = $('#conversation-search-open'), clear = $('#search-project-clear');
+  const shortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘ K' : 'Ctrl K';
+  let sessions = [], tasks = [], workspaces = {}, project = null, tab = 'all', status = '', detail = null;
+  let version = 0, timer, queryVersion = 0, search = {}, loadNotes = [], loading = false;
+  let options = [], active = 0, limit = 40;
+  const tr = (zh,en) => rt(zh,en);
+  const modes = () => [['all',tr('全部','All')],['projects',tr('项目','Projects')],['chats',tr('对话','Chats')],['messages',tr('问答','Messages')],['tasks',tr('任务','Tasks')]];
+  const states = () => [['',tr('全部状态','All states')],['active',tr('进行中','Active')],['attention',tr('需要处理','Needs attention')],['completed',tr('已完成','Completed')],['cancelled',tr('已停止','Stopped')]];
+  const stateGroup = s => ['running','executing','queued','preparing','preparing_workspace'].includes(s) ? 'active' : ['failed','unknown','blocked','interrupted'].includes(s) ? 'attention' : s;
+  const stateLabel = s => states().find(([id]) => id === stateGroup(s))?.[1] || s || '';
+  const clean = value => ConversationState.titleText(String(value || '').replace(/!\[[^\]]*\]\([^)]*(?:\)|$)/g,' '));
+  const basename = path => path.split(/[\\/]/).filter(Boolean).pop() || path;
+  const machine = id => id && id !== 'local' ? id : workspaces.selfId || 'local';
+  const machineLabel = id => workspaces.machines?.find(m => m.id === machine(id))?.label || machine(id);
+  function where(item) {
+    const path = (item.repository || item.cwd || '').replace(/\/$/,'');
+    if (!path) return null;
+    const node = machine(item.machineId || item.node);
+    const registered = workspaces.config?.projects?.find(p => p.paths?.[node]?.replace(/\/$/,'') === path);
+    return { key: registered ? 'project:' + registered.id : JSON.stringify([node,path]), name: registered?.name || basename(path), path, node };
+  }
+  function inProject(p) { return !project || (p && (p.key === project.key || (p.node === project.node && p.path === project.path))); }
+  function matchesProject(item) { return inProject(where(item)); }
+  function syncTrigger() {
+    trigger.querySelector('span').textContent = tr('搜索对话、项目、任务','Search chats, projects, tasks');
+    trigger.querySelector('kbd').textContent = shortcut;
+    trigger.setAttribute('aria-keyshortcuts','Meta+K Control+K');
+    clear.hidden = !project || state.type !== 'sessions';
+    clear.textContent = project ? project.name + '  ×' : '';
+    clear.title = tr('清除项目筛选','Clear project filter');
+    clear.setAttribute('aria-label',clear.title + (project ? ' · ' + project.name : ''));
+  }
+  function scope(value) {
+    project = value;
+    syncTrigger();
+    if (state.type === 'sessions') {
+      if (value) resetEngineFilter();
+      renderList();
+    }
+  }
+  function resetEngineFilter() {
+    if (selectedSessionEngine() === 'all') return;
+    sessionEngine = 'all'; localStorage.setItem('panel-session-engine','all'); renderSessionEngines();
+  }
+  function draftLocation() {
+    return project ? { cwd: project.path, machineId: project.node, workspaceId: project.key.startsWith('project:') ? project.key.slice(8) : '' } : null;
+  }
+  function buttons(host, pairs, current, select) {
+    host.replaceChildren(...pairs.map(([id,label]) => {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = label;
+      b.setAttribute('aria-pressed',String(current === id)); b.onclick = () => { select(id); input.focus(); }; return b;
+    }));
+  }
+  function chrome() {
+    buttons(get('[data-tabs]'), modes(), tab, id => changeTab(id));
+    const filters = get('[data-states]'); filters.hidden = tab !== 'tasks';
+    if (!filters.hidden) buttons(filters,states(),status,id => { status=id; limit=40; active=0; paint(); chrome(); });
+    const chip = get('[data-scope]'); chip.hidden = !project;
+    chip.textContent = project ? project.name + '  ×' : '';
+    chip.title = tr('搜索所有项目','Search all projects');
+  }
+  function changeTab(id) {
+    tab=id; detail=null; limit=40; active=0; chrome(); query();
+  }
+  function query() {
+    clearTimeout(timer);
+    const q = input.value.trim(), token = ++queryVersion;
+    search = { results:[], q, pending:!!q && ['all','messages'].includes(tab) };
+    paint();
+    if (search.pending) timer = setTimeout(() => fetchHits(token),230);
+  }
+  async function fetchHits(token) {
+    if (!dialog.open || token !== queryVersion || search.fetching) return;
+    const s = search; s.fetching=true; s.pending=true; s.error=''; paint();
+    const params = new URLSearchParams({q:s.q,engine:'all'});
+    if (s.next) params.set('before',s.next);
+    try {
+      const page = await api('GET','search?' + params);
+      if (dialog.open && token === queryVersion) {
+        s.results.push(...page.results); s.next = page.next; s.unavailable = page.unavailable;
+      }
+    } catch (e) { s.error = e.message; }
+    finally { s.fetching=false; s.pending=false; if (dialog.open && token === queryVersion) paint(); }
+  }
+  function highlight(i, scroll = false) {
+    active = Math.max(0, Math.min(i, options.length-1));
+    for (const node of list.querySelectorAll('[role=option]')) node.setAttribute('aria-selected',String(Number(node.dataset.i)===active));
+    if (!options.length) { input.removeAttribute('aria-activedescendant'); return; }
+    input.setAttribute('aria-activedescendant','finder-option-'+active);
+    if (scroll) get('#finder-option-'+active)?.scrollIntoView({block:'nearest'});
+  }
+  async function go(id, hit) {
+    close();
+    if (state.type !== 'sessions') await switchType('sessions',false,id);
+    if (state.type !== 'sessions') return;
+    const item = sessions.find(row => row.key === id);
+    if (item && !matchesSessionEngine(item)) { resetEngineFilter(); renderList(); }
+    state.sessionDetail = false;
+    if (id && chatView.sessionId === id && !hit && $('#chat-messages')) return;
+    if (hit) await openSearchHit(hit); else await openItem(id);
+  }
+  function paint() {
+    const previous = options[active]?.key, q = input.value.trim().toLowerCase();
+    const words=q.split(/\s+/).filter(Boolean);
+    const matches = (...values) => { const hay=values.filter(Boolean).join(' ').toLowerCase(); return words.every(w=>hay.includes(w)); };
+    const entries=[], markup=[], notes=[...loadNotes], byId = new Map(sessions.map(s=>[s.key,s]));
+    function row(key,type,title,meta,run) {
+      const i=entries.length; entries.push({key,run});
+      markup.push(`<div id="finder-option-${i}" role="option" data-i="${i}" class="finder-option"><span class="finder-icon">${icon(type)}</span><span class="finder-copy"><strong>${esc(title)}</strong>${meta ? '<small>'+esc(meta)+'</small>':''}</span><span class="finder-enter" aria-hidden="true">↵</span></div>`);
+    }
+    function section(name,items,max,draw,mode) {
+      if (!items.length) return;
+      markup.push('<div class="finder-group" role="presentation">'+esc(name)+'</div>');
+      items.slice(0,max).forEach(draw);
+      if (items.length>max) row('more-'+mode,'arrow',tr('更多','More')+' · '+name,'',()=>{ if(tab==='all') changeTab(mode); else { limit+=40; paint(); } });
+    }
+    if (detail) {
+      row('back','arrow',tr('返回任务结果','Back to tasks'),'',()=>{detail=null;paint();input.focus();});
+      markup.push('<div class="finder-detail"><strong>'+esc(clean(detail.prompt) || tr('执行任务','Task'))+'</strong><p>'+esc(detail.error || detail.reason || stateLabel(detail.state))+'</p></div>');
+    } else {
+      const projects=new Map();
+      const taskSession = t => t.sessionId || t.conversationId || t.requestedId;
+      const taskPlace = t => {
+        const session=byId.get(taskSession(t));
+        return where(session || {}) || where({cwd:t.jobMeta?.worktree?.repository || t.jobMeta?.cwd || t.cwd,node:t.jobMeta?.machineId || t.node});
+      };
+      const addProject = p => { if(p && !projects.has(p.key)) projects.set(p.key,p); };
+      sessions.forEach(s=>addProject(where(s))); tasks.forEach(t=>addProject(taskPlace(t)));
+      for (const registered of workspaces.config?.projects || []) {
+        const paths = Object.entries(registered.paths || {}).filter(([,path])=>path);
+        const preferred = paths.find(([id])=>id === (workspaces.config.defaultMachine || workspaces.selfId)) || paths[0];
+        if (preferred) addProject(where({machineId:preferred[0],cwd:preferred[1]}));
+      }
+      if (tab==='projects' || (tab==='all' && !project)) {
+        const found=[...projects.values()].filter(p=>matches(p.name,p.path,machineLabel(p.node)));
+        section(tr('切换项目','Switch project'),found,tab==='all'?3:limit,p=>row('p'+p.key,'folder',p.name,[machineLabel(p.node),p.path].join(' · '),()=>{
+          scope(p); input.value=''; changeTab('chats'); input.focus();
+        }),'projects');
+      }
+      if (tab==='all' || tab==='chats') {
+        const found=sessions.filter(s=>matchesProject(s) && matches(s.name,s.description,s.key,s.cwd,s.repository,s.engine));
+        section(q?tr('对话','Chats'):tr('最近对话','Recent chats'),found,tab==='all'?5:limit,s=>row('c'+s.key,'sessions',clean(s.name)||tr('图片对话','Image conversation'),
+          [where(s)?.name,machineLabel(s.machineId),engineLabel(s.engine||'claude',true)].filter(Boolean).join(' · '),()=>go(s.key)),'chats');
+      }
+      if (project && tab==='chats' && !q) row('new-project-chat','plus',tr('在此项目新建对话','New chat in this project'),project.name,async ()=>{
+        close();
+        if (state.type!=='sessions') await switchType('sessions',false);
+        if (state.type==='sessions') openNewChat();
+      });
+      if (tab==='messages' || tab==='all') {
+        const hits=(search.results || []).filter(h=>matchesProject(byId.get(h.session) || {cwd:h.project,machineId:h.machineId}));
+        section(tr('问答内容','Messages'),hits,tab==='all'?4:limit,h=>row('h'+h.key,'chat',h.snippet,
+          [h.role==='user'?tr('提问','Question'):tr('回答','Answer'),clean(byId.get(h.session)?.name)||basename(h.project||''),machineLabel(h.machineId)].filter(Boolean).join(' · '),()=>go(h.session,h)),'messages');
+        if (search.next && !search.pending && hits.length <= (tab==='all'?4:limit)) row('more-hits','arrow',tr('继续查找问答','Load more messages'),'',()=>fetchHits(queryVersion));
+        if (search.pending) notes.push(tr('正在搜索问答…','Searching messages…'));
+        if (search.error) row('retry','arrow',tr('重试问答搜索','Retry message search'),search.error,()=>fetchHits(queryVersion));
+        if (search.unavailable?.length) notes.push(tr('未能搜索','Unavailable')+' · '+search.unavailable.join('、'));
+      }
+      if (tab==='tasks' || (tab==='all' && q)) {
+        const found=tasks.filter(t=>{const p=taskPlace(t);return inProject(p) && (tab!=='tasks'||!status||stateGroup(t.state)===status) &&
+          matches(t.prompt,t.error,t.reason,t.sessionTitle,byId.get(taskSession(t))?.name,p?.name,p?.path,t.engine,t.node,stateLabel(t.state));});
+        section(tr('执行记录','Task history'),found,tab==='all'?4:limit,t=>{
+          const p=taskPlace(t), id=t.sessionId || (byId.has(taskSession(t)) ? taskSession(t) : '');
+          row('t'+t.id,'terminal',clean(t.prompt) || tr('执行任务','Task'),
+            [stateLabel(t.state),p?.name,t.error || t.reason || (t.createdAt && new Date(t.createdAt).toLocaleString())].filter(Boolean).join(' · '),
+            ()=>{ if(id) return go(id,t.prompt ? {session:id,role:'user',snippet:t.prompt.replace(/\s+/g,' ').trim().slice(0,140),ts:new Date(t.createdAt || 0).toISOString(),messageId:t.messageId} : null); detail=t;paint(); });
+        },'tasks');
+      }
+    }
+    if (loading) notes.push(tr('正在读取记录…','Loading records…'));
+    if (!entries.length && !loading && !search.pending) notes.unshift(tab==='messages'&&!q?tr('输入关键词搜索提问和回答','Type to search questions and answers'):tr('没有匹配结果','No matches'));
+    options=entries;list.innerHTML=markup.join('');
+    get('.finder-note').textContent=notes.join(' · ');
+    const ix=options.findIndex(o=>o.key===previous);highlight(ix>=0?ix:0);
+  }
+  async function open(mode='all') {
+    if (dialog.open) { input.focus(); return; }
+    const rev=++version; active=0; options=[]; status=''; detail=null; limit=40; tab=mode;
+    loading=true; loadNotes=[]; input.value='';
+    input.placeholder=tr('搜索项目、对话、提问和回答…','Search projects, chats, questions and answers…');
+    input.setAttribute('aria-label',input.placeholder);dialog.setAttribute('aria-label',tr('搜索工作空间','Search workspace'));
+    get('[data-close]').setAttribute('aria-label',tr('关闭搜索','Close search'));
+    get('[data-key-help]').textContent=tr('↑ ↓ 选择　 ↵ 打开','↑ ↓ Select　 ↵ Open');
+    if (state.type==='sessions' && state.items.length) sessions=state.items;
+    dialog.showModal(); chrome(); query(); input.focus();
+    const reads=[['sessions',v=>sessions=v.items],['tasks',v=>tasks=v.items],['workspaces',v=>{workspaces=v;if(project) project=where({cwd:project.path,machineId:project.node}) || project;syncTrigger();if(project && state.type==='sessions')renderList();}]];
+    await Promise.all(reads.map(async ([key,apply])=>{
+      try { const result=await api('GET',key); if(rev===version) apply(result); }
+      catch { if(rev===version) loadNotes.push(({sessions:tr('对话暂不可读','Chats unavailable'),tasks:tr('任务暂不可读','Tasks unavailable'),workspaces:tr('项目配置暂不可读','Projects unavailable')})[key]); }
+      if (dialog.open && rev===version) paint();
+    }));
+    if (dialog.open && rev===version) {loading=false;paint();}
+  }
+  function close() { if(dialog.open) dialog.close(); }
+  dialog.addEventListener('close',()=>{++version;++queryVersion;clearTimeout(timer);});
+  dialog.addEventListener('keydown',e=>{if(e.key==='Escape')e.stopPropagation();});
+  dialog.addEventListener('click',e=>{ if(e.target===dialog){const r=dialog.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)close();} });
+  input.oninput=e=>{ if (!e.isComposing) { detail=null;active=0;options=[];limit=40;query(); } };
+  input.oncompositionend=()=>{ detail=null;active=0;options=[];limit=40;query(); };
+  input.onkeydown=e=>{
+    if(e.isComposing || e.keyCode===229)return;
+    if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();highlight(active+(e.key==='ArrowDown'?1:-1),true);}
+    if(e.key==='Enter' && options[active]){e.preventDefault();options[active].run();}
+  };
+  list.onclick=e=>{const item=e.target.closest('[data-i]');if(item)options[Number(item.dataset.i)]?.run();};
+  get('[data-close]').onclick=close;
+  get('[data-scope]').onclick=()=>{scope(null);chrome();paint();input.focus();};
+  clear.onclick=()=>{scope(null);trigger.focus();};
+  trigger.onclick=()=>open();
+  document.addEventListener('keydown',e=>{
+    if (e.isComposing || e.altKey || e.shiftKey || !(e.metaKey||e.ctrlKey) || e.key.toLowerCase()!=='k') return;
+    if (!dialog.open && (document.querySelector('dialog[open]') || $('#modal').style.display==='flex')) return;
+    e.preventDefault(); if(dialog.open)close();else open();
+  });
+  return {open,close,matchesProject,syncTrigger,draftLocation};
+}
+</script>
 <script src="/directory-browser.js"></script>
 <script src="/feishu-ui.js"></script>
 
@@ -190,7 +419,7 @@ function renderUserGuide() {
 // IM entry points. A planned channel never receives an active configuration form.
 const IM_CHANNELS = [
   { id: 'feishu', name: ['飞书 / Lark', 'Feishu / Lark'], available: true, description: ['机器人接入，支持私聊、群聊与话题', 'Bot access for private chats, groups and topics'] },
-  { id: 'wecom', name: ['企业微信', 'WeCom'], available: true, description: ['智能机器人，支持私聊与群聊文字任务', 'Intelligent bot for direct and group text tasks'] },
+  { id: 'wecom', name: ['企业微信', 'WeCom'], available: true, description: ['私聊或群聊发任务、找会话、查进度', 'Send tasks, find sessions and check progress in chat'] },
 ];
 let imSelectedChannel = localStorage.getItem('panel-im-channel') || 'feishu', imRenderRevision = 0;
 if (!IM_CHANNELS.some(channel => channel.id === imSelectedChannel)) imSelectedChannel = 'feishu';
@@ -256,6 +485,7 @@ async function renderIMAccess() {
 const $ = s => document.querySelector(s);
 
 const ICONS = {im: '<path d="M4 4h16v12H9l-5 4V4Z"/>', "terminal": "<path d=\"m5 6 6 6-6 6M13 18h6\"/>", "stats": "<path d=\"M4 19V5m0 14h16M8 15v-4m5 4V7m5 8v-6\"/>", "proxy": "<rect x=\"3\" y=\"4\" width=\"18\" height=\"6\" rx=\"2\"/><rect x=\"3\" y=\"14\" width=\"18\" height=\"6\" rx=\"2\"/><path d=\"M7 7h.01M7 17h.01M12 10v4\"/>", "inspector": "<path d=\"M3 12h4l3-7 4 14 3-7h4\"/>", "sessions": "<path d=\"M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z\"/>", "voyage": "<path d=\"m3 17 9 4 9-4M5 15l7-3 7 3M12 3v9M12 3l7 6h-7M5 15v3m14-3v3\"/>", "commands": "<path d=\"m5 6 6 6-6 6M13 18h6\"/>", "skills": "<path d=\"m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4L12 3Z\"/>", "agents": "<rect x=\"4\" y=\"7\" width=\"16\" height=\"14\" rx=\"3\"/><path d=\"M12 3v4M8 12h.01M16 12h.01M9 17h6M1 12v5m22-5v5\"/>", "plugins": "<path d=\"M9 3v4m6-4v4M7 7h10v5a5 5 0 0 1-10 0V7Zm5 10v4\"/>", "workflows": "<rect x=\"8\" y=\"2\" width=\"8\" height=\"5\" rx=\"1\"/><rect x=\"2\" y=\"17\" width=\"7\" height=\"5\" rx=\"1\"/><rect x=\"15\" y=\"17\" width=\"7\" height=\"5\" rx=\"1\"/><path d=\"M12 7v5M5.5 17v-5h13v5\"/>", "config": "<path d=\"M4 7h16M4 17h16M8 4v6m8 4v6\"/>", "chat": "<path d=\"M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z\"/>", "folder": "<path d=\"M3 8a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9H3V8Z\"/>", "arrow": "<path d=\"M5 12h14m-6-6 6 6-6 6\"/>"};
+ICONS.plus = '<path d="M12 5v14M5 12h14"/>';
 ICONS.guide = '<path d="M12 5v16M12 5C9 3 5 3 3 4v15c3-1 6-1 9 2 3-3 6-3 9-2V4c-2-1-6-1-9 1Z"/>';
 function icon(type) { return `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[type] || ICONS.folder}</svg>`; }
 // ---------- i18n lookup ----------
@@ -398,7 +628,7 @@ function viewDescription(type) {
 function viewHeading(type, action = '') {
   return `<div class="view-heading"><div class="view-heading-left"><span class="view-icon">${icon(type)}</span><div><h2>${esc(t('tabs')[type])}</h2><p>${esc(viewDescription(type))}</p></div></div>${action}</div>`;
 }
-function productNavParent(type){return ({today:'tasks',connections:'im',capabilities:'skills',config:'settings'})[type]||type;}
+function productNavParent(type){return ({connections:'im',capabilities:'skills',config:'settings'})[type]||type;}
 function updateBrowserTitle() {
   const section = t('tabs')[state.type];
   const heading = state.type === 'sessions' && $('#title').firstChild.textContent.trim();
@@ -417,6 +647,7 @@ function updateWorkspaceChrome() {
   $('#workspaceScope').textContent = scopeLabel || ui('个人工作空间','Personal workspace');
   renderResourceEngines();
   renderSessionEngines();
+  conversationSearch.syncTrigger();
   $('#projbar').hidden = !SCOPED.includes(state.type);
   $('#libraryToggle').hidden = dashboard;
   document.body.dataset.libraryOpen = 'false';
@@ -637,7 +868,7 @@ const CAPS = {
   stats:    { new: false, edit: false, del: false, filter: false, dashboard: true },
 };
 // 支持项目作用域的专区
-for(const type of ['today','tasks','connections','capabilities','settings'])CAPS[type]={new:false,edit:false,del:false,filter:false,dashboard:true};
+for(const type of ['connections','capabilities','settings'])CAPS[type]={new:false,edit:false,del:false,filter:false,dashboard:true};
 const SCOPED = ['commands', 'skills', 'agents', 'workflows', 'config'];
 // resourceEngine is validated against the registry once /api/engines has loaded (see init).
 let state = { resourceEngine: localStorage.getItem('panel-resource-engine') || LEGACY_ENGINE, type: 'commands', items: [], current: null, editing: false, keyword: '', origin: 'user', scope: '', projects: [] };
@@ -678,7 +909,7 @@ function writeRoute(mode = 'push') {
 function readRoute() {
   const parts = location.pathname.split('/').filter(Boolean);
   if (!parts.length) return null;
-  if (parts[0] === 'today') parts[0] = 'tasks';
+  if (['tasks','today'].includes(parts[0])) return { type:'sessions', key:null, scope:'', view:'', searchTasks:true };
   if (parts[0] === 'assistant') parts[0] = 'heartflow';
   if (parts[0] === 'feishu') parts[0] = 'im'; // Existing bookmarks keep working.
   if (!Object.hasOwn(CAPS, parts[0]) || parts.length > 2) throw new Error(ui('页面不存在', 'Page not found'));
@@ -693,12 +924,13 @@ function readRoute() {
   return { ...(engine ? { engine } : {}), ...(channel ? { channel } : {}), type: parts[0], key: parts[1] ? decodeURIComponent(parts[1]) : null, scope: query.get('scope') || '', view };
 }
 async function restoreRoute() {
+  conversationSearch.close();
   const revision = ++routeRevision;
   const previous = routePath();
   if (state.editing && !confirm(t('unsaved'))) { history.replaceState({}, '', previous); return; }
   state.editing = false;
   try {
-    const target = readRoute() || { type: Object.hasOwn(CAPS, localStorage.getItem('panel-section')) ? localStorage.getItem('panel-section') : 'tasks', key: null, scope: '', view: '', engine: state.resourceEngine };
+    const target = readRoute() || { type: Object.hasOwn(CAPS, localStorage.getItem('panel-section')) ? localStorage.getItem('panel-section') : 'sessions', key: null, scope: '', view: '', engine: state.resourceEngine };
     if (isResourceType(target.type)) { state.resourceEngine = knownEngine(target.engine, defaultResourceEngine()); localStorage.setItem('panel-resource-engine', state.resourceEngine); }
     if (target.type === 'im' && target.channel) imSelectedChannel = target.channel;
     state.scope = SCOPED.includes(target.type) ? target.scope : '';
@@ -709,6 +941,7 @@ async function restoreRoute() {
       if (target.type === 'sessions' && target.view === 'replay') await loadReplay(target.key);
       else { state.sessionDetail = target.view === 'detail'; await openItem(target.key); }
     } else writeRoute('replace');
+    if (target.searchTasks) conversationSearch.open('tasks');
   } catch (e) {
     $('#empty').style.display = 'none';
     $('#render').style.display = 'block';
@@ -772,105 +1005,6 @@ async function loadCounts() {
   }
 }
 
-function groupTasksByProject(items, allItems = items) {
-  const context = new Map();
-  const identity = task => JSON.stringify([task.node || 'local', task.sessionId || task.conversationId || task.requestedId || task.id]);
-  for (const task of allItems) {
-    const cwd = task.jobMeta?.worktree?.repository || task.jobMeta?.cwd || task.cwd;
-    if (cwd && !context.has(identity(task))) context.set(identity(task), cwd);
-  }
-  const groups = new Map();
-  for (const task of items) {
-    const cwd = task.jobMeta?.worktree?.repository || task.jobMeta?.cwd || task.cwd || context.get(identity(task)) || '';
-    const node = task.node || 'local', key = JSON.stringify([node, cwd]);
-    if (!groups.has(key)) groups.set(key, { cwd, node, items: [] });
-    groups.get(key).items.push(task);
-  }
-  return [...groups.values()];
-}
-
-const taskBrowse = { project:'', status:'all', query:'', page:0, open:'', historyPage:0 };
-function mountTaskBrowser(container, rows, labels) {
-  const uiState = taskBrowse;
-  const projects = groupTasksByProject(rows), threads = [];
-  const time = task => task.updatedAt || task.createdAt || 0;
-  const shortName = group => group.cwd.split(/[\\/]/).filter(Boolean).pop() || rt('未记录目录', 'Unknown folder');
-  for (const project of projects) {
-    project.key = JSON.stringify([project.node, project.cwd]);
-    const groups = new Map();
-    for (const task of project.items) {
-      const sid = task.sessionId || task.conversationId || task.requestedId;
-      const key = JSON.stringify([project.key, sid || task.id]);
-      if (!groups.has(key)) groups.set(key, { project, sid: '', key, items: [] });
-      const thread = groups.get(key);
-      thread.sid ||= task.sessionId || (!task.error && task.conversationId) || '';
-      thread.items.push(task);
-    }
-    for (const thread of groups.values()) {
-      thread.items.sort((a,b) => (a.createdAt || 0) - (b.createdAt || 0));
-      thread.title = thread.items[0].sessionTitle || thread.items[0].jobMeta?.title || thread.items[0].prompt || rt('执行任务','Task');
-      threads.push(thread);
-    }
-  }
-  if (!projects.some(p => p.key === uiState.project)) uiState.project = '';
-  const states = [['all','全部','All'],['active','进行中','Active'],['attention','需要处理','Needs attention'],['completed','已完成','Completed'],['cancelled','已取消','Cancelled']];
-  const matches = task => uiState.status === 'all' || (uiState.status === 'active' ? ['running','preparing','queued','executing'].includes(task.state) : uiState.status === 'attention' ? ['failed','unknown','blocked','interrupted'].includes(task.state) : uiState.status === task.state);
-  container.innerHTML = `<div class="task-filters"><input type="search" data-query aria-label="${esc(rt('搜索任务','Search tasks'))}" placeholder="${esc(rt('搜索任务、对话或目录','Search tasks, chats or folders'))}" value="${esc(uiState.query)}"><select data-project aria-label="${esc(rt('按项目筛选','Filter by project'))}"><option value="">${esc(rt('全部项目','All projects'))}</option>${projects.map(p => `<option value="${esc(p.key)}" ${p.key === uiState.project ? 'selected' : ''}>${esc(shortName(p) + ' · ' + p.node)}</option>`).join('')}</select><select data-status aria-label="${esc(rt('按状态筛选','Filter by status'))}">${states.map(([value,zh,en]) => `<option value="${value}" ${value === uiState.status ? 'selected' : ''}>${esc(rt(zh,en))}</option>`).join('')}</select></div><div data-results></div>`;
-  const results = container.querySelector('[data-results]'), size = 8;
-  function pager(page, count, target) {
-    const pages = Math.ceil(count / size);
-    if (pages <= 1) return '';
-    return `<nav class="task-pagination" aria-label="${esc(target === 'threads' ? rt('对话分页','Conversation pages') : rt('历史分页','History pages'))}"><button class="btn" aria-label="${esc(rt('上一页','Previous page'))}" data-page="${target}" data-index="${page-1}" ${page === 0 ? 'disabled' : ''}>‹</button><label>${esc(rt('页','Page'))} <select data-jump="${target}" aria-label="${esc(rt('跳到页','Jump to page'))}">${Array.from({length:pages},(_,i)=>`<option value="${i}" ${i === page ? 'selected' : ''}>${i+1} / ${pages}</option>`).join('')}</select></label><button class="btn" aria-label="${esc(rt('下一页','Next page'))}" data-page="${target}" data-index="${page+1}" ${page === pages-1 ? 'disabled' : ''}>›</button></nav>`;
-  }
-  function paint() {
-    const query = uiState.query.trim().toLowerCase();
-    const matched = threads.filter(th => !uiState.project || th.project.key === uiState.project).map(th => {
-      const all = [th.title, th.sid, th.project.cwd, th.project.node].join(' ').toLowerCase().includes(query);
-      const items = th.items.map((task,i) => ({ task, number:i+1 })).filter(({task}) => matches(task) && (all || String(task.prompt || '').toLowerCase().includes(query))).reverse();
-      return { ...th, filtered:items };
-    }).filter(th => th.filtered.length).sort((a,b) => time(b.filtered[0].task) - time(a.filtered[0].task));
-    uiState.page = Math.min(uiState.page, Math.max(0, Math.ceil(matched.length/size)-1));
-    const date = task => new Date(time(task)).toLocaleString();
-    const display = matched.slice(uiState.page*size, (uiState.page+1)*size);
-    const renderThread = th => {
-      const latest = th.filtered[0].task, open = uiState.open === th.key;
-      const page = Math.min(uiState.historyPage, Math.ceil(th.filtered.length/size)-1);
-      const link = th.sid ? `<a href="/sessions/${encodeURIComponent(th.sid)}">${esc(rt('查看对话','Open chat'))} ↗</a>` : '';
-      const history = open ? `<div class="task-turns">${th.filtered.slice(page*size,(page+1)*size).map(({task,number}) => `<div><small>#${number}</small><span>${esc(task.prompt || rt('执行任务','Task'))}${task.error || task.reason ? `<small class="task-turn-reason">${esc(task.error || task.reason)}</small>` : ''}</span><small>${esc(labels[task.state] || task.state)} · ${esc(date(task))}</small></div>`).join('')}${pager(page,th.filtered.length,'history')}</div>` : '';
-      return `<article class="task-thread"><header><button type="button" data-thread="${esc(th.key)}" aria-expanded="${open}"><span class="task-caret" aria-hidden="true">›</span><span><strong>${esc(th.title)}</strong></span></button><div class="task-thread-meta"><span>${esc(labels[latest.state] || latest.state)}</span><small>${th.filtered.length} ${esc(rt('次任务','tasks'))} · ${esc(date(latest))}</small></div>${link}</header>${history}</article>`;
-    };
-    const onPage = new Map();
-    for (const thread of display) {
-      if (!onPage.has(thread.project)) onPage.set(thread.project, []);
-      onPage.get(thread.project).push(thread);
-    }
-    const cards = Array.from(onPage, ([project, items]) => `<section class="task-project-group"><h2><span>${esc(shortName(project))}</span><small>${esc(project.node === 'local' ? rt('本机','Local') : project.node)}</small></h2><p title="${esc(project.cwd)}">${esc(project.cwd)}</p>${items.map(renderThread).join('')}</section>`).join('');
-    results.innerHTML = `<p class="task-result-count" role="status">${matched.length} ${esc(rt('个对话','conversations'))} · ${matched.reduce((n,th)=>n+th.filtered.length,0)} ${esc(rt('次任务','tasks'))}</p>${cards || `<p class="product-empty">${esc(rows.length ? rt('没有匹配的任务','No matching tasks') : rt('还没有任务记录。','No tasks yet.'))}</p>`}${pager(uiState.page,matched.length,'threads')}`;
-  }
-  function go(target, index) {
-    if (target === 'history') uiState.historyPage = index;
-    else { uiState.page = index; uiState.open = ''; }
-    paint();
-    const anchor = target === 'history' ? results.querySelector('[aria-expanded="true"]') : container;
-    anchor?.scrollIntoView({ block:'nearest' });
-  }
-  results.onclick = event => {
-    const page = event.target.closest('[data-page]'), thread = event.target.closest('[data-thread]');
-    if (page) go(page.dataset.page, Number(page.dataset.index));
-    if (thread) {
-      const key = thread.dataset.thread;
-      uiState.open = uiState.open === key ? '' : key; uiState.historyPage = 0; paint();
-      Array.from(results.querySelectorAll('[data-thread]')).find(button => button.dataset.thread === key)?.focus({ preventScroll:true });
-    }
-  };
-  results.onchange = event => { if (event.target.matches('[data-jump]')) go(event.target.dataset.jump, Number(event.target.value)); };
-  function filter(field,value) { uiState[field]=value; uiState.open=''; uiState.page=0; uiState.historyPage=0; paint(); }
-  container.querySelector('[data-query]').oninput = event => filter('query',event.target.value);
-  container.querySelector('[data-project]').onchange = event => filter('project',event.target.value);
-  container.querySelector('[data-status]').onchange = event => filter('status',event.target.value);
-  paint();
-}
-
 async function renderProductPage(type) {
   $('#empty').style.display='none';$('#metabar').style.display='none';$('#render').style.display='block';$('#render').classList.add('wide');
   const root=$('#render');root.innerHTML='<p role="status">正在加载…</p>';
@@ -878,29 +1012,7 @@ async function renderProductPage(type) {
   const titles=t('tabs');
   let body='';
   try{
-    if(type==='today'||type==='tasks'){
-      const [taskResult,assistantResult]=await Promise.allSettled([api('GET','tasks'),type === 'today' ? api('GET','heartflow') : null]);if(state.type!==type)return;
-      const rows=taskResult.status==='fulfilled'?taskResult.value.items:[],assistant=assistantResult.status==='fulfilled'?assistantResult.value:null;
-      const active=rows.filter(t=>['running','preparing','queued','executing'].includes(t.state));
-      const attention=rows.filter(t=>['failed','unknown','blocked'].includes(t.state));
-      const pending=assistant?Object.values(assistant.proposals).filter(p=>p.state==='pending').length:null;
-      const labels={running:'进行中',executing:'进行中',preparing:'准备中',queued:'排队中',completed:'已完成',failed:'需要处理',unknown:'待核对',blocked:'需要处理',cancelled:'已取消',interrupted:'已中断'};
-      const taskIdentity=t=>JSON.stringify([t.node||'local',t.sessionId||t.conversationId||t.requestedId||t.id]);
-      const conversations=new Map();
-      for(const t of rows){const key=taskIdentity(t);if(!conversations.has(key))conversations.set(key,[]);conversations.get(key).push(t);}
-      const breadcrumbs=t=>{
-        const siblings=conversations.get(taskIdentity(t))||[t];
-        const first=[...siblings].sort((a,b)=>(a.createdAt||0)-(b.createdAt||0))[0];
-        const cwd=t.jobMeta?.worktree?.repository||t.jobMeta?.cwd||t.cwd||siblings.find(x=>x.jobMeta?.cwd||x.cwd)?.jobMeta?.cwd||siblings.find(x=>x.cwd)?.cwd||'';
-        const sid=t.sessionId||t.conversationId;
-        const name=String(first.sessionTitle||first.jobMeta?.title||first.prompt||'对话').replace(/\s+/g,' ').slice(0,42);
-        return `<nav class="task-breadcrumb" aria-label="任务归属"><span title="${esc(cwd)}">${esc(cwd.split(/[\\/]/).filter(Boolean).pop()||'未记录项目')}</span><span aria-hidden="true">/</span>${sid?`<a href="/sessions/${encodeURIComponent(sid)}" title="${esc(sid)}">${esc(name)} <span class="task-conversation-id">${esc(sid.slice(0,8))}</span></a>`:'<span>未关联对话</span>'}<span aria-hidden="true">/</span><span aria-current="page">第 ${siblings.slice().sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)).findIndex(x=>x.id===t.id)+1} 次任务</span>${siblings.length>1?`<span class="task-thread-count">同一对话 · ${siblings.length} 次任务</span>`:''}</nav>`;
-      };
-      const list=items=>items.map(t=>`<article class="product-task"><span class="product-status">${esc(labels[t.state]||t.state)}</span><div>${breadcrumbs(t)}<strong>${esc((t.prompt||'执行任务').slice(0,180))}</strong><small>${esc(new Date(t.updatedAt||t.createdAt).toLocaleString())}</small></div>${t.sessionId||t.conversationId?`<a href="/sessions/${encodeURIComponent(t.sessionId||t.conversationId)}">查看对话 →</a>`:''}</article>`).join('');
-      if(type==='today') body=`${taskResult.status==='rejected'?'<p role="alert">任务记录暂时无法读取，请稍后刷新。</p>':''}<div class="product-summary">${tile('heartflow','待你确认 · '+(pending??'暂不可读'),'查看助理整理的判断与建议')}${tile('tasks','进行中 · '+active.length,'跟进已发起的任务')}${tile('connections','管理连接','聊天软件、电脑和 AI 账号')}</div>`;
-      if(type==='today')body+=`<h3>正在推进</h3>${list(active.slice(0,8))||'<p class="product-empty">暂无正在执行的任务，可以从助理建议或新对话开始。</p>'}<h3>需要处理</h3>${list(attention.slice(0,5))||'<p class="product-empty">暂无执行异常。</p>'}${tile('sessions','开始对话','提出问题，或继续之前的工作')}`;
-      else { body = (taskResult.status === 'rejected' ? '<p role="alert">任务记录暂时无法读取，请稍后刷新。</p>' : '') + '<div id="product-task-list"></div>'; root._productTasks = {rows, labels}; }
-    }else if(type==='connections'){
+    if(type==='connections'){
       body=`<p class="product-muted">连接你的消息来源与执行环境。助理使用已授权的消息范围，任务使用可用的执行设备。</p><div class="product-grid">${tile('im','聊天软件','接入飞书 / Lark 或企业微信智能机器人。')}${tile('proxy',t('tabs').proxy,'连接电脑，设置项目文件夹和 AI 账号。')}${tile('heartflow','助理关注范围','选择助理关注的聊天，以及通知与确认方式。')}</div><p class="product-note">机器人连接与个人聊天读取授权是不同能力。飞书机器人已连接，不代表助理可以读取你的所有聊天。</p>`;
     }else if(type==='capabilities'){
       body=`<p class="product-muted">把常用方法、专属助手和扩展能力放在一起，按需要选用。</p><label>适用工具 <select id="product-capability-engine">${resourceEngines().map(e=>`<option value="${esc(e.id)}" ${state.resourceEngine===e.id?'selected':''}>${esc(e.short)}</option>`).join('')}</select></label><div class="product-grid">${[['commands','快捷操作','复用常用指令，减少重复输入。'],['skills','技能','完成具体工作的知识与方法。'],['agents','专属助手','为不同工作准备合适的助手。'],['plugins','扩展','管理已安装的插件。'],['workflows','工作流','把多个步骤组织成可复用的流程。']].filter(([id])=>can(state.resourceEngine,'resources',id)).map(([id,title,description])=>tile(id,title,description)).join('')}</div>`;
@@ -908,11 +1020,9 @@ async function renderProductPage(type) {
       body=`<div class="product-grid">${tile('config','偏好与指令','管理个人偏好及项目约定。')}${tile('connections','连接管理','聊天软件、电脑和 AI 账号。')}${tile('guide','帮助与使用指南','了解如何开始对话和协作。')}</div><section class="product-advanced"><h3>工具与记录</h3><p class="product-muted">需要排查问题或查看详细运行数据时使用。</p><div class="product-grid">${tile('inspector','请求诊断','查看模型请求、上下文和响应。')}${tile('stats','使用统计','查看用量、成本与运行情况。')}${tile('voyage','工作回顾','按时间回看历史活动；当前基于 Claude 记录。')}</div></section>`;
     }
     if(state.type!==type)return;
-    root.innerHTML=`<section class="product-page"><header><h1>${titles[type]}</h1>${['tasks','today'].includes(type)?'<button class="btn" id="product-refresh">刷新</button>':''}</header>${body}</section>`;
+    root.innerHTML=`<section class="product-page"><header><h1>${titles[type]}</h1></header>${body}</section>`;
     root.querySelectorAll('[data-product-target]').forEach(b=>b.onclick=()=>switchType(b.dataset.productTarget));
-    if($('#product-refresh'))$('#product-refresh').onclick=()=>renderProductPage(type);
     if($('#product-capability-engine'))$('#product-capability-engine').onchange=e=>{state.resourceEngine=e.target.value;localStorage.setItem('panel-resource-engine',state.resourceEngine);renderResourceEngines();renderProductPage(type);};
-    if (type === 'tasks') mountTaskBrowser($('#product-task-list'), root._productTasks.rows, root._productTasks.labels);
   }catch(e){if(state.type===type)root.innerHTML=`<p role="alert">${esc(e.message)}</p>`;}
 }
 
@@ -952,12 +1062,12 @@ async function switchType(type, updateRoute = true, initialKey = '') {
   $('#footerBtns').style.display = type === 'config' && resourceCopy('bundle') !== false && state.resourceEngine === defaultResourceEngine() ? 'flex' : 'none';
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.type === productNavParent(type)));
   $('#newbtn').style.display = CAPS[type].new ? '' : 'none';
-  $('#newbtn').textContent = newBtnLabel(type);
+  paintNewButton(type);
   $('#filterbar').style.display = CAPS[type].filter ? 'flex' : 'none';
   $('#delBtn').textContent = type === 'plugins' ? t('uninstall') : t('del');
   localStorage.setItem('panel-section', type);
   showEmpty(!initialKey && !(updateRoute && sessionNavigation?.current));
-  if (['today','tasks','connections','capabilities','settings'].includes(type)) { await renderProductPage(type); return; }
+  if (['connections','capabilities','settings'].includes(type)) { await renderProductPage(type); return; }
   if (type === 'guide') { renderUserGuide(); return; }
   if (type === 'proxy') { await renderProxyTab(); return; }
   if (type === 'heartflow') { await openHeartflow(); return; }
@@ -967,8 +1077,6 @@ async function switchType(type, updateRoute = true, initialKey = '') {
   if (type === 'inspector') startInspectorPoll(); else stopInspectorPoll();
   if (type === 'sessions') {
     if(sessionNavigation){state.items=sessionNavigation.items;state.keyword=sessionNavigation.keyword;$('#search').value=state.keyword;listPage={...sessionNavigation.page};renderList();$('#list').scrollTop=sessionNavigation.scroll;
-      const search = currentTranscriptSearch();
-      if (state.keyword && (!search || (search.pending && !search.loading))) scheduleTranscriptSearch();
       if(updateRoute&&sessionNavigation.current){if(sessionNavigation.current==='__draft__'){state.current=null;if (!restoreChatPage('__draft__')) startChatDraft();}else openSessionChat(sessionNavigation.current);}
       startRoutePoll();return;
     }
@@ -1005,7 +1113,7 @@ function renderSessionEngines() {
   const selected = selectedSessionEngine();
   host.innerHTML = ENGINES.length > 1 ? '<div class="engine-filter">' + [['all', ui('全部', 'All', 'すべて')], ...ENGINES.map(engine => [engine.id, engine.short])].map(([id, label]) => `<button type="button" data-session-engine="${esc(id)}" aria-pressed="${selected === id}">${esc(label)}</button>`).join('') + '</div>' : '';
   host.querySelectorAll('button').forEach(button => button.onclick = () => {
-    sessionEngine = button.dataset.sessionEngine; localStorage.setItem('panel-session-engine', sessionEngine); renderSessionEngines(); scheduleTranscriptSearch(true);
+    sessionEngine = button.dataset.sessionEngine; localStorage.setItem('panel-session-engine', sessionEngine); renderSessionEngines(); renderList();
   });
 }
 let listPage = { key: '', index: 0 };
@@ -1019,7 +1127,7 @@ function renderList({ revealCurrent = false } = {}) {
   if (state.type === 'inspector') updateCaptureFilterCounts();
   const visibleItems = state.items
     .filter(it => matchOrigin(it))
-    .filter(it => state.type !== 'sessions' || matchesSessionEngine(it))
+    .filter(it => state.type !== 'sessions' || (matchesSessionEngine(it) && conversationSearch.matchesProject(it)))
     .filter(it => state.type !== 'inspector' || matchesCaptureFilters(it))
     .filter(it => !kw || (state.type === 'sessions' ? kw.trim().split(/\s+/).every(word => [it.name, it.description, it.key, it.cwd, it.gitBranch].filter(Boolean).join(' ').toLowerCase().includes(word)) : it.name.toLowerCase().includes(kw) || (it.description || '').toLowerCase().includes(kw)));
   const pageKey = JSON.stringify([state.type, state.resourceEngine, state.scope, state.origin, kw, sessionEngine, state.inspectorEngine, state.inspectorSession, state.inspectorPurpose]);
@@ -1031,9 +1139,7 @@ function renderList({ revealCurrent = false } = {}) {
   }
   listPage.index = Math.max(0, Math.min(listPage.index, Math.ceil(visibleItems.length / LIST_PAGE_SIZE) - 1));
   const start = listPage.index * LIST_PAGE_SIZE, end = Math.min(visibleItems.length, start + LIST_PAGE_SIZE);
-  const transcript = currentTranscriptSearch();
-  if (transcript) appendSearchResults(fragment, transcript, visibleItems.length);
-  if (!visibleItems.length && !transcript) { const note = document.createElement('p'); note.className = 'list-empty'; note.textContent = kw ? ui('没有找到匹配的内容', 'No matching results') : ui('这里还没有内容', 'Nothing here yet'); fragment.append(note); }
+  if (!visibleItems.length) { const note = document.createElement('p'); note.className = 'list-empty'; note.textContent = kw ? ui('没有找到匹配的内容', 'No matching results') : ui('这里还没有内容', 'Nothing here yet'); fragment.append(note); }
   visibleItems.slice(start, end).forEach(it => {
       const key = it.key || it.name;
       const div = document.createElement('button');
@@ -1094,7 +1200,7 @@ function renderList({ revealCurrent = false } = {}) {
       } else fragment.appendChild(div);
     });
   list.replaceChildren(fragment);
-  $('#libraryCount').textContent = transcript ? (transcript.pending ? '…' : String(visibleItems.length + transcript.results.length) + (transcript.next ? '+' : '')) : visibleItems.length + ui(' 项', ' items', ' 件');
+  $('#libraryCount').textContent = visibleItems.length + ui(' 项', ' items', ' 件');
   let pager = $('#list-pager');
   if (!pager) { pager = document.createElement('div'); pager.id = 'list-pager'; pager.className = 'list-pager'; pager.setAttribute('aria-label', ui('列表分页', 'List pagination')); list.after(pager); }
   pager.replaceChildren(); pager.hidden = visibleItems.length <= LIST_PAGE_SIZE;
@@ -1313,79 +1419,8 @@ async function createItem() {
 }
 $('#newName').addEventListener('keydown', e => { if (e.key === 'Enter') createItem(); });
 
-let transcriptQuery = null, searchTimer, hitNavigation = 0;
-function scheduleTranscriptSearch(immediate = false) {
-  clearTimeout(searchTimer);
-  const q = state.keyword.trim(), engine = selectedSessionEngine();
-  if (state.type !== 'sessions' || !q) { transcriptQuery = null; renderList(); return; }
-  if (transcriptQuery?.q !== q || transcriptQuery.engine !== engine) {
-    transcriptQuery = { q, engine, results: [], pending: true, unavailable: [] };
-  }
-  const search = transcriptQuery;
-  renderList();
-  if (immediate) fetchSearchPage(search);
-  else searchTimer = setTimeout(() => fetchSearchPage(search), 350);
-}
-async function fetchSearchPage(search) {
-  if (search.loading || search !== currentTranscriptSearch()) return;
-  search.pending = search.loading = true;
-  search.error = '';
-  if (state.type === 'sessions') renderList();
-  const params = new URLSearchParams({ q: search.q, engine: search.engine });
-  if (search.next) params.set('before', search.next);
-  try {
-    const page = await api('GET', 'search?' + params);
-    if (search !== transcriptQuery) return;
-    if (search.next) search.results.push(...page.results);
-    else search.results = page.results;
-    search.next = page.next;
-    search.unavailable = page.unavailable || [];
-  } catch (err) { search.error = err.message; }
-  finally {
-    search.pending = search.loading = false;
-    if (state.type === 'sessions' && search === transcriptQuery) renderList();
-  }
-}
-function currentTranscriptSearch() {
-  if (!transcriptQuery || state.type !== 'sessions') return null;
-  return transcriptQuery.q === state.keyword.trim() && transcriptQuery.engine === selectedSessionEngine() ? transcriptQuery : null;
-}
-function appendSearchResults(fragment, search, titleCount) {
-  const titles = new Map(state.items.map(item => [item.key, item.name]));
-  const note = text => {
-    const line = document.createElement('p'); line.className = 'search-status'; line.textContent = text; fragment.append(line);
-  };
-  for (const hit of search.results) {
-    const row = document.createElement('button'); row.type = 'button'; row.className = 'item search-result';
-    const heading = document.createElement('div'); heading.className = 'nm';
-    heading.textContent = titles.get(hit.session) || hit.project?.split('/').pop() || hit.session;
-    const excerpt = document.createElement('div'); excerpt.className = 'search-excerpt';
-    const word = search.q.split(/\s+/)[0], pos = hit.snippet.toLowerCase().indexOf(word.toLowerCase());
-    if (pos < 0) excerpt.textContent = hit.snippet;
-    else {
-      const mark = document.createElement('mark'); mark.textContent = hit.snippet.slice(pos, pos + word.length);
-      excerpt.append(hit.snippet.slice(0, pos), mark, hit.snippet.slice(pos + word.length));
-    }
-    const meta = document.createElement('small');
-    meta.textContent = [hit.role === 'user' ? ui('提问','Question','質問') : ui('回答','Answer','回答'), engineLabel(hit.engine, true), hit.machineId, hit.ts?.slice(0,10)].filter(Boolean).join(' · ');
-    row.append(heading, excerpt, meta); row.onclick = () => openSearchHit(hit); fragment.append(row);
-  }
-  if (search.pending) note(ui('正在搜索问答…', 'Searching messages…', 'メッセージを検索中…'));
-  else if (search.error) note(search.error);
-  if (search.unavailable.length) note(ui('未能搜索的设备', 'Devices unavailable', '検索できないデバイス') + ' · ' + search.unavailable.join('、'));
-  if (!search.results.length && !titleCount && !search.pending && !search.error && !search.unavailable.length) note(t('srNone'));
-  if (!search.pending && (search.next || search.error || search.unavailable.length)) {
-    const more = document.createElement('button'); more.type = 'button'; more.className = 'btn search-more';
-    more.textContent = search.next && !search.error ? ui('更多匹配', 'More matches', 'もっと見る') : ui('重新搜索', 'Search again', '再検索');
-    more.onclick = () => {
-      if (!search.next && !search.error) { transcriptQuery = null; scheduleTranscriptSearch(true); }
-      else fetchSearchPage(search);
-    };
-    fragment.append(more);
-  }
-  if (titleCount && search.results.length) note(ui('匹配的会话', 'Matching sessions', '一致するセッション'));
-}
-
+const conversationSearch = createConversationSearch();
+let hitNavigation = 0;
 async function openSearchHit(hit) {
   const navigation = ++hitNavigation;
   await openItem(hit.session);
@@ -1393,9 +1428,11 @@ async function openSearchHit(hit) {
   const current = () => navigation === hitNavigation && state.type === 'sessions' && state.current === hit.session && view === chatView && view.sessionId === hit.session;
   while (current()) {
     const matches = m => m.role === hit.role && m.text?.replace(/\s+/g, ' ').includes(hit.snippet);
-    let index = hit.ts ? view.messages.findLastIndex(m => m.timestamp === hit.ts && matches(m)) : -1;
+    let index = hit.messageId ? view.messages.findLastIndex(m => m.role === hit.role && (m.id === hit.messageId || m.messageId === hit.messageId)) : -1;
+    if (index < 0) index = hit.ts ? view.messages.findLastIndex(m => m.timestamp === hit.ts && matches(m)) : -1;
     // Adjacent assistant chunks are combined in the conversation. Their final
     // timestamp can be later than the matching chunk, so use its turn interval.
+    if (index < 0 && hit.messageId) index = view.messages.findLastIndex(m => matches(m) && (!hit.ts || !m.timestamp || Math.abs(Date.parse(m.timestamp) - Date.parse(hit.ts)) < 15000));
     if (index < 0) index = view.messages.findLastIndex((m, i) => matches(m) && (!hit.ts || !m.timestamp ||
       (m.timestamp >= hit.ts && (!i || !view.messages[i - 1].timestamp || view.messages[i - 1].timestamp <= hit.ts))));
     if (index >= 0) {
@@ -1414,15 +1451,7 @@ async function openSearchHit(hit) {
 
 $('#search').addEventListener('input', e => {
   state.keyword = e.target.value;
-  if (state.type === 'sessions' && !e.isComposing) scheduleTranscriptSearch();
-  else renderList();
-});
-$('#search').addEventListener('compositionend', () => {
-  state.keyword = $('#search').value;
-  if (state.type === 'sessions') scheduleTranscriptSearch();
-});
-$('#search').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && state.type === 'sessions') scheduleTranscriptSearch(true);
+  renderList();
 });
 
 // ---------- 会话回放 ----------
@@ -2685,13 +2714,13 @@ function statsHTML(d) {
   return h + '</div>';
 }
 
-if(localStorage.getItem('panel-section')==='today')localStorage.setItem('panel-section','tasks');
+if (['today','tasks'].includes(localStorage.getItem('panel-section'))) localStorage.setItem('panel-section','sessions');
 // Visible groups keep every capability one click away; old hub URLs remain valid.
 const navTab=type=>document.querySelector(`.tab[data-type="${type}"]`);
 const makeProductTab=(type,reference)=>{const tab=navTab(reference).cloneNode(true);tab.classList.remove('active');tab.dataset.type=type;tab.querySelector('.cnt').textContent='';tab.onclick=()=>switchType(type);return tab;};
-const taskNav=makeProductTab('tasks','workflows'),settingsNav=makeProductTab('settings','config');
-const navigationGroups=[['工作',['sessions','tasks','heartflow']],['连接',['im','proxy']],['能力库',['commands','skills','agents','plugins','workflows']],['更多',['stats','voyage','inspector']]];
-const navigationNodes=new Map(Array.from(document.querySelectorAll('#tabs .tab')).map(tab=>[tab.dataset.type,tab]));navigationNodes.set('tasks',taskNav);
+const settingsNav=makeProductTab('settings','config');
+const navigationGroups=[['工作',['sessions','heartflow']],['连接',['im','proxy']],['能力库',['commands','skills','agents','plugins','workflows']],['更多',['stats','voyage','inspector']]];
+const navigationNodes=new Map(Array.from(document.querySelectorAll('#tabs .tab')).map(tab=>[tab.dataset.type,tab]));
 const navFragment=document.createDocumentFragment();
 for(const [label,types] of navigationGroups){const heading=document.createElement('div');heading.className='nav-group-label';heading.dataset.navGroup=label;heading.textContent=label;navFragment.append(heading);for(const type of types)navFragment.append(navigationNodes.get(type));}
 // Hidden configuration tab remains addressable for compatibility and counters.
@@ -2700,16 +2729,16 @@ $('#tabs').replaceChildren(navFragment);
 navTab('guide').before(settingsNav);
 // ---------- 语言切换 ----------
 function syncThemeControl() {
-  const button = $('#themeToggle');
-  button.title = document.documentElement.dataset.theme === 'dark'
-    ? ui('切换到浅色模式', 'Switch to light mode', 'ライトモードに切り替え')
-    : ui('切换到暗黑模式', 'Switch to dark mode', 'ダークモードに切り替え');
-  button.setAttribute('aria-label', button.title);
+  const select = $('#themeSelect');
+  select.setAttribute('aria-label', ui('外观主题','Appearance','テーマ'));
+  const options = [['',ui('跟随系统','System','システム')],['light',ui('浅色','Light','ライト')],['dark',ui('深色','Dark','ダーク')],['paper',ui('手绘纸张','Sketchbook','スケッチブック')]];
+  select.replaceChildren(...options.map(([id,label]) => new Option(label,id)));
+  select.value = themePreference || '';
+  syncChatPicker(select);
 }
-$('#themeToggle').onclick = () => {
-  applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
-  try { localStorage.setItem('panel-theme', themePreference); } catch {}
-  syncThemeControl();
+$('#themeSelect').onchange = event => {
+  applyTheme(event.target.value);
+  try { if (themePreference) localStorage.setItem('panel-theme', themePreference); else localStorage.removeItem('panel-theme'); } catch {}
 };
 systemTheme.addEventListener('change', () => {
   if (!themePreference) { applyTheme(null); syncThemeControl(); }
@@ -2735,7 +2764,7 @@ function applyLang() {
   $('#search').placeholder = t('search');
   document.querySelector('.fbtn[data-origin="user"]').textContent = t('mineOnly');
   document.querySelector('.fbtn[data-origin="all"]').textContent = t('all');
-  $('#newbtn').textContent = newBtnLabel(state.type);
+  paintNewButton(state.type);
   $('#exportBtn').textContent = t('exportBtn');
   $('#importBtn').textContent = t('importBtn');
   $('#search').placeholder = state.type === 'sessions' ? t('searchSessionsPh') : t('search');
@@ -2762,7 +2791,7 @@ async function setLang(code) {
   if (state.type === 'proxy') { await renderProxyTab(); return; }
   if (state.type === 'sessions' && $('#chat-messages') && !chatAbort) { chatView.sessionId ? openSessionChat(chatView.sessionId) : renderChat(); return; }
   if (state.type === 'voyage') { await renderVoyage(); return; }
-  if (['today','tasks','connections','capabilities','settings'].includes(state.type)) { await renderProductPage(state.type); return; }
+  if (['connections','capabilities','settings'].includes(state.type)) { await renderProductPage(state.type); return; }
   if (CAPS[state.type].dashboard) { await renderStatsTab(); loadCounts(); return; }
   const cur = state.current;
   const type = state.type;
@@ -3024,7 +3053,13 @@ function paintRoutes() {
     }
   }
 }
-const newBtnLabel = type => type === 'sessions' ? '＋ ' + ui('新对话', 'New chat', '新しいチャット') : t('newBtn');
+const newBtnLabel = type => type === 'sessions' ? ui('新对话', 'New chat', '新しいチャット') : t('newBtn');
+function paintNewButton(type) {
+  const button = $('#newbtn'), label = newBtnLabel(type);
+  button.setAttribute('aria-label', label);
+  if (type === 'sessions') button.innerHTML = icon('plus') + '<span>' + esc(label) + '</span>';
+  else button.textContent = label;
+}
 // All selects share an in-page menu; native selects remain the source of form values.
 const panelSelects = new WeakMap();
 let panelSelectSequence = 0;
@@ -3159,17 +3194,21 @@ function chatChrome(title, path) {
   document.body.dataset.libraryOpen = 'false'; syncPanelToggles();
 }
 function startChatDraft() {
-  chatView = { sessionId: '', cwd: '', messages: [], worktreeEnabled: true, engine: knownEngine(localStorage.getItem('panel-chat-engine')) };
+  chatView = { sessionId: '', cwd: '', ...conversationSearch.draftLocation(), messages: [], worktreeEnabled: true, engine: knownEngine(localStorage.getItem('panel-chat-engine')) };
   chatChrome(ui('新对话', 'New chat', '新しいチャット'), '');
   renderChat();
 }
 function openNewChat() {
-  if ($('.chat-launch')) { $('#chat-prompt').focus(); return; }
+  if ($('.chat-launch')) {
+    const location = conversationSearch.draftLocation();
+    if (location) { Object.assign(chatView, location); loadChatExecution(chatView); }
+    $('#chat-prompt').focus(); return;
+  }
   ++detailRevision;
   rememberChatPage(); chatAbort?.abort();
   state.current = null; routeView = ''; writeRoute(); renderList();
   sessionEngine = 'all'; localStorage.setItem('panel-session-engine', 'all'); renderSessionEngines();
-  if (state.keyword) scheduleTranscriptSearch(true);
+  if (state.keyword) renderList();
   startChatDraft();
 }
 async function openSessionChat(id, { fresh=false } = {}) {
