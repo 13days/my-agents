@@ -2,6 +2,8 @@
 
 [快速接入](#启动第一台) · [使用手册](docs/user-guide.md) · [English](README.en.md)
 
+![飞书、企业微信和网页通过 my-agents 集群在 Mac 或 Linux 上运行 Claude Code、Codex、DeepSeek Harness，可接自定义网关或 Codex 订阅代理](https://raw.githubusercontent.com/13days/my-agents/main/docs/my-agents-overview-zh.gif)
+
 [![播放 3 分 20 秒产品介绍，从终端与飞书接续到多机执行、模型代理和助理](https://raw.githubusercontent.com/13days/my-agents/main/docs/product-tour-zh.png)](https://cdn.jsdelivr.net/gh/13days/my-agents@2a8d7841becf17cad868340333861091f4826f51/docs/my-agents-intro.mp4)
 
 在终端用 Codex 或 Claude Code 开始的对话，出门后可以在飞书接手，回到电脑也能在网页或原终端继续。没有 Claude 模型也能用 Claude Code 改文件、跑命令。你可以接入自己的兼容网关，也可以通过 Codex 订阅代理，让带 Codex 权限的 ChatGPT 订阅提供 GPT 模型。 [下载介绍视频（MP4）](https://raw.githubusercontent.com/13days/my-agents/2a8d7841becf17cad868340333861091f4826f51/docs/my-agents-intro.mp4) · [中英字幕（SRT）](docs/my-agents-intro.srt)
@@ -84,7 +86,7 @@ MY_AGENTS_NO_PROXY_SETUP=1 npm start
 
 ## 一个终端启动，多台机器分头工作
 
-在「电脑与 AI 账号 → 连接电脑 → 添加电脑」填入平时使用的免密 SSH 地址，例如 `devbox`。面板会检查环境、准备运行时、安装执行程序并建立连接。在同页选择「新任务默认执行机器」。点电脑卡片上的「选择目录」浏览本机或远程文件夹；也可以在下方为同一项目分别选择各机器上的目录。已有会话沿用其执行机器。
+在「电脑与 AI 账号 → 连接电脑 → 添加电脑」填入平时使用的免密 SSH 地址，例如 `devbox`。面板会检查环境、准备运行时、安装执行程序并建立连接。在同页选择「新任务默认执行机器」。点电脑卡片上的「选择目录」浏览本机或远程文件夹。在卡片内的「项目文件夹」点「添加」，可新建项目或为已有项目关联这台电脑上的目录。已有会话沿用其执行机器。
 
 ![同一个 design-kit 项目在设计工作站和 Linux 开发机上分别指定目录](https://raw.githubusercontent.com/13days/my-agents/main/docs/workspace-paths-preview.png)
 

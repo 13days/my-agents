@@ -10,12 +10,16 @@ function claudeRelayMessage(row) {
   const footer = text.lastIndexOf('\n\nThis came from another Claude session');
   if (footer < match[0].length) return null;
   let body = text.slice(match[0].length, footer).trim();
+  body = visibleRelayText(body);
+  return body ? { text: body, relayMessageId: match[1], source: 'feishu' } : null;
+}
+function visibleRelayText(body) {
   const context = /^\[(my-agents|Claude Panel) 飞书发送上下文，本轮有效\]\r?\n/.exec(body);
   if (context) {
     const closing = `[/${context[1]} 飞书发送上下文]`, end = body.indexOf(closing, context[0].length);
-    if (end < 0) return null;
+    if (end < 0) return '';
     body = body.slice(end + closing.length).trim();
   }
-  return body ? { text: body, relayMessageId: match[1], source: 'feishu' } : null;
+  return body;
 }
-module.exports = { claudeRelayMessage };
+module.exports = { claudeRelayMessage, visibleRelayText };

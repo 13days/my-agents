@@ -2,6 +2,8 @@
 
 [Quick start](#start-your-first-panel) · [User guide (Chinese)](docs/user-guide.md) · [中文](README.md)
 
+![Feishu, WeCom and the web share a my-agents cluster running Claude Code, Codex or DeepSeek Harness, with optional custom gateway and Codex subscription proxies](https://raw.githubusercontent.com/13days/my-agents/main/docs/my-agents-overview.gif)
+
 [![Play the 3 min 20 sec tour of session handoff, multi-machine tasks, model proxies and the assistant](https://raw.githubusercontent.com/13days/my-agents/main/docs/product-tour-en.png)](https://cdn.jsdelivr.net/gh/13days/my-agents@2a8d7841becf17cad868340333861091f4826f51/docs/my-agents-intro.mp4)
 
 Start a conversation in Codex or Claude Code, pick it up in Feishu on your phone, and continue in your browser or the original terminal. You can use Claude Code without access to a Claude model. Connect your own compatible gateway, or use GPT through the Codex subscription proxy with a ChatGPT subscription that includes Codex. [Download the tour (MP4)](https://raw.githubusercontent.com/13days/my-agents/2a8d7841becf17cad868340333861091f4826f51/docs/my-agents-intro.mp4) · [Chinese and English captions (SRT)](docs/my-agents-intro.srt)
@@ -83,7 +85,7 @@ Both the installer and this start command keep your terminal proxy configuration
 
 ## Run tasks on several machines from one panel
 
-In **Computers & AI accounts → Computers → Add computer**, enter a passwordless SSH address or host alias. The panel prepares the runtime, installs the runner, and connects the device. On the same page, choose the default machine for new tasks. Use **Choose folder** on a computer card to browse its local or remote directories, or map a project across machines under **Project folders**. Existing sessions keep their execution machine.
+In **Computers & AI accounts → Computers → Add computer**, enter a passwordless SSH address or host alias. The panel prepares the runtime, installs the runner, and connects the device. On the same page, choose the default machine for new tasks. Use **Choose folder** on a computer card to browse its local or remote directories, or use **Project folders → Add** on the card to create a project or link its existing checkout on this machine. Existing sessions keep their execution machine.
 
 ![The design-kit checkout mapped to a different directory on each execution machine](https://raw.githubusercontent.com/13days/my-agents/main/docs/workspace-paths-preview.png)
 

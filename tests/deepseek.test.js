@@ -46,3 +46,26 @@ test('Harness routes on the execution machine, resumes its native session, and p
     session.close();
   }
 });
+
+test('reads every native Harness frame and only displays user questions and model replies', { skip: !require('node:zlib').zstdCompressSync }, async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-history-'));
+  t.after(() => fs.rmSync(dir, { recursive:true, force:true }));
+  const id = randomUUID(), native = 'session-' + randomUUID();
+  const folder = path.join(dir, 'sessions', 'project', native);
+  fs.mkdirSync(folder, { recursive:true }); fs.mkdirSync(path.join(dir, 'dsh-sessions'));
+  fs.writeFileSync(path.join(dir, 'dsh-sessions', id), native);
+  const message = (role, kind, text) => ({ role, source:{kind}, content:[{type:'text',text}] });
+  const frames = [
+    { type:'session', cwd:'/project' },
+    { type:'user/message', data:message('user','user','[my-agents 飞书发送上下文，本轮有效]\ninternal\n[/my-agents 飞书发送上下文]\n\nquestion') },
+    { type:'user/message', data:message('user','runtime-context','internal') },
+    { type:'assistant/message', data:{ message:message('assistant','model','reply') } },
+  ];
+  fs.writeFileSync(path.join(folder, 'session.v4.jsonl.zstd'), Buffer.concat(frames.map(frame => require('node:zlib').zstdCompressSync(JSON.stringify(frame) + '\n'))));
+  const read = require('../engines/deepseek/history').createHarnessHistory(dir, dir);
+  const history = await read(id);
+  assert.equal(history.project, '/project');
+  assert.deepEqual(history.messages.map(m=>m.text), ['question','reply']);
+  assert.equal((await read(id, { since:history.revision })).unchanged, true);
+  assert.equal(await read('../invalid'), null);
+});

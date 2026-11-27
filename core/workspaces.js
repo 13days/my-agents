@@ -60,7 +60,7 @@ function createWorkspaces({ dir, selfId, machines, hostFor, leaderId = () => '' 
     };
     if ('directory' in input) {
       const { machineId: id, path: value } = input.directory || {};
-      if ((!known.has(id) && value !== previous) || typeof value !== 'string') throw fail('机器或目录无效');
+      if (!known.has(id) || typeof value !== 'string') throw fail('机器或目录无效');
       const checked = value && await check(id, value, old.defaults[id]);
       const latest = read();
       if (checked) latest.defaults[id] = checked; else delete latest.defaults[id];

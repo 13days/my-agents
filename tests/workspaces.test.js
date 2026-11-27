@@ -60,3 +60,13 @@ test('new tasks share a stable default machine, explicit selections and existing
   await store.save({ defaultMachine: '' });
   assert.equal(store.resolve().machineId, 'mac');
 });
+
+test('a legacy runner verifies manual paths on the selected node and preserves real lookup errors', async () => {
+  const { browseHost } = require('../hosts/directories');
+  const host = { listDirectories: async () => { throw Error('未知方法：host.listDirectories'); }, resolveDir: async p => p === '~' ? '/home/dev' : Promise.reject(Error('目录不存在')) };
+  assert.deepEqual(await browseHost(host, { dir:'~', offset:0 }, () => ''), { cwd:'/home/dev', manual:true });
+  await assert.rejects(browseHost(host, { dir:'/missing', offset:0 }, () => ''), /目录不存在/);
+  await assert.rejects(browseHost(host, { dir:'relative', offset:0 }, () => ''), /绝对目录/);
+  host.listDirectories = async () => { throw Error('EACCES'); };
+  await assert.rejects(browseHost(host, { dir:'~', offset:0 }, () => assert.fail()), /EACCES/);
+});

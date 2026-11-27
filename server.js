@@ -769,7 +769,7 @@ function isCodexSession(id) {
   return !!codexSessions.pathFor(id) && !transcriptPathFor(id);
 }
 function sessionEngine(id) {
-  const saved = sessionStore.read()[id]?.engine;
+  const saved = sessionStore.read()[id]?.engine || conversations.get(id)?.engine;
   if (saved === 'deepseek') return saved;
   return isCodexSession(id) || saved === 'codex' ? 'codex' : 'claude';
 }
@@ -1926,22 +1926,35 @@ const sessionDirectory = require('./core/session-directory').createSessionDirect
   local: listSessions, selfId: machineId,
   peers: () => registry.nodes().filter(node => node.id !== 'local' && node.peer).map(node => ({ id: node.id, peer: clusterNetwork?.peer(node.id) || node.peer })),
 });
+const readHarnessHistory = require('./engines/deepseek/history').createHarnessHistory(DATA_DIR);
+async function machineHistoryPage(id, page) {
+  const native = await readHarnessHistory(id, page);
+  if (native) return native.unchanged ? native : pageSessionMessages(native, page);
+  const saved = conversations.get(id);
+  if (saved?.engine !== 'deepseek' || !saved.messages?.length) return sessionHistoryPage(id, page);
+  return checkpointPage(saved, page);
+}
+function checkpointPage(saved, page) {
+  const revision = 'checkpoint:' + saved.updatedAt + ':' + (saved.messages?.length || 0);
+  if (page.before === undefined && page.since === revision) return { unchanged: true, revision };
+  return pageSessionMessages({ id: saved.id, project: saved.project, engine: saved.engine, machineId: saved.machineId, messages: saved.messages || [], checkpoint: true, revision }, page);
+}
 async function conversationHistory(id, sourceMachine, { cachedDirectory = false, ...page } = {}) {
   const directoryItem = () => cachedDirectory ? sessionDirectory.findCached(id) : sessionDirectory.find(id);
   const saved = conversations.get(id), meta = sessionStore.read()[id] || saved || {};
   const source = sourceMachine || meta.machineId || meta.node || directoryItem()?.machineId || machineId();
   let result;
-  if (source === machineId() || source === 'local') result = sessionHistoryPage(id, page);
+  if (source === machineId() || source === 'local') result = await machineHistoryPage(id, page);
   else {
     const peer = clusterNetwork?.peer(source) || registry.node(source)?.peer;
     if (peer) { try { result = await peer.call('history.messages', { id, ...page }, { timeout: 5000 }); } catch {} }
   }
   if (result?.unchanged) return result;
+  // An older remote panel may return only its launch prompt for a Harness session.
+  if (saved?.engine === 'deepseek' && saved.messages?.length && !result?.engine && !result?.revision) return checkpointPage(saved, page);
   if (result && !result.checkpoint) { const item = directoryItem(); if (item?.machineId === source && item.project) result = { ...result, project: item.project }; }
   if (result || !saved) return result || null;
-  const revision = 'checkpoint:' + saved.updatedAt + ':' + (saved.messages?.length || 0);
-  if (page.before === undefined && page.since === revision) return { unchanged:true, revision };
-  return pageSessionMessages({ id, project: saved.project, engine: saved.engine, machineId: saved.machineId, messages: saved.messages || [], checkpoint: true, revision }, page);
+  return checkpointPage(saved, page);
 }
 
 const sessionInspection = require('./core/session-inspection').createSessionInspection({
@@ -2378,7 +2391,8 @@ const server = http.createServer(async (req, res) => {
         const host = id && registry.node(id === machineId() ? 'local' : id)?.host;
         if (!host) return sendJSON(res, 409, { error: '执行机器未连接，暂时无法浏览目录' });
         try {
-          const listing = await host.listDirectories({ dir: url.searchParams.get('path') || '~', hidden: url.searchParams.get('hidden') === '1', offset: Number(url.searchParams.get('offset') || 0) });
+          const { browseHost, configuredTarget } = require('./hosts/directories');
+          const listing = await browseHost(host, { dir: url.searchParams.get('path') || '~', hidden: url.searchParams.get('hidden') === '1', offset: Number(url.searchParams.get('offset') || 0) }, () => configuredTarget(DATA_DIR, id, nodeHub.configured()));
           return sendJSON(res, 200, listing);
         } catch (error) { return sendJSON(res, 400, { error: error.message }); }
       }
@@ -2396,7 +2410,15 @@ const server = http.createServer(async (req, res) => {
         try {
           const input = JSON.parse(await readBody(req, 256 * 1024));
           let config;
-          if (cluster?.status().enabled && !cluster.canStart()) { const leader = cluster.status().leader; if (!leader) return sendJSON(res, 409, { error: '当前没有有效主节点，共享目录尚不能保存；请先恢复集群连接' }); config = await clusterNetwork.call(leader, 'workspaces.save', input, { timeout: 15000 }); }
+          if (cluster?.status().enabled && !cluster.canStart()) {
+            const leader = cluster.status().leader;
+            if (!leader) return sendJSON(res, 409, { error: '当前没有有效主节点，共享目录尚不能保存；请先恢复集群连接' });
+            try { config = await clusterNetwork.call(leader, 'workspaces.save', input, { timeout: 15000 }); }
+            catch (error) {
+              if (error.message === '请提供机器默认目录和项目映射') return sendJSON(res, 409, { error: `接收聊天消息的电脑「${leader}」仍在运行旧版。请更新该电脑后再保存项目或默认目录。` });
+              throw error;
+            }
+          }
           else config = await workspaceStore.save(input); return sendJSON(res, 200, { ...workspaceStore.view(), config });
         } catch (error) { return sendJSON(res, error.status || 400, { error: error.message }); }
       }
@@ -2795,13 +2817,13 @@ const server = http.createServer(async (req, res) => {
         const id = decodeURIComponent(parts[2]), following = url.searchParams.get('source') === 'transcript', running = following ? null : manager.get(id);
         // Passive CLI followers read the current transcript, even while an idle
         // panel connection retains its launch-time baseHistory for SSE replay.
-        if (running && !running.job.closed && Array.isArray(running.baseMessages) && !url.searchParams.has('before')) return sendJSON(res, 200, { ...running.baseHistory, id: running.id, project: running.job.meta.cwd, worktree: running.job.meta.worktree, messages: running.baseMessages, liveReplay: true, jobId: running.job.meta.jobId });
+        if (running && !running.job.closed && Array.isArray(running.baseMessages) && !url.searchParams.has('before')) return sendJSON(res, 200, { ...running.baseHistory, id: running.id, engine: running.engine, project: running.job.meta.cwd, worktree: running.job.meta.worktree, messages: running.baseMessages, liveReplay: true, jobId: running.job.meta.jobId });
         const directoryItem = following ? sessionDirectory.findCached(id) : sessionDirectory.find(id);
         const metadata = sessionStore.read()[id];
         const saved = conversations.get(id);
         const owner = metadata?.machineId || metadata?.node || saved?.machineId || directoryItem?.machineId || machineId();
         const page = { since: url.searchParams.get('since'), before: url.searchParams.get('before') ?? undefined, limit: Math.max(1, Number(url.searchParams.get('limit')) || 80) };
-        const r = owner === machineId() || owner === 'local' ? sessionHistoryPage(id, page) : await conversationHistory(id, owner, { cachedDirectory: following, ...page });
+        const r = await conversationHistory(id, owner, { cachedDirectory: true, ...page });
         if (r?.unchanged) return sendJSON(res, 200, r);
         if (!r) return sendJSON(res, 404, { error: T(lang, 'errNotFound') });
         let lastLoginFailure;
@@ -2810,7 +2832,7 @@ const server = http.createServer(async (req, res) => {
           const failure = state.lastCodexLoginFailure(running.job.events, r.messages);
           if (failure) lastLoginFailure = { at: failure.timestamp, hint: state.codexLoginHint(failure.error, codexLoginSource(running)) };
         }
-        return sendJSON(res, 200, { ...r, project: directoryItem?.project || r.project, machineId: owner, worktree: metadata?.worktree || null, lastLoginFailure });
+        return sendJSON(res, 200, { ...r, engine: r.engine || metadata?.engine || saved?.engine || directoryItem?.engine, project: directoryItem?.project || r.project, machineId: owner, worktree: metadata?.worktree || null, lastLoginFailure });
       }
       if (req.method === 'GET' && parts.length === 4 && parts[3] === 'replay') {
         const r = sessionReplay(decodeURIComponent(parts[2]));
@@ -3082,7 +3104,7 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
     const self = clusterConfig.members.find(item => item.id === clusterConfig.nodeId);
     if (self?.witness) return;
     const oldRuntime = registry.node(id); if (oldRuntime?.info.transport === 'cluster' && oldRuntime.peer !== peer) { registry.removeNode(id); clusterRuntimePending.delete(id); }
-    require('./node/agent').serveNode({ peer, runtime: executionRuntime, ownerId: id, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listSessions, messages: sessionHistoryPage, search: input => historyWorker.read('search', input), previews: items => historyWorker.read('sessionPreviews', items), userPage: input => historyWorker.read('sessionUserPage', input) }, beforeOpen: async (id, options) => { const native = id && await registry.adapter(options.engine, 'local')?.nativeSessionAvailable?.(id); if (id && manager.busy(id) && !native) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed && !manager.busy(id)) previous.session.close(); } });
+    require('./node/agent').serveNode({ peer, runtime: executionRuntime, ownerId: id, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listSessions, messages: machineHistoryPage, search: input => historyWorker.read('search', input), previews: items => historyWorker.read('sessionPreviews', items), userPage: input => historyWorker.read('sessionUserPage', input) }, beforeOpen: async (id, options) => { const native = id && await registry.adapter(options.engine, 'local')?.nativeSessionAvailable?.(id); if (id && manager.busy(id) && !native) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed && !manager.busy(id)) previous.session.close(); } });
     setImmediate(() => attachClusterRuntime(id, peer).catch(error => console.warn('集群执行连接：' + error.message)));
   } });
   cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: imGateways, canTransfer: () => manager.running().length === 0 && executionRuntime.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });

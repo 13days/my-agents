@@ -13,15 +13,17 @@ function chooseMachineDirectory(machine, { initial, reset = false } = {}) {
   let selected = null, page = null, revision = 0;
   async function browse(path, offset = 0) {
     const current = ++revision;
-    choose.disabled = true; up.disabled = true; entries.inert = true;
+    page = null; choose.disabled = true; up.disabled = true; entries.inert = true;
+    entries.setAttribute('aria-busy', 'true'); dialog.classList.add('is-loading');
     location.value = path; status.textContent = rt('正在读取目录…', 'Loading folders…');
     if (!offset) entries.replaceChildren();
     try {
       const query = new URLSearchParams({ machineId: machine.id, path, offset, hidden: hidden.checked ? '1' : '0' });
       const next = await api('GET', 'workspaces/directories?' + query);
       if (!dialog.open || current !== revision) return;
+      if (typeof next.cwd !== 'string' || (!next.manual && !Array.isArray(next.directories))) throw new Error(rt('请更新面板后再浏览目录。', 'Update the panel to browse folders.'));
       page = next; location.value = page.cwd; entries.querySelector('[data-more]')?.remove();
-      for (const folder of page.directories) {
+      for (const folder of page.directories || []) {
         const button = document.createElement('button');
         button.type = 'button'; button.innerHTML = icon('folder'); button.append(document.createTextNode(folder.name));
         button.onclick = () => browse(folder.path);
@@ -31,15 +33,17 @@ function chooseMachineDirectory(machine, { initial, reset = false } = {}) {
         const more = document.createElement('button'); more.type = 'button'; more.dataset.more = '';
         more.textContent = rt('显示更多文件夹', 'Show more folders'); more.onclick = () => browse(page.cwd, page.nextOffset); entries.append(more);
       }
-      entries.inert = false; choose.disabled = false; up.disabled = page.parent === page.cwd;
-      status.textContent = entries.children.length ? '' : rt('此处没有可见的子文件夹。', 'No visible subfolders here.');
+      entries.inert = false; choose.disabled = false; up.disabled = !page.parent || page.parent === page.cwd;
+      status.textContent = page.manual ? rt('已验证此路径。此执行器暂时无法列出子目录，可输入其他路径并点「前往」。', 'Path verified. To choose another folder, enter its path and select Go.') : entries.children.length ? '' : rt('此处没有可见的子文件夹。', 'No visible subfolders here.');
     } catch (error) {
       if (current !== revision || !dialog.open) return;
       page = null; entries.replaceChildren(); status.textContent = error.message;
+    } finally {
+      if (current === revision) { entries.removeAttribute('aria-busy'); dialog.classList.remove('is-loading'); }
     }
   }
   get('form').onsubmit = event => { event.preventDefault(); browse(location.value.trim() || '~'); };
-  location.oninput = () => { ++revision; choose.disabled = true; };
+  location.oninput = () => { ++revision; page = null; choose.disabled = true; up.disabled = true; entries.inert = true; entries.replaceChildren(); entries.removeAttribute('aria-busy'); dialog.classList.remove('is-loading'); status.textContent = rt('点「前往」读取此路径。', 'Select Go to open this path.'); };
   get('[data-home]').onclick = () => browse('~');
   up.onclick = () => { if (page) browse(page.parent); };
   hidden.onchange = () => browse(location.value || '~');
