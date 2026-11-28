@@ -4,4 +4,8 @@ function cliResultError(result) {
   if (typeof result.result === 'string' && result.result.trim()) errors.push(result.result.trim());
   return [...new Set(errors)].join('\n') || `Claude Code 执行失败（${result.subtype || 'unknown'}）`;
 }
-module.exports = { cliResultError };
+function noResponseMarker(message) {
+  return message?.model === '<synthetic>' && message.content?.length === 1 &&
+    message.content[0].type === 'text' && message.content[0].text === 'No response requested.';
+}
+module.exports = { cliResultError, noResponseMarker };

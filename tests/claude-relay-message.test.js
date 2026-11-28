@@ -17,7 +17,7 @@ test('native history retains IM user boundaries and does not glue answers across
  const rows=[{type:'user',message:{content:'首次提问'}},assistant('第一轮'),{type:'user',isMeta:true,message:{content:'Skill instructions'}},relay('接下来呢'),assistant('第二轮'),relay('查到关键问题了吗'),assistant('第三轮')];
  fs.writeFileSync(file,rows.map(JSON.stringify).join('\n'));
  const source=fs.readFileSync(path.join(__dirname,'../server.js'),'utf8');
- const c=vm.createContext({...require('../message-timing'),claudeRelayMessage,fs,path,Buffer,normalizeTitle:x=>x,isCodexSession:()=>false,readHistory:()=>[],transcriptPathFor:()=>file,transcriptHead:()=>({cwd:dir}),CLAUDE_DIR:dir});
+ const c=vm.createContext({ ...require('../engines/claude/result'),...require('../message-timing'),claudeRelayMessage,fs,path,Buffer,normalizeTitle:x=>x,isCodexSession:()=>false,readHistory:()=>[],transcriptPathFor:()=>file,transcriptHead:()=>({cwd:dir}),CLAUDE_DIR:dir});
  vm.runInContext(source.slice(source.indexOf('function transcriptUserText('),source.indexOf('// Codex rollouts are keyed')),c);
  const result=c.sessionMessages('session');assert.deepEqual(Array.from(result.messages,m=>[m.role,m.text]),[['user','首次提问'],['assistant','第一轮'],['user','接下来呢'],['assistant','第二轮'],['user','查到关键问题了吗'],['assistant','第三轮']]);
  assert.equal(result.messages[2].source,'feishu');assert.equal(c.latestTranscriptPrompt(file).title,'查到关键问题了吗');

@@ -144,3 +144,66 @@ test('thinking deltas surface as reasoning events', () => {
   h.partial({ type: 'content_block_stop', index: 0 });
   assert.equal(h.events().find(e => e.type === 'reasoning').data.text, 'plan');
 });
+
+test('a resumed Claude process drains its zero-turn recovery result before the new stdin prompt', async () => {
+  const h = streamHarness(null, { resume: true });
+  assert.ok(h.child.args.includes('--replay-user-messages'));
+  h.session.submit('new-turn', { prompt: '改完了吗' });
+  h.session.submit('follow-up', { prompt: 'second' });
+  h.send({ type: 'user', uuid: 'old-turn', isReplay: true });
+  h.send({ type: 'assistant', message: { model: '<synthetic>', content: [{ type: 'text', text: 'No response requested.' }] } });
+  h.send({ type: 'result', subtype: 'success', num_turns: 0, result: '' });
+  assert.equal(h.session.currentId, 'new-turn');
+  assert.equal(h.events().some(e => ['text', 'done', 'idle'].includes(e.type)), false);
+  h.send({ type: 'user', uuid: 'new-turn', isReplay: true });
+  h.send({ type: 'assistant', message: { model: 'normal-model', content: [{ type: 'text', text: 'No response requested.' }] } });
+  h.send({ type: 'result', subtype: 'success', num_turns: 1, result: 'No response requested.' });
+  assert.equal(h.events().find(e => e.type === 'text').data.messageId, 'new-turn');
+  assert.equal(h.events().find(e => e.type === 'done').data.messageId, 'new-turn');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.session.currentId, 'follow-up');
+  h.send({ type: 'user', uuid: 'follow-up', isReplay: true });
+  h.send({ type: 'result', subtype: 'success', num_turns: 0, result: '' });
+  assert.equal(h.session.currentId, '');
+});
+
+test('a failed Claude resume before acknowledgement still reports the error', () => {
+  const h = streamHarness(null, { resume: true });
+  h.session.submit('failed-input', { prompt: 'try' });
+  h.send({ type: 'result', subtype: 'error_during_execution', num_turns: 0, errors: ['session missing'], is_error: true });
+  assert.equal(h.events().find(e => e.type === 'error').data.messageId, 'failed-input');
+  assert.equal(h.events().find(e => e.type === 'done').data.isError, true);
+});
+
+test('Claude receives supplements while its first tool is active and one combined result settles each UUID', async () => {
+  const h = streamHarness();
+  h.session.submit('main', { prompt: 'start' });
+  h.partial({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'reading', name: 'Read', input: {} } });
+  for (const id of ['additional', 'last']) h.session.submit(id, { prompt: id, mode: 'insert' });
+  assert.deepEqual(h.child.writes.filter(row => row.type === 'user').map(row => row.uuid), ['main','additional','last']);
+  assert.ok(!h.child.writes.some(row => row.request?.subtype === 'interrupt'));
+  h.session.submit('queued', { prompt: 'queue' }, false);
+  for (const uuid of ['main','additional','last']) h.send({ type: 'user', isReplay: true, uuid });
+  assert.equal(h.session.currentId, 'last');
+  h.send({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'reading', content: 'file' }] } });
+  h.partial({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'combined' } });
+  h.send({ type: 'result', subtype: 'success', num_turns: 2, total_cost_usd: 1, result: 'combined' });
+  const events = h.events();
+  assert.equal(events.find(e => e.type === 'tool_result').data.messageId, 'main');
+  assert.equal(events.find(e => e.type === 'text').data.messageId, 'last');
+  assert.deepEqual(events.filter(e => e.type === 'done').map(e => [e.data.messageId, !!e.data.continued]), [['main',true], ['additional',true], ['last',false]]);
+  assert.equal(events.filter(e => e.type === 'done' && e.data.cost).length, 1);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.session.currentId,'queued');
+});
+
+test('a written supplement acknowledged after a result starts the next turn without a second write', async () => {
+  const h = streamHarness();
+  h.session.submit('first', { prompt: 'question' });
+  h.session.submit('second', { prompt: 'supplement', mode: 'insert' });
+  h.send({ type: 'result', subtype: 'success', num_turns: 1, result: 'first answer' });
+  h.send({ type: 'user', uuid: 'second', isReplay: true });
+  h.send({ type: 'result', subtype: 'success', num_turns: 1, result: 'second answer' });
+  assert.equal(h.child.writes.filter(row => row.uuid === 'second').length, 1);
+  assert.deepEqual(h.events().filter(e => e.type === 'text').map(e => e.data.messageId), ['first','second']);
+});

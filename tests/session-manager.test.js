@@ -253,3 +253,43 @@ test('listing busy flags and forwarding warnings never recover archived runs', (
     manager.warn('archived-session', 'upstream failed', 'upstream_retry');
   } finally { manager.shutdown(); }
 });
+
+test('sending immediately after stop waits for the actual CLI exit and resumes the same session once', async t => {
+  const dir = require('fs').mkdtempSync(path.join(os.tmpdir(), 'stop-and-resume-'));
+  t.after(() => require('fs').rmSync(dir, { recursive: true, force: true }));
+  const { registry } = setup(), opens = [];
+  const engine = fakeEngine('delayed-stop', 'assigned', opens);
+  engine.owns = async id => opens.some(options => options.sessionId === id);
+  engine.open = async options => {
+    opens.push(options);
+    let active = '';
+    return {
+      ready: Promise.resolve(options.sessionId),
+      get currentId() { return active; }, get busy() { return !!active; },
+      submit(id, input, steer, accept) { active = id; accept?.(); options.emit('turn', { id }); },
+      stop() {}, close() { options.onClosed(); },
+    };
+  };
+  registry.register(engine);
+  const manager = createSessionManager({ registry, runStore: require('../core/run-store').createRunStore({ dir }),
+    history: { ownerOf: () => null, messages: () => ({ messages: [] }), touch() {} } });
+  t.after(() => manager.shutdown());
+  const input = { sessionId: 'same-session', cwd: dir, engine: engine.id };
+  const first = await manager.start({ ...input, prompt: 'first' });
+  const previous = first.run.job.meta.jobId;
+  assert.equal(manager.stop(input.sessionId, { jobId: previous }), true);
+  assert.throws(() => manager.send(input.sessionId, { prompt: 'stale' }), { status: 409 });
+  const next = manager.start({ ...input, prompt: 'new question' });
+  await settle();
+  assert.equal(opens.length, 1);
+  opens[0].emit('done', {});
+  assert.equal(first.run.job.events.at(-1).event, 'stopped');
+  opens[0].onClosed();
+  const { run } = await next;
+  assert.equal(opens.length, 2);
+  assert.equal(opens[1].resume, true);
+  assert.equal(run.id, input.sessionId);
+  assert.equal(manager.stop(input.sessionId, { jobId: previous }), false);
+  assert.throws(() => manager.send(input.sessionId, { prompt: 'stale', jobId: previous }), { status: 409 });
+  assert.equal(run.job.events.filter(e => e.event === 'input').length, 1);
+});

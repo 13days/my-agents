@@ -10,14 +10,16 @@ test('history pages preserve all long text, cover every message, and reuse uncha
     rows.push({ type: 'user', message: { content: 'question-' + i } });
     rows.push({ type: 'assistant', message: { content: [{ type: 'text', text: i === 85 ? '长回复'.repeat(20000) : 'answer-' + i }] } });
   }
+  rows.splice(42, 0, { type: 'assistant', message: { model: '<synthetic>', content: [{ type: 'text', text: 'No response requested.' }] } });
   fs.writeFileSync(file, rows.map(JSON.stringify).join('\n') + '\n');
   let reads = 0;
   const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  const context = vm.createContext({ ...require('../message-timing'), codexSessions: { list: () => [], pathFor: () => '', messages: () => null }, isCodexPath: () => false, isCodexSession: () => false, fs: { ...fs, readFileSync(...args) { reads++; return fs.readFileSync(...args); } }, path,
+  const context = vm.createContext({ ...require('../message-timing'), ...require('../engines/claude/result'), codexSessions: { list: () => [], pathFor: () => '', messages: () => null }, isCodexPath: () => false, isCodexSession: () => false, fs: { ...fs, readFileSync(...args) { reads++; return fs.readFileSync(...args); } }, path,
     readHistory: () => [], transcriptPathFor: () => file, transcriptHead: () => ({ cwd: dir }),
     transcriptUserText: text => text, claudeRelayMessage: require('../core/claude-relay-message').claudeRelayMessage, CLAUDE_DIR: dir,
   });
   vm.runInContext(source.slice(source.indexOf('const sessionMessageCache ='), source.indexOf('function listSessions()')), context);
+  assert.equal(context.sessionMessages('session-id', {limit:0}).messages[41].text, 'answer-20');
   const latest = context.sessionMessages('session-id');
   assert.equal(latest.messages.length, 80);
   assert.equal(latest.historyBefore, 120);

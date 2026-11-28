@@ -66,7 +66,7 @@ function createSessionManager({ registry, history, stallMs = 90 * 1000, idleMs =
     const conversationId = runStore?.find(input.sessionId)?.conversationId || (typeof input.sessionId === 'string' && SESSION_ID.test(input.sessionId) ? input.sessionId : crypto.randomUUID());
     const record = runStore?.begin({ conversationId, requestedId: input.sessionId || '', engine: input.engine || registry.defaultId(), node: input.node || 'local' }, turn);
     const preparingId = record?.id || crypto.randomUUID();
-    const preparation = { id: preparingId, conversationId, state: 'preparing', messageId: turn.messageId, controller: new AbortController() };
+    const preparation = { id: preparingId, conversationId, requestedId: input.sessionId, state: 'preparing', messageId: turn.messageId, controller: new AbortController() };
     preparations.set(preparingId, preparation);
     try { return await startActual(input, turn, record, preparation); }
     catch (error) { if (record) runStore.update(record.id, { state: preparation.controller.signal.aborted ? 'cancelled' : 'failed', error: error.message }); throw error; }
@@ -89,7 +89,19 @@ function createSessionManager({ registry, history, stallMs = 90 * 1000, idleMs =
     try { cwd = await host.resolveDir(location?.cwd || owner?.project || input.cwd); }
     catch (error) { throw httpError(error.status || 400, `执行机器「${registry.node(nodeId).label || nodeId}」无法使用目录 ${location?.cwd || owner?.project || input.cwd || '(默认)'}：${error.message}。请在「连接电脑 → 项目文件夹」核对这台电脑上的项目路径`); }
 
-    const previous = requested && runs.get(requested);
+    let previous = requested && runs.get(requested);
+    if (previous?.stopped && !previous.job.closed) {
+      // SIGTERM and remote stop acknowledgements can precede the actual CLI exit.
+      let timer;
+      try {
+        await Promise.race([previous.closed, new Promise((_, reject) => {
+          timer = setTimeout(() => reject(httpError(409, '上一轮仍在停止，请稍后继续')), readyTimeoutMs);
+          timer.unref?.();
+        })]);
+      } finally { clearTimeout(timer); }
+      cancelled();
+      previous = runs.get(requested);
+    }
     if (live(previous) && !location?.handoff) {
       if (previous.session.currentId || previous.session.pendingCount || previous.session.busy) throw httpError(409, '此会话正在运行，请重新打开会话接续');
       previous.session.close(); // idle connection: replace it with a fresh one
@@ -123,7 +135,7 @@ function createSessionManager({ registry, history, stallMs = 90 * 1000, idleMs =
     const emit = (event, data) => {
       const payload = { timestamp: new Date().toISOString(), ...data, ...(session?.currentId && !data.messageId ? { messageId: session.currentId } : {}) };
       if (!run) return void buffered.push([event, payload]);
-      if (run.job.closed) return;
+      if (run.job.closed || run.stopped) return;
       run.job.publish(event, payload);
       try { history.record?.(run.id, event, payload); } catch (error) { log.warn?.(error.message); }
     };
@@ -133,7 +145,10 @@ function createSessionManager({ registry, history, stallMs = 90 * 1000, idleMs =
       idleTimer = setTimeout(() => { if (!session.busy) session.close(); }, idleMs);
       idleTimer.unref?.();
     };
+    let resolveClosed;
+    const closed = new Promise(resolve => { resolveClosed = resolve; });
     const onClosed = () => {
+      resolveClosed();
       clearTimeout(idleTimer);
       if (run && !run.job.closed) { history.record?.(run.id,'end',{}); run.job.close(); }
       const current = run;
@@ -163,7 +178,7 @@ function createSessionManager({ registry, history, stallMs = 90 * 1000, idleMs =
     const jobMeta = { conversationId: record?.conversationId || realId, routed: !!session.routed, nativeAttached: !!session.nativeAttached, engine: engineId, node: host.id, machineId: location?.machineId, workspaceId: location?.workspaceId, handoff: location?.handoff, cwd, worktree, model: session.nativeAttached ? '' : model, requestedModel, sessionId: realId, jobId: record?.id || crypto.randomUUID() };
     if (record) runStore.update(record.id, { state: 'running', sessionId: realId, engine: engineId, node: host.id, jobMeta });
     const job = createChatJob(jobMeta, { journal: record ? runStore.journal(record.id) : null });
-    run = { id: realId, engine: engineId, node: host.id, job, session, baseHistory, baseMessages: baseHistory?.messages || [], stopped: false, requestedId: requested };
+    run = { id: realId, engine: engineId, node: host.id, job, session, closed, baseHistory, baseMessages: baseHistory?.messages || [], stopped: false, requestedId: requested };
     runs.set(realId, run);
     for (const [event, data] of buffered.splice(0)) { job.publish(event, data); history.record?.(realId,event,data); }
     return { sessionId: realId, run };
@@ -172,19 +187,23 @@ function createSessionManager({ registry, history, stallMs = 90 * 1000, idleMs =
   // Adds input to a live run; steering interrupts the active turn when supported.
   function send(id, input) {
     const run = get(id);
-    if (!live(run)) throw httpError(409, '会话连接已结束，请重新发送');
+    if (!live(run) || run.stopped || (input.jobId && run.job.meta.jobId !== input.jobId)) throw httpError(409, '这轮连接已结束，请在当前会话继续发送');
     const turn = validateInput(input);
     if (runStore?.hasMessage(turn.messageId)) return { messageId: turn.messageId };
-    run.session.submit(turn.messageId, turn, input.mode !== 'queue', () => { const data = { id: turn.messageId, prompt: turn.prompt, images: turn.images, mode: input.mode, timestamp: new Date().toISOString() }; run.job.publish('input', data); history.record?.(run.id, 'input', data); });
+    const insert = input.mode === 'insert';
+    if (insert && (!registry.get(run.engine)?.capabilities.liveInput || run.session.nativeAttached)) throw httpError(409, '此连接暂不支持运行中插入消息');
+    run.session.submit(turn.messageId, insert ? { ...turn, mode: 'insert' } : turn, !insert && input.mode !== 'queue', () => { const data = { id: turn.messageId, prompt: turn.prompt, images: turn.images, mode: input.mode, timestamp: new Date().toISOString() }; run.job.publish('input', data); history.record?.(run.id, 'input', data); });
     history.touch(run.id, { prompt: turn.prompt });
     return { messageId: turn.messageId };
   }
 
-  function stop(id) {
-    const preparing = preparations.get(id) || [...preparations.values()].find(item => item.conversationId === id);
+  function stop(id, { jobId, messageId } = {}) {
+    const preparing = preparations.get(id) || [...preparations.values()].find(item =>
+      (item.conversationId === id || item.requestedId === id) && (!jobId || item.id === jobId) && (!messageId || item.messageId === messageId));
     if (preparing) { preparing.state = 'cancelling'; preparing.controller.abort(); return true; }
-    const run = get(id);
-    if (!live(run)) return false;
+    const run = current(id);
+    if (!live(run) || run.stopped || (jobId && run.job.meta.jobId !== jobId)) return false;
+    if (!jobId && messageId && !run.job.events.some(row => row.event === 'input' && row.data.id === messageId)) return false;
     run.stopped = true;
     run.job.publish('stopped', {});
     history.record?.(run.id, 'stopped', {});

@@ -1,13 +1,14 @@
 const crypto = require('crypto');
 const { createTurnQueue } = require('../../core/turn-queue');
 const { createPermissionBridge } = require('./permissions');
-const { cliResultError } = require('./result');
+const { cliResultError, noResponseMarker } = require('./result');
 const { imageContent, imageMessage } = require('../../core/chat-input');
 
 // One long-lived `claude -p --input-format stream-json` process per session.
 // Normalizes the CLI stream-json protocol into panel events.
 function openClaudeSession({ host, cli, env, cwd, sessionId, resume, model, settingsEnv, emit, onIdle, onClosed, transcript, timeoutMs = 0 }) {
   const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--dangerously-skip-permissions'];
+  args.push('--replay-user-messages');
   args.push(resume ? '--resume' : '--session-id', sessionId);
   if (model) args.push('--model', model);
   // settings.json env outranks the process env; --settings guarantees routing through the panel proxy.
@@ -20,11 +21,15 @@ function openClaudeSession({ host, cli, env, cwd, sessionId, resume, model, sett
   const streamingTools = new Map(), thinking = new Map();
   const toolAliases = new Map(), pendingTools = new Map();
   const backgroundTasks = new Set();
-  const send = (event, data) => { if (!ended) emit(event, { ...data, ...(queue.currentId ? { messageId: queue.currentId } : {}) }); };
+  const turnIds = [];
+  const outputId = () => turnIds.at(-1) || queue.currentId;
+  const send = (event, data) => { if (!ended) emit(event, { ...(outputId() ? { messageId: outputId() } : {}), ...data }); };
   const write = message => child.stdin.write(JSON.stringify(message) + '\n');
-  let interruptId = '';
+  let interruptId = '', awaitingResumeInput = !!resume, sawNoResponseMarker = false;
 
+  const writeInput = entry => write({ ...entry.payload, uuid: entry.id, parent_tool_use_id: null });
   const queue = createTurnQueue({
+    forward: writeInput,
     isOpen: () => !child.stdin.destroyed && !child.stdin.writableEnded,
     start: entry => {
       clearTimeout(timer);
@@ -32,9 +37,10 @@ function openClaudeSession({ host, cli, env, cwd, sessionId, resume, model, sett
         send('error', { error: `本轮已达到配置的超时时间（${Math.round(timeoutMs / 1000)} 秒）` });
         child.kill('SIGTERM');
       }, timeoutMs);
-      sentText = turnStreamed = false; streamingTools.clear(); thinking.clear(); toolAliases.clear(); pendingTools.clear(); interruptId = '';
+      turnIds.length = 0; turnIds.push(entry.id);
+      sawNoResponseMarker = false; sentText = turnStreamed = false; streamingTools.clear(); thinking.clear(); toolAliases.clear(); pendingTools.clear(); interruptId = '';
       send('turn', { id: entry.id });
-      write({ ...entry.payload, uuid: entry.id, parent_tool_use_id: null });
+      if (!entry.forwarded) writeInput(entry);
     },
     interrupt: () => {
       interruptId = crypto.randomUUID();
@@ -50,8 +56,9 @@ function openClaudeSession({ host, cli, env, cwd, sessionId, resume, model, sett
   const emitToolResult = block => {
     const id = toolAliases.get(block.tool_use_id) || block.tool_use_id;
     if (!pendingTools.has(id)) return;
+    const owner = pendingTools.get(id)?.messageId;
     pendingTools.delete(id);
-    send('tool_result', { id, output: block.content, isError: !!block.is_error });
+    send('tool_result', { ...(owner ? {messageId: owner} : {}), id, output: block.content, isError: !!block.is_error });
   };
   // Some CLI versions omit user tool_result events from stdout. The transcript
   // is authoritative and also contains permission failures.
@@ -72,6 +79,15 @@ function openClaudeSession({ host, cli, env, cwd, sessionId, resume, model, sett
 
   const processLine = line => {
     let msg; try { msg = JSON.parse(line); } catch { return; }
+    if (msg.type === 'user' && msg.isReplay && !msg.parent_tool_use_id) {
+      if (msg.uuid === queue.currentId) awaitingResumeInput = false;
+      if (queue.acknowledgeForwarded(msg.uuid)) {
+        turnIds.push(msg.uuid);
+        sentText = turnStreamed = sawNoResponseMarker = false;
+        send('turn', { id: msg.uuid, inserted: true });
+      }
+      return;
+    }
     if (msg.type === 'system' && msg.subtype === 'init' && msg.session_id) send('status', {kind:'model_session',routeSessionId:msg.session_id});
     if (msg.type === 'system' && msg.subtype === 'api_retry') {
       const status = msg.error?.status || msg.status_code || msg.error_status;
@@ -97,7 +113,7 @@ function openClaudeSession({ host, cli, env, cwd, sessionId, resume, model, sett
         if (block?.type === 'thinking') thinking.set(ev.index, { id: `${(queue.currentId || 'turn').slice(0, 8)}-${msg.event?.index}-${crypto.randomUUID().slice(0, 4)}`, text: block.thinking || '', sent: 0 });
         if (block?.type === 'tool_use') {
           const tool = { id: block.id, name: block.name, finalized: false };
-          streamingTools.set(ev.index, tool); pendingTools.set(block.id, tool);
+          streamingTools.set(ev.index, tool); pendingTools.set(block.id, { ...tool, messageId: outputId() });
           send('tool', { id: block.id, name: block.name, input: block.input, partial: true });
         }
       }
@@ -106,6 +122,7 @@ function openClaudeSession({ host, cli, env, cwd, sessionId, resume, model, sett
       if (ev?.type === 'content_block_stop' && thinking.has(ev.index)) flushThinking(ev.index, true);
       if (ev?.type === 'content_block_delta' && ev.delta?.type === 'input_json_delta' && streamingTools.has(ev.index)) send('tool_input', { id: streamingTools.get(ev.index).id, text: ev.delta.partial_json || '' });
     } else if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
+      if (noResponseMarker(msg.message)) { sawNoResponseMarker = true; return; }
       syncToolResults();
       if (!msg.parent_tool_use_id && !msg.error && typeof msg.message.model === 'string' && msg.message.model && msg.message.model !== '<synthetic>') {
         send('status', { kind: 'response_model', model: msg.message.model });
@@ -118,7 +135,7 @@ function openClaudeSession({ host, cli, env, cwd, sessionId, resume, model, sett
           const id = toolAliases.get(block.id) || tool?.id || block.id;
           if (tool) tool.finalized = true;
           toolAliases.set(block.id, id);
-          if (!known || pendingTools.has(id)) pendingTools.set(id, { id, name: block.name });
+          if (!known || pendingTools.has(id)) pendingTools.set(id, { id, name: block.name, messageId: pendingTools.get(id)?.messageId || outputId() });
           send('tool', { id, name: block.name, input: block.input });
         }
       }
@@ -126,13 +143,22 @@ function openClaudeSession({ host, cli, env, cwd, sessionId, resume, model, sett
     } else if (msg.type === 'user' && Array.isArray(msg.message?.content)) {
       for (const block of msg.message.content) if (block.type === 'tool_result') emitToolResult(block);
     } else if (msg.type === 'result') {
+      // A resumed CLI can finish an interrupted input before acknowledging the new UUID.
+      // Its empty success must not release our turn or start the next queued input.
+      if (awaitingResumeInput && queue.currentId && msg.subtype === 'success' && !msg.is_error && msg.num_turns === 0 &&
+          (!msg.result || msg.result === 'No response requested.') && !sentText) return;
+      awaitingResumeInput = false;
       syncToolResults();
       const interrupted = queue.interrupted;
+      // Claude may merge several acknowledged stdin prompts into one inference result.
+      // Settle every accepted message; attribute usage only to the final one.
+      for (const id of turnIds.slice(0, -1)) send('done', { messageId: id, continued: true, sessionId });
       const error = interrupted ? '' : cliResultError(msg);
       if (error) send('error', { error });
-      else if (!sentText && msg.result && !interrupted) send('text', { text: msg.result });
-      send('done', { sessionId: msg.session_id || sessionId, cost: msg.total_cost_usd || null, turns: msg.num_turns || 0, usage: msg.usage || null, isError: !!error, error, interrupted });
+      else if (!sentText && msg.result && !interrupted && !(sawNoResponseMarker && msg.result === 'No response requested.')) send('text', { text: msg.result });
+      send('done', { sessionId: msg.session_id || sessionId, cost: msg.total_cost_usd || null, turns: msg.num_turns || 0, usage: msg.usage || null, isError: !!error, error, interrupted, ...(sawNoResponseMarker && !sentText && !error ? { noResponse: true } : {}) });
       clearTimeout(timer);
+      turnIds.length = 0;
       queue.finish();
     }
   };
@@ -163,11 +189,11 @@ function openClaudeSession({ host, cli, env, cwd, sessionId, resume, model, sett
 
   return {
     ready: Promise.resolve(sessionId),
-    submit(id, input, steer, onAccept) { queue.submit(id, imageMessage(input.prompt, imageContent(input.images), input.context), steer, onAccept); },
+    submit(id, input, steer, onAccept) { queue.submit(id, imageMessage(input.prompt, imageContent(input.images), input.context), steer, onAccept, input.mode === 'insert'); },
     stop() { stopped = true; queue.stop(); child.kill('SIGTERM'); },
     close() { child.stdin.end(); },
     respondPermission: (id, behavior) => permissions.respond(id, behavior),
-    get currentId() { return queue.currentId; },
+    get currentId() { return outputId(); },
     get pendingCount() { return queue.pendingCount; },
     get busy() { return !!queue.currentId || permissions.size > 0 || backgroundTasks.size > 0; },
   };

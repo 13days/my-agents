@@ -24,6 +24,7 @@ const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
 const { messageTimestamp, annotateMessageTimings } = require('./message-timing');
+const { noResponseMarker } = require('./engines/claude/result');
 const { claudeRelayMessage } = require('./core/claude-relay-message');
 const crypto = require('crypto');
 const { chooseFolder } = require('./folder-picker');
@@ -753,6 +754,12 @@ function sessionMessages(id, options = {}) {
       if ((t || images.length) && d.uuid) nativeUsers.add(d.uuid);
       if (t || images.length) messages.push({ role: 'user', text: t, images, ...(relay ? { source: relay.source, relayMessageId: relay.relayMessageId } : {}), ...(timestamp ? { timestamp } : {}) });
     } else if (d.type === 'assistant' && Array.isArray(d.message.content)) {
+      if (noResponseMarker(d.message)) {
+        const last = messages.at(-1);
+        if (last?.role === 'assistant') { if (!last.text) last.noResponse = true; }
+        else messages.push({ role: 'assistant', text: '', tools: [], noResponse: true, timestamp });
+        continue;
+      }
       let add = ''; const tools = [];
       for (const b of d.message.content) {
         if (b.type === 'text' && b.text) add += (add ? '\n\n' : '') + b.text;
@@ -764,7 +771,7 @@ function sessionMessages(id, options = {}) {
       }
       if (!add && !tools.length) continue;
       const prev = messages[messages.length - 1];
-      if (prev && prev.role === 'assistant') { if (add) prev.text = prev.text + '\n\n' + add; prev.tools.push(...tools); if (timestamp) prev.timestamp = timestamp; }
+      if (prev && prev.role === 'assistant') { if (add) { prev.text = prev.text ? prev.text + '\n\n' + add : add; delete prev.noResponse; } prev.tools.push(...tools); if (timestamp) prev.timestamp = timestamp; }
       else messages.push({ role: 'assistant', text: add, tools, ...(timestamp ? { timestamp } : {}) });
     }
   }
@@ -2117,7 +2124,7 @@ const heartflow = HISTORY_WORKER ? null : require('./core/heartflow').createHear
     if (context.length > 12000) throw new Error('来源上下文过长，请拆分建议后重新确认');
     const input = { prompt:a.prompt, context, messageId:delivery.messageId, mode:'queue', sessionId:a.sessionId || undefined, engine:a.engine, machineId:a.machineId, cwd:a.cwd, worktree:!a.sessionId };
     const existing = a.sessionId && manager.get(a.sessionId);
-    if (existing && !existing.job.closed && existing.session) {
+    if (existing && !existing.stopped && !existing.job.closed && existing.session) {
       manager.send(a.sessionId,input); return {sessionId:existing.id,runId:existing.job.meta.jobId};
     }
     const {run,sessionId} = await manager.start(input);
@@ -2139,7 +2146,7 @@ const clusterLeadership = { canStart: () => !cluster || cluster.canStart() };
 const macRuntime = require('./mac-runtime').createMacRuntime({ dir: DATA_DIR, claudeDir: CLAUDE_DIR, serverPath: path.join(__dirname, 'server.js'), port: PORT, proxyPort: PROXY_PORT, claudeInfo: HISTORY_WORKER ? undefined : resolveClaude() });
 async function submitIMTurn({ gatewayContext, ...input }) {
   input.sessionId ||= crypto.randomUUID();
-  const run = manager.get(input.sessionId), live = run && !run.job.closed;
+  const run = manager.get(input.sessionId), live = run && !run.stopped && !run.job.closed;
   // The Claude adapter queues native handovers until the original turn is idle.
   if (!live && input.engine !== 'claude' && accountRouter.sessions().items.some(item => item.id === input.sessionId && item.running)) throw new Error('此会话正在外部 CLI 中运行，请等本轮结束后续接；可先用 /history 查看记录');
   if (live && executionMachines().find(item => item.id === run.job.meta.machineId)?.online !== false && (run.job.meta.requestedModel ?? run.job.meta.model ?? '') === (input.model || '')) { manager.send(input.sessionId, { ...input, context: gatewayContext }); return { sessionId: run.id, engine: run.job.meta.engine, machineId: run.job.meta.machineId }; }
@@ -2578,9 +2585,10 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method !== 'POST') return sendJSON(res, 405, { error: 'method not allowed' });
       if (parts.length === 4 && parts[3] === 'stop') {
-        req.resume();
-        manager.stop(id);
-        return sendJSON(res, 200, { ok: true });
+        try {
+          const input = JSON.parse(await readBody(req, 4096) || '{}');
+          return sendJSON(res, 200, { ok: true, stopped: manager.stop(id, input) });
+        } catch (error) { return sendJSON(res, 400, { error: error.message }); }
       }
       let input;
       try { input = JSON.parse(await readBody(req, 30 * 1024 * 1024)); } catch { return sendJSON(res, 400, { error: 'JSON 格式无效或请求过大' }); }
@@ -2943,7 +2951,7 @@ const server = http.createServer(async (req, res) => {
         const id = decodeURIComponent(parts[2]), following = url.searchParams.get('source') === 'transcript', running = following ? null : manager.current(id);
         // Passive CLI followers read the current transcript, even while an idle
         // panel connection retains its launch-time baseHistory for SSE replay.
-        if (running && !running.job.closed && Array.isArray(running.baseMessages) && !url.searchParams.has('before')) return sendJSON(res, 200, { ...running.baseHistory, id: running.id, engine: running.engine, project: running.job.meta.cwd, worktree: running.job.meta.worktree, messages: running.baseMessages, liveReplay: true, jobId: running.job.meta.jobId });
+        if (running && !running.stopped && !running.job.closed && Array.isArray(running.baseMessages) && !url.searchParams.has('before')) return sendJSON(res, 200, { ...running.baseHistory, id: running.id, engine: running.engine, project: running.job.meta.cwd, worktree: running.job.meta.worktree, messages: running.baseMessages, liveReplay: true, jobId: running.job.meta.jobId });
         let directoryItem = sessionDirectory.findCached(id);
         const metadata = sessionStore.read()[id];
         const saved = conversations.get(id);

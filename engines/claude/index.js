@@ -36,7 +36,7 @@ function createClaudeEngine({ accounts = null, transcripts, nativeBusy = null, n
     id: 'claude',
     meta: { label: 'Claude Code', short: 'Claude', emblem: '✳', color: '#d97757', aliases: ['cc', 'claude-code'], cliEnv: 'CLAUDE_CLI', upstreamHint: '可停止任务后用 /route 切换账号' },
     capabilities: {
-      sessionId: 'assigned', steer: 'inject', streamingText: true, reasoning: true, permissions: 'auto',
+      sessionId: 'assigned', steer: 'inject', liveInput: true, streamingText: true, reasoning: true, permissions: 'auto',
       accounts: !!accounts, images: true, resources: ['skills', 'config', 'commands', 'agents', 'plugins', 'workflows'],
       usage: { cost: true }, search: true, wrapped: true, capture: true,
     },

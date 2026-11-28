@@ -9,6 +9,7 @@ function fixture(active) {
   const prompt = { value: 'Keep my message' }, model = { value: 'new-model' };
   const calls = [];
   const ctx = vm.createContext({
+    can: (engine, capability) => engine === 'claude' && capability === 'liveInput',
     chatModel: '', LEGACY_ENGINE: 'claude', localStorage: { setItem() {} },
     document: { querySelectorAll: () => [] },
     $: selector => selector === '#chat-prompt' ? prompt : model,
@@ -19,7 +20,7 @@ function fixture(active) {
   });
   ctx.chatView.run.finished = Promise.resolve();
   ctx.chatView.run.abort = { abort: () => { calls.push(['detach']); ctx.chatView.run = null; } };
-  vm.runInContext(sendSource, ctx);
+  vm.runInContext(html.slice(html.indexOf('function supportsLiveInput('), html.indexOf('function updateChatSendState(')) + sendSource, ctx);
   return { ctx, prompt, calls };
 }
 
@@ -49,7 +50,7 @@ test('sending the first prompt enters its conversation once and clears the cache
   assert.equal(ctx.chatPageCache.has('__draft__'), false);
 });
 
-test('Enter queues the second message and only the interrupt button steers the active turn', async () => {
+test('Enter inserts a Claude follow-up, Ctrl+Enter steers and an attached native conversation keeps its queue', async () => {
   const { ctx, prompt } = fixture(true);
   const modes = [], controls = { '#chat-prompt': prompt, '#chat-form': {}, '#chat-steer': {} };
   const run = ctx.chatView.run;
@@ -66,5 +67,12 @@ test('Enter queues the second message and only the interrupt button steers the a
   await run.inputChain;
   prompt.value = 'change direction';
   await controls['#chat-steer'].onclick(); await run.inputChain;
-  assert.deepEqual(modes, [['Keep my message', 'queue'], ['change direction', 'steer']]);
+  prompt.value = 'right now';
+  prompt.onkeydown({ key: 'Enter', ctrlKey: true, preventDefault() {} });
+  await run.inputChain;
+  run.nativeAttached = true;
+  prompt.value = 'original terminal';
+  prompt.onkeydown({ key: 'Enter', preventDefault() {} });
+  await run.inputChain;
+  assert.deepEqual(modes, [['Keep my message', 'insert'], ['change direction', 'steer'], ['right now', 'steer'], ['original terminal', 'queue']]);
 });

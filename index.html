@@ -3110,7 +3110,7 @@ async function refreshOpenChat() {
   try {
     const d = await api('GET', `sessions/${encodeURIComponent(v.sessionId)}/messages?limit=${Math.max(80, v.messages.length)}${v.revision ? '&since=' + encodeURIComponent(v.revision) : ''}`);
     if (chatView !== v || state.type !== 'sessions' || v.run || !$('#chat-messages')) return;
-    if (d.unchanged || !Array.isArray(d.messages)) return;
+    if (d.unchanged || !Array.isArray(d.messages) || (d.liveReplay && (v.stopRequest || (v.stoppedJobId && d.jobId === v.stoppedJobId)))) return;
     // The same job still needs a new subscription after navigation aborted its stream.
     // v.run above is the live-connection guard; lastReplayJobId is only identity.
     if (v.readingImages || v.loadingOlder || document.querySelector('.panel-select-menu:popover-open')) return;
@@ -3559,11 +3559,13 @@ function renderChat() {
   });
   $('#chat-model-refresh')?.addEventListener('click', () => loadChatModels(true));
   loadChatModels();
-  $('#chat-stop').onclick = async () => {
-    try { await api('POST', `chat/${encodeURIComponent(v.sessionId)}/stop`, {}); }
-    catch (e) { toast(e.message, false); }
+  $('#chat-stop').onclick = () => stopChat(v);
+  $('#chat-prompt').onkeydown = e => {
+    if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229) return;
+    e.preventDefault();
+    if (e.ctrlKey && !$('#chat-steer').hidden) sendChat('steer');
+    else $('#chat-form').requestSubmit();
   };
-  $('#chat-prompt').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#chat-form').requestSubmit(); } };
   $('#chat-form').onsubmit = e => { e.preventDefault(); sendChat(); };
   $('#chat-steer').onclick = () => sendChat('steer');
   v.attachments ||= [];
@@ -3702,6 +3704,9 @@ function paintChatAttachments(v) {
     preview.append(img, label, remove); gallery.append(preview);
   });
 }
+function supportsLiveInput(v) {
+  return can(v.engine, 'liveInput') && !v.run?.nativeAttached && !v.run?.taskState?.nativeAttached;
+}
 function updateChatSendState(v) {
   if (chatView !== v || !$('#chat-send')) return;
   if ($('.chat-launch')) {
@@ -3711,11 +3716,11 @@ function updateChatSendState(v) {
   const running = !!v.run && Array.from(v.run.turns.values()).some(turn => !turn.finished);
   const native = !!(v.run?.nativeAttached || v.run?.taskState?.nativeAttached);
   $('#chat-send').disabled = !!v.readingImages;
-  const sendLabel = running ? rt('排队发送', 'Queue message', '順番に送信') : rt('发送', 'Send', '送信');
+  const sendLabel = running ? (supportsLiveInput(v) ? rt('插入消息', 'Insert message') : rt('排队发送', 'Queue message', '順番に送信')) : rt('发送', 'Send', '送信');
   $('#chat-send').textContent = sendLabel; $('#chat-send').setAttribute('aria-label', sendLabel);
-  $('#chat-send').title = running ? rt('等当前回复完成后发送', 'Send after the current reply', '現在の応答が終わったら送信') : '';
+  $('#chat-send').title = running ? (supportsLiveInput(v) ? rt('回车插入当前任务，Ctrl+Enter 中断并立即发送', 'Enter to insert into this task, Ctrl+Enter to interrupt and send now') : rt('等当前回复完成后发送', 'Send after the current reply', '現在の応答が終わったら送信')) : '';
   $('#chat-steer').hidden = !running || native || can(v.engine, 'steer', 'queue'); $('#chat-steer').disabled = !!v.readingImages;
-  $('#chat-stop').hidden = !running;
+  $('#chat-stop').hidden = !running; $('#chat-stop').disabled = !!v.stopRequest;
   $('#chat-stop').textContent = native ? rt('断开同步', 'Disconnect sync') : rt('停止', 'Stop');
   $('#chat-stop').title = native ? rt('原终端继续运行，已投递消息不会撤回', 'The original terminal continues; delivered messages remain queued') : '';
 }
@@ -3756,6 +3761,7 @@ function createChatTurn(v, prompt, images, id = crypto.randomUUID()) {
   turn.finish = (reason = '', timing = {}) => {
     answer.timestamp = timing.timestamp || answer.timestamp || new Date().toISOString();
     answer.durationMs = Number.isFinite(timing.durationMs) ? timing.durationMs : Math.max(0, Date.now() - turn.startedAt);
+    if (timing.noResponse && !answer.text) answer.noResponse = true;
     paintChatTiming(node, answer);
     if (turn.finished) return;
     if (paintFrame) { cancelAnimationFrame(paintFrame); paintFrame = 0; }
@@ -3765,13 +3771,37 @@ function createChatTurn(v, prompt, images, id = crypto.randomUUID()) {
     turn.transcriptText = answer.text; // Status/error notices below are not native assistant text.
     answer.tools.forEach(tool => { if (tool.state === 'running') { tool.state = 'interrupted'; paintChatTool(node, tool); } });
     if (reason) answer.text += (answer.text ? '\n\n' : '') + reason;
-    else if (!answer.text && !answer.tools.length) answer.text = rt('本轮已结束', 'Turn ended');
+    else if (!answer.text && !answer.tools.length && !answer.noResponse) answer.text = rt('本轮已结束', 'Turn ended');
     paintNow();
   };
   return turn;
 }
-async function sendChat(mode = 'queue') {
-  const v = chatView, prompt = $('#chat-prompt').value.trim();
+async function stopChat(v) {
+  const run = v.run;
+  if (!run || v.stopRequest || run.stopped) return;
+  const stop = () => api('POST', `chat/${encodeURIComponent(v.sessionId)}/stop`, { jobId: run.jobId, messageId: run.firstMessageId });
+  const request = (async () => {
+    const hadJobId = !!run.jobId;
+    const result = await stop();
+    // The server may still be reading the initial POST, or the CLI may have assigned a different ID.
+    if (result.stopped === false && !hadJobId && !run.ended && !run.stopped) {
+      await run.ready;
+      if (v.run === run) await stop();
+    }
+    if (v.run === run && !run.ended) run.markStopped({});
+    await run.finished;
+    return true;
+  })().catch(error => { if (!run.stopped) toast(error.message, false); return run.stopped; });
+  v.stopRequest = request;
+  updateChatSendState(v);
+  try { await request; } finally { if (v.stopRequest === request) v.stopRequest = null; updateChatSendState(v); }
+}
+async function sendChat(mode = 'auto') {
+  const v = chatView;
+  if (v.stopRequest && !await v.stopRequest) return;
+  if (v.run?.stopped || v.run?.ended) await v.run.finished;
+  if (chatView !== v || !$('#chat-prompt')) return;
+  const prompt = $('#chat-prompt').value.trim();
   if ((!prompt && !v.attachments?.length) || v.readingImages || v.changingModel) return;
   const images = (v.attachments || []).slice();
   chatModel = $('#chat-model').value.trim(); localStorage.setItem('panel-chat-model-' + (chatView.engine || LEGACY_ENGINE), chatModel);
@@ -3799,10 +3829,12 @@ async function sendChat(mode = 'queue') {
     const run = v.run;
     const busy = Array.from(run.turns.values()).some(item => !item.finished);
     run.turns.set(turn.id, turn);
-    if (busy) turn.label.textContent = mode === 'queue' ? rt('已排队', 'Queued') : rt('等待引导', 'Waiting to steer');
+    if (busy) turn.label.textContent = mode === 'steer' ? rt('等待中断', 'Waiting to interrupt') : supportsLiveInput(v) ? rt('等待 Claude 接收补充', 'Waiting for Claude to receive input') : rt('已排队', 'Queued');
     run.inputChain = run.inputChain.then(async () => {
       await run.ready;
-      await api('POST', `chat/${encodeURIComponent(v.sessionId)}/input`, { prompt, images, cwd: v.cwd, messageId: turn.id, mode });
+      if (run.stopped || run.ended) return;
+      const delivery = mode === 'auto' ? (supportsLiveInput(v) ? 'insert' : 'queue') : mode;
+      await api('POST', `chat/${encodeURIComponent(v.sessionId)}/input`, { prompt, images, cwd: v.cwd, messageId: turn.id, mode: delivery, jobId: run.jobId });
     }).catch(err => turn.finish('⚠ ' + err.message));
     updateChatSendState(v); return;
   }
@@ -3814,13 +3846,23 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
   const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; }); ready.catch(() => {});
   let resolveFinished;
   const finished = new Promise(resolve => { resolveFinished = resolve; });
-  const run = v.run = { abort, model: chatModel, finished, turns: new Map(turn ? [[turn.id, turn]] : []), activeId: turn?.id || '', ready, inputChain: Promise.resolve(), lastStatus: '', permissions: new Map(), metaSeen: false, ended: false };
+  const run = v.run = { abort, model: chatModel, finished, turns: new Map(turn ? [[turn.id, turn]] : []), activeId: turn?.id || '', firstMessageId: turn?.id, ready, inputChain: Promise.resolve(), lastStatus: '', permissions: new Map(), metaSeen: false, ended: false };
   const status = $('#chat-status');
   const visible = () => chatView === v && !!$('#chat-messages');
   const updateStatus = () => {
     const active = run.turns.get(run.activeId) || Array.from(run.turns.values()).find(turn => !turn.finished);
     if (active && !active.finished) status.textContent = `${engineLabel(v.engine)} ${active.phase}… · ${Math.floor((Date.now() - active.startedAt) / 1000)}s`;
     else if (run.lastStatus) status.textContent = run.lastStatus;
+  };
+  run.markStopped = payload => {
+    if (run.stopped) return;
+    run.stopped = run.ended = true;
+    if (run.jobId) v.stoppedJobId = run.jobId;
+    run.lastStatus = run.nativeAttached || run.taskState?.nativeAttached ? rt('同步已断开，原终端继续运行', 'Sync disconnected; original terminal continues') : rt('已停止', 'Stopped', '停止しました');
+    run.turns.forEach(item => { if (!item.finished) item.finish(run.lastStatus, payload); });
+    run.activeId = '';
+    abort.abort();
+    updateChatSendState(v); updateStatus();
   };
   const timer = setInterval(updateStatus, 1000); updateChatSendState(v); updateStatus();
   // State events always apply, even while another view is open; only DOM work is skipped when the chat isn't on screen.
@@ -3842,13 +3884,9 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
       if (current && payload.timestamp) { current.user.timestamp = payload.timestamp; paintChatTiming(current.userNode, current.user); }
       updateChatSendState(v); return;
     }
-    if (kind === 'stopped') {
-      const status = run.nativeAttached || run.taskState?.nativeAttached ? rt('同步已断开，原终端继续运行', 'Sync disconnected; original terminal continues') : rt('已停止', 'Stopped', '停止しました');
-      run.turns.forEach(item => { if (!item.finished) item.finish(status, payload); });
-      run.activeId = ''; run.lastStatus = status; updateChatSendState(v); updateStatus(); return;
-    }
+    if (kind === 'stopped') { run.markStopped(payload); return; }
     if (kind === 'meta') {
-      run.metaSeen = true;
+      run.jobId = payload.jobId; run.metaSeen = true;
       run.codexLogin = payload.codexLogin || { machineLabel: payload.machineId || payload.node, routed: !!payload.routed };
       run.nativeAttached = !!payload.nativeAttached;
       // Engines may mint the thread id on the CLI side: replace the id the browser pre-allocated for a new chat.
@@ -3957,7 +3995,7 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
     }
     if (kind === 'text') { answer.text += payload.text || ''; current.phase = rt('正在输出', 'Responding', '応答中'); current.paint(); }
     if (kind === 'done') {
-      current.finish(payload.interrupted ? rt('已按补充消息继续', 'Continued with follow-up input', '追加の入力で続行しました') : payload.isError ? '⚠ ' + (payload.error || rt('本轮执行失败', 'Turn failed', 'このターンは失敗しました')) : '', payload);
+      current.finish(payload.continued ? rt('已与补充消息一同处理', 'Handled with the follow-up') : payload.interrupted ? rt('已按补充消息继续', 'Continued with follow-up input', '追加の入力で続行しました') : payload.isError ? '⚠ ' + (payload.error || rt('本轮执行失败', 'Turn failed', 'このターンは失敗しました')) : '', payload);
       updateChatSendState(v); refreshSessionList();
     }
     if (kind === 'error') current.finish('⚠ ' + (payload.error || 'Error'), payload);
@@ -4018,7 +4056,7 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
     }
   } catch (err) {
     if (err.name !== 'AbortError') failure = friendlyError(err);
-    else { run.lastStatus = rt('任务仍在后台运行', 'Task continues in the background', 'タスクはバックグラウンドで続行中です'); run.turns.forEach(item => { if (!item.finished) item.finish(''); }); }
+    else if (!run.stopped) { run.lastStatus = rt('任务仍在后台运行', 'Task continues in the background', 'タスクはバックグラウンドで続行中です'); run.turns.forEach(item => { if (!item.finished) item.finish(''); }); }
   } finally {
     clearInterval(timer);
     resolveFinished();
@@ -4085,6 +4123,9 @@ function paintChatTiming(body, message) {
     const duration = document.createElement('span'); const seconds = message.durationMs / 1000;
     duration.textContent = rt('耗时 ', 'Took ') + (seconds >= 60 ? `${Math.floor(seconds / 60)}${rt('分', 'm ')}${Math.floor(seconds % 60)}${rt('秒', 's')}` : `${seconds.toFixed(1)}${rt('秒', 's')}`);
     meta.append(duration);
+  }
+  if (message.noResponse && !message.text) {
+    const note = document.createElement('span'); note.textContent = rt('未生成文字回复', 'No written reply'); meta.append(note);
   }
   if (message.interrupted) {
     const note = document.createElement('span');
