@@ -713,7 +713,8 @@ function sessionMessages(id, options = {}) {
   const messages = [];
   let lines = [];
   try { lines = fs.readFileSync(fp, 'utf8').split('\n'); } catch { return null; }
-  const toolsById = new Map();
+  const toolsById = new Map(), nativeUsers = new Set(), dropped = new Set();
+  let previousInterrupted;
   for (const line of lines) {
     let d; try { d = JSON.parse(line); } catch { continue; }
     const relay = claudeRelayMessage(d);
@@ -731,6 +732,18 @@ function sessionMessages(id, options = {}) {
       }
       const t = relay?.text || transcriptUserText(d.message.content);
       const images = (Array.isArray(d.message.content) ? d.message.content : []).filter(b => b?.type === 'image' && b.source?.type === 'base64' && ['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(b.source.media_type)).map(b => ({ mimeType: b.source.media_type, data: b.source.data }));
+      // Claude can replace a prompt with an interrupt marker before persisting its text.
+      // Keep its exact position, even when several prompts were dropped together.
+      if (Array.isArray(d.droppedPromptUuids)) {
+        for (const id of d.droppedPromptUuids) {
+          if (typeof id !== 'string' || dropped.has(id)) continue;
+          dropped.add(id);
+          previousInterrupted ||= new Map((cached?.value.messages || [])
+            .filter(m => m.interrupted && (m.text || m.images?.length)).map(m => [m.id, m]));
+          messages.push(previousInterrupted.get(id) || { role: 'user', id, text: '', interrupted: true, timestamp });
+        }
+      }
+      if ((t || images.length) && d.uuid) nativeUsers.add(d.uuid);
       if (t || images.length) messages.push({ role: 'user', text: t, images, ...(relay ? { source: relay.source, relayMessageId: relay.relayMessageId } : {}), ...(timestamp ? { timestamp } : {}) });
     } else if (d.type === 'assistant' && Array.isArray(d.message.content)) {
       let add = ''; const tools = [];
@@ -748,7 +761,12 @@ function sessionMessages(id, options = {}) {
       else messages.push({ role: 'assistant', text: add, tools, ...(timestamp ? { timestamp } : {}) });
     }
   }
-  const value = { id, project, messages: annotateMessageTimings(messages) };
+  let visible = messages;
+  if (dropped.size) {
+    visible = messages.filter(m => !m.interrupted || !nativeUsers.has(m.id));
+    visible = restoreInterruptedInputs(id, visible);
+  }
+  const value = { id, project, messages: annotateMessageTimings(visible) };
   sessionMessageCache.delete(fp);
   sessionMessageCache.set(fp, { revision, value });
   while (sessionMessageCache.size > 2) sessionMessageCache.delete(sessionMessageCache.keys().next().value);
@@ -1935,6 +1953,16 @@ const sessionDirectory = require('./core/session-directory').createSessionDirect
   peers: () => registry.nodes().filter(node => node.id !== 'local' && node.peer).map(node => ({ id: node.id, peer: clusterNetwork?.peer(node.id) || node.peer })),
 });
 const readHarnessHistory = require('./engines/deepseek/history').createHarnessHistory(DATA_DIR);
+function restoreInterruptedInputs(sessionId, messages) {
+  const ids = new Set(messages.filter(m => m.interrupted && !m.text && !m.images?.length).map(m => m.id));
+  if (!ids.size) return messages;
+  const store = runStore || require('./core/run-store').createRunStore({ dir: DATA_DIR });
+  const inputs = store.acceptedInputs(sessionId, ids);
+  return messages.map(message => {
+    const input = message.interrupted && inputs.get(message.id);
+    return input ? { ...message, text: input.prompt, images: input.images || [], timestamp: input.timestamp || message.timestamp } : message;
+  });
+}
 async function machineHistoryPage(id, page) {
   const native = await readHarnessHistory(id, page);
   if (native) return native.unchanged ? native : pageSessionMessages(native, page);
@@ -1958,6 +1986,8 @@ async function conversationHistory(id, sourceMachine, { cachedDirectory = false,
     if (peer) { try { result = await peer.call('history.messages', { id, ...page }, { timeout: 5000 }); } catch {} }
   }
   if (result?.unchanged) return result;
+  // A remote CLI writes the transcript on its machine, while the sending panel owns the input journal.
+  if (result?.messages && source !== machineId() && source !== 'local') result.messages = restoreInterruptedInputs(id, result.messages);
   // An older remote panel may return only its launch prompt for a Harness session.
   if (saved?.engine === 'deepseek' && saved.messages?.length && !result?.engine && !result?.revision) return checkpointPage(saved, page);
   if (result && !result.checkpoint) { const item = directoryItem(); if (item?.machineId === source && item.project) result = { ...result, project: item.project }; }

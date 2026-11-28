@@ -48,3 +48,23 @@ test('sending the first prompt enters its conversation once and clears the cache
   assert.deepEqual(calls, [['render', 'new-session'], ['start']]);
   assert.equal(ctx.chatPageCache.has('__draft__'), false);
 });
+
+test('Enter queues the second message and only the interrupt button steers the active turn', async () => {
+  const { ctx, prompt } = fixture(true);
+  const modes = [], controls = { '#chat-prompt': prompt, '#chat-form': {}, '#chat-steer': {} };
+  const run = ctx.chatView.run;
+  run.inputChain = Promise.resolve(); run.model = 'new-model';
+  ctx.$ = selector => controls[selector] || { value: 'new-model' };
+  ctx.createChatTurn = () => ({ id: prompt.value, label: {} });
+  ctx.updateChatSendState = () => {};
+  ctx.api = async (method, url, input) => modes.push([input.prompt, input.mode]);
+  controls['#chat-form'].requestSubmit = () => controls['#chat-form'].onsubmit({ preventDefault() {} });
+  const handlers = html.slice(html.indexOf("  $('#chat-prompt').onkeydown"), html.indexOf("  v.attachments ||= [];"));
+  vm.runInContext(handlers, ctx);
+  assert.ok(html.includes('type="button" id="chat-steer"'));
+  prompt.onkeydown({ key: 'Enter', preventDefault() {} });
+  await run.inputChain;
+  prompt.value = 'change direction';
+  await controls['#chat-steer'].onclick(); await run.inputChain;
+  assert.deepEqual(modes, [['Keep my message', 'queue'], ['change direction', 'steer']]);
+});

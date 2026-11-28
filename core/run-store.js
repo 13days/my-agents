@@ -50,6 +50,18 @@ function createRunStore({ dir, now = Date.now }) {
     },
     update, journal,
     status: () => ({ records: records.size, unreadable: [...unreadable] }),
+    acceptedInputs(sessionId, ids) {
+      const inputs = new Map();
+      for (const record of records.values()) {
+        if (record.sessionId !== sessionId || !(ids.has(record.messageId) || record.messageIds?.some(id => ids.has(id)))) continue;
+        let entries;
+        try { entries = journal(record.id).read(); } catch { continue; }
+        for (const { event, data } of entries) {
+          if (event === 'input' && ids.has(data.id)) inputs.set(data.id, data);
+        }
+      }
+      return inputs;
+    },
     hasMessage: id => [...records.values()].some(row => row.messageId === id || row.messageIds?.includes(id)),
     find: id => [...records.values()].reverse().filter(row => [row.id, row.sessionId, row.conversationId].includes(id)).sort((a,b) => b.createdAt - a.createdAt)[0],
     list: () => [...records.values()].sort((a,b) => b.createdAt - a.createdAt).map(({ input, ...row }) => ({ ...row, prompt: input?.prompt || '' })),

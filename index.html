@@ -3303,7 +3303,7 @@ function renderChat() {
     </div></header>
     <div class="chat-conversation"><div class="chat-messages" id="chat-messages"></div><div class="chat-scroll-controls" hidden><button type="button" id="chat-scroll-top" title="${esc(rt('会话顶部', 'Top of conversation'))}" aria-label="${esc(rt('会话顶部', 'Top of conversation'))}">↑</button><button type="button" id="chat-scroll-bottom" title="${esc(rt('会话底部', 'Bottom of conversation'))}" aria-label="${esc(rt('会话底部', 'Bottom of conversation'))}">↓</button></div></div>
     <form class="chat-compose" id="chat-form">${v.lastLoginFailure ? `<p class="chat-warning" id="chat-login-failure" role="status">${esc(v.lastLoginFailure.hint)}</p>` : ''}<div id="chat-attachments" class="chat-attachments" hidden></div><textarea autocomplete="off" autocorrect="off" spellcheck="false" id="chat-prompt" rows="3" placeholder="${esc(existing ? rt('在这个会话里继续… 可粘贴图片', 'Continue this session… Paste images here') : rt('描述你想完成的任务…', 'Describe what you’d like to get done…', '取り組みたいタスクを入力…'))}"></textarea>
-      <div class="chat-compose-footer"><button type="button" class="btn chat-attach" id="chat-attach"${can(v.engine, 'images') ? '' : ' hidden'}>${esc(rt('＋ 图片', '+ Image'))}</button><input type="file" id="chat-image-file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>${enginePicker}<span id="chat-status">${esc(rt('回车发送 · Shift + 回车换行', 'Enter to send · Shift + Enter for a new line'))}</span>${launch ? '<div class="launch-model"></div>' : ''}<button class="btn" type="submit" data-mode="queue" id="chat-queue" title="${esc(rt('等当前轮完成后处理', 'Process after the current turn'))}" hidden>${esc(rt('排队', 'Queue'))}</button><button class="btn primary" type="submit" id="chat-send" aria-label="${esc(rt('发送', 'Send'))}">${launch ? '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m-7 7 7-7 7 7"/></svg>' : esc(rt('发送', 'Send'))}</button><button class="btn" type="button" id="chat-stop" hidden>${esc(rt('停止', 'Stop'))}</button></div>
+      <div class="chat-compose-footer"><button type="button" class="btn chat-attach" id="chat-attach"${can(v.engine, 'images') ? '' : ' hidden'}>${esc(rt('＋ 图片', '+ Image'))}</button><input type="file" id="chat-image-file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>${enginePicker}<span id="chat-status">${esc(rt('回车发送 · Shift + 回车换行', 'Enter to send · Shift + Enter for a new line'))}</span>${launch ? '<div class="launch-model"></div>' : ''}<button class="btn" type="button" id="chat-steer" title="${esc(rt('中断当前回复，立即处理这条消息', 'Interrupt the current reply and process this message', '進行中の応答を中断してこのメッセージを処理'))}" hidden>${esc(rt('中断并发送', 'Interrupt & send', '中断して送信'))}</button><button class="btn primary" type="submit" id="chat-send" aria-label="${esc(rt('发送', 'Send'))}">${launch ? '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m-7 7 7-7 7 7"/></svg>' : esc(rt('发送', 'Send'))}</button><button class="btn" type="button" id="chat-stop" hidden>${esc(rt('停止', 'Stop'))}</button></div>
     </form>
   </section>`;
   const settingsPanel = $('#chat-settings-panel'), settingsToggle = $('#chat-settings-toggle');
@@ -3382,7 +3382,8 @@ function renderChat() {
     catch (e) { toast(e.message, false); }
   };
   $('#chat-prompt').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#chat-form').requestSubmit(); } };
-  $('#chat-form').onsubmit = e => { e.preventDefault(); sendChat(e.submitter?.dataset.mode || 'steer'); };
+  $('#chat-form').onsubmit = e => { e.preventDefault(); sendChat(); };
+  $('#chat-steer').onclick = () => sendChat('steer');
   v.attachments ||= [];
   paintChatAttachments(v);
   const addImages = async files => {
@@ -3527,9 +3528,10 @@ function updateChatSendState(v) {
   const running = !!v.run && Array.from(v.run.turns.values()).some(turn => !turn.finished);
   const native = !!(v.run?.nativeAttached || v.run?.taskState?.nativeAttached);
   $('#chat-send').disabled = !!v.readingImages;
-  $('#chat-send').textContent = running ? native ? rt('排队发送', 'Queue message') : rt('引导', 'Steer') : rt('发送', 'Send');
-  $('#chat-send').title = running ? native ? rt('加入原终端会话队列，保留当前执行', 'Queue in the original terminal session') : rt('中断当前轮，按补充消息继续', 'Interrupt the current turn and continue with your input') : '';
-  $('#chat-queue').hidden = !running || native; $('#chat-queue').disabled = !!v.readingImages;
+  const sendLabel = running ? rt('排队发送', 'Queue message', '順番に送信') : rt('发送', 'Send', '送信');
+  $('#chat-send').textContent = sendLabel; $('#chat-send').setAttribute('aria-label', sendLabel);
+  $('#chat-send').title = running ? rt('等当前回复完成后发送', 'Send after the current reply', '現在の応答が終わったら送信') : '';
+  $('#chat-steer').hidden = !running || native || can(v.engine, 'steer', 'queue'); $('#chat-steer').disabled = !!v.readingImages;
   $('#chat-stop').hidden = !running;
   $('#chat-stop').textContent = native ? rt('断开同步', 'Disconnect sync') : rt('停止', 'Stop');
   $('#chat-stop').title = native ? rt('原终端继续运行，已投递消息不会撤回', 'The original terminal continues; delivered messages remain queued') : '';
@@ -3584,7 +3586,7 @@ function createChatTurn(v, prompt, images, id = crypto.randomUUID()) {
   };
   return turn;
 }
-async function sendChat(mode = 'steer') {
+async function sendChat(mode = 'queue') {
   const v = chatView, prompt = $('#chat-prompt').value.trim();
   if ((!prompt && !v.attachments?.length) || v.readingImages || v.changingModel) return;
   const images = (v.attachments || []).slice();
@@ -3610,8 +3612,10 @@ async function sendChat(mode = 'steer') {
   const turn = createChatTurn(v, prompt, images);
   v.attachments = []; paintChatAttachments(v); $('#chat-prompt').value = '';
   if (v.run) {
-    const run = v.run; run.turns.set(turn.id, turn);
-    turn.label.textContent = mode === 'queue' ? rt('已排队', 'Queued') : rt('等待引导', 'Waiting to steer');
+    const run = v.run;
+    const busy = Array.from(run.turns.values()).some(item => !item.finished);
+    run.turns.set(turn.id, turn);
+    if (busy) turn.label.textContent = mode === 'queue' ? rt('已排队', 'Queued') : rt('等待引导', 'Waiting to steer');
     run.inputChain = run.inputChain.then(async () => {
       await run.ready;
       await api('POST', `chat/${encodeURIComponent(v.sessionId)}/input`, { prompt, images, cwd: v.cwd, messageId: turn.id, mode });
@@ -3896,13 +3900,17 @@ function paintChatTiming(body, message) {
     duration.textContent = rt('耗时 ', 'Took ') + (seconds >= 60 ? `${Math.floor(seconds / 60)}${rt('分', 'm ')}${Math.floor(seconds % 60)}${rt('秒', 's')}` : `${seconds.toFixed(1)}${rt('秒', 's')}`);
     meta.append(duration);
   }
+  if (message.interrupted) {
+    const note = document.createElement('span');
+    note.textContent = rt('已中断', 'Interrupted', '中断済み'); meta.append(note);
+  }
   meta.hidden = !meta.childNodes.length;
 }
 function appendChatMessage(box, role, text, timing = {}) {
   box.querySelector('.chat-welcome')?.remove();
   const article = document.createElement('article'); article.className = 'chat-message ' + role;
   const label = document.createElement('div'); label.className = 'chat-message-label'; label.textContent = role === 'user' ? rt('你', 'You', 'あなた') : engineLabel(chatView?.engine || LEGACY_ENGINE);
-  const body = document.createElement('div'); body.className = 'chat-message-body'; body.innerHTML = role === 'assistant' ? md(text) : esc(ConversationState.messageText(text, timing.images)).replace(/\n/g, '<br>');
+  const body = document.createElement('div'); body.className = 'chat-message-body'; body.innerHTML = role === 'assistant' ? md(text) : esc(timing.interrupted && !text && !timing.images?.length ? rt('未找到这条消息的原文', 'Original message unavailable', '元のメッセージが見つかりません') : ConversationState.messageText(text, timing.images)).replace(/\n/g, '<br>');
   article.append(label, body); box.append(article); paintChatTiming(body, { role, ...timing }); return body;
 }
 

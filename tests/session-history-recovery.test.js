@@ -19,6 +19,25 @@ test('completed and interrupted archived jobs load native history after restart 
     const row = store.begin({ requestedId: id, conversationId: id, engine: 'claude', node: 'local' }, { messageId: 'message-' + index });
     store.update(row.id, { sessionId: id, state: index ? 'running' : 'completed', jobMeta: { sessionId: id, jobId: row.id, cwd: dir, engine: 'claude' } });
   }
+  const interruptedSession = '33333333-3333-4333-8333-333333333333';
+  const inputTime = '2026-11-28T07:50:31.817Z';
+  const image = { mimeType: 'image/png', data: 'YQ==' };
+  const inputId = 'dropped-message', presentId = 'kept-message', followId = 'next-message';
+  const run = store.begin({ engine: 'claude' }, { messageId: presentId });
+  store.update(run.id, { sessionId: interruptedSession });
+  const journal = store.journal(run.id);
+  journal.append('input', { id: presentId, prompt: 'same text' });
+  journal.append('input', { id: inputId, prompt: 'same text', images: [image], timestamp: inputTime });
+  journal.append('input', { id: followId, prompt: 'follow-up' });
+  journal.append('done', { messageId: followId });
+  const marker = { type: 'user', droppedPromptUuids: [presentId, inputId, inputId],
+    message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } };
+  fs.writeFileSync(path.join(project, interruptedSession + '.jsonl'), [
+    { type: 'user', uuid: presentId, cwd: dir, message: { content: 'same text' } },
+    marker, marker,
+    { type: 'user', uuid: followId, message: { content: 'follow-up' } },
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'answer' }] } },
+  ].map(JSON.stringify).join('\n') + '\n');
   const panel = await port(), proxy = await port();
   const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: { ...process.env, MY_AGENTS_HOME: dir, CLAUDE_DIR: dir, CLAUDE_CONFIG_DIR: dir, CODEX_HOME: path.join(dir, 'codex'), MY_AGENTS_BIND: '127.0.0.1', PORT: String(panel), PROXY_PORT: String(proxy), MY_AGENTS_NO_PROXY_SETUP: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   t.after(async () => { if (child.exitCode === null) { child.kill('SIGTERM'); await new Promise(resolve => child.once('exit', resolve)); } });
@@ -34,4 +53,15 @@ test('completed and interrupted archived jobs load native history after restart 
     assert.deepEqual(data.messages.map(message => message.text), ['original question', 'original reply']);
     assert.notEqual(data.liveReplay, true); assert.equal(data.id, id);
   }
+  const url = 'http://127.0.0.1:' + panel + '/api/sessions/' + interruptedSession + '/messages';
+  for (const query of ['', '?source=transcript']) {
+    const data = await (await fetch(url + query)).json();
+    assert.deepEqual(data.messages.map(m => m.text), ['same text', 'same text', 'follow-up', 'answer']);
+    assert.deepEqual(data.messages[1], { role: 'user', id: inputId, interrupted: true,
+      text: 'same text', images: [image], timestamp: inputTime });
+    assert.equal(data.messageCount, 4);
+  }
+  const older = await (await fetch(url + '?before=2&limit=1')).json();
+  assert.equal(older.messages[0].id, inputId);
+
 });
