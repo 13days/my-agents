@@ -351,7 +351,7 @@ function createConversationSearch() {
         }),'projects');
       }
       if (tab==='all' || tab==='chats') {
-        const found=sessions.filter(s=>matchesProject(s) && matches(s.name,s.description,s.key,s.cwd,s.repository,s.engine));
+        const found=ConversationState.sessionGroups(sessions).filter(group => (group.stages || [group]).some(s=>matchesProject(s) && matches(s.name,s.description,s.key,s.cwd,s.repository,s.engine)));
         section(q?tr('对话','Chats'):tr('最近对话','Recent chats'),found,tab==='all'?5:limit,s=>row('c'+s.key,'sessions',clean(s.name)||tr('图片对话','Image conversation'),
           [where(s)?.name,machineLabel(s.machineId),engineLabel(s.engine||'claude',true)].filter(Boolean).join(' · '),()=>go(s.key)),'chats');
       }
@@ -1020,7 +1020,7 @@ async function loadCounts() {
       const { items, usagePending } = await api('GET', type);
       hydrateResourceUsage(items, type, resourceEngine, scope, usagePending);
       if (!Array.isArray(items) || ((SCOPED.includes(type) || type === 'plugins') && (resourceEngine !== state.resourceEngine || scope !== state.scope))) continue;
-      document.querySelector(`.tab[data-type="${type}"] .cnt`).textContent = items.filter(it => matchOrigin(it, type)).length;
+      document.querySelector(`.tab[data-type="${type}"] .cnt`).textContent = (type === 'sessions' ? ConversationState.sessionGroups(items) : items).filter(it => matchOrigin(it, type)).length;
 
     } catch (e) {}
   }
@@ -1150,15 +1150,19 @@ async function toggleSessionPin(item) {
   if (pendingPins.has(item.key)) return;
   pendingPins.add(item.key);
   try {
-    const { pinnedAt } = await api('PUT', `sessions/${encodeURIComponent(item.key)}/pin`, { pinned: !item.pinnedAt });
+    const pinned = !item.pinnedAt;
+    const stages = item.stages || [item];
+    const ids = pinned ? [stages.find(row => row.key === item.pinKey)?.key || item.key] : stages.filter(row => row.pinnedAt).map(row => row.key);
+    for (const id of ids) {
+      const { pinnedAt } = await api('PUT', `sessions/${encodeURIComponent(id)}/pin`, { pinned });
+      pinRevision++;
+      const current = state.type === 'sessions' && state.items.find(row => row.key === id);
+      if (current) current.pinnedAt = pinnedAt;
+    }
     if (state.type !== 'sessions') return;
-    const current = state.items.find(row => row.key === item.key);
-    if (!current) return;
-    pinRevision++;
-    current.pinnedAt = pinnedAt;
-    if (pinnedAt) listPage.index = 0;
+    if (pinned) listPage.index = 0;
     renderList();
-    if (pinnedAt) $('#list').scrollTop = 0;
+    if (pinned) $('#list').scrollTop = 0;
   } catch (error) { toast(error.message, false); }
   finally { pendingPins.delete(item.key); }
 }
@@ -1171,11 +1175,12 @@ function renderList({ revealCurrent = false } = {}) {
   if (CAPS[state.type].dashboard) { list.replaceChildren(); return; }
   const fragment = document.createDocumentFragment();
   if (state.type === 'inspector') updateCaptureFilterCounts();
-  const visibleItems = state.items
+  const rows = state.type === 'sessions' ? ConversationState.sessionGroups(state.items) : state.items;
+  const visibleItems = rows
     .filter(it => matchOrigin(it))
-    .filter(it => state.type !== 'sessions' || (matchesSessionEngine(it) && conversationSearch.matchesProject(it)))
+    .filter(it => state.type !== 'sessions' || (it.stages || [it]).some(row => matchesSessionEngine(row) && conversationSearch.matchesProject(row)))
     .filter(it => state.type !== 'inspector' || matchesCaptureFilters(it))
-    .filter(it => !kw || (state.type === 'sessions' ? kw.trim().split(/\s+/).every(word => [it.name, it.description, it.key, it.cwd, it.gitBranch].filter(Boolean).join(' ').toLowerCase().includes(word)) : it.name.toLowerCase().includes(kw) || (it.description || '').toLowerCase().includes(kw)));
+    .filter(it => !kw || (state.type === 'sessions' ? (it.stages || [it]).some(row => kw.trim().split(/\s+/).every(word => [row.name, row.description, row.key, row.cwd, row.gitBranch].filter(Boolean).join(' ').toLowerCase().includes(word))) : it.name.toLowerCase().includes(kw) || (it.description || '').toLowerCase().includes(kw)));
   if (state.type === 'sessions') visibleItems.sort((a, b) => (b.pinnedAt || 0) - (a.pinnedAt || 0));
   const pageKey = JSON.stringify([state.type, state.resourceEngine, state.scope, state.origin, kw, sessionEngine, state.inspectorEngine, state.inspectorSession, state.inspectorPurpose]);
   const samePage = listPage.key === pageKey;
@@ -1191,7 +1196,7 @@ function renderList({ revealCurrent = false } = {}) {
       const key = it.key || it.name;
       const div = document.createElement('button');
       div.type = 'button';
-      const selected = state.current != null && String(state.current) === String(key);
+      const selected = state.current != null && (String(state.current) === String(key) || it.stages?.some(stage => stage.key === state.current));
       div.className = 'item' + (selected ? ' active' : '');
       if (selected) div.setAttribute('aria-current', 'true');
       if (state.type === 'sessions') div.dataset.sid = String(key).toLowerCase();
@@ -1247,7 +1252,13 @@ function renderList({ revealCurrent = false } = {}) {
           if (action === 'delete') button.className = 'danger';
           button.onclick = () => { menu.open = false; if (action === 'pin') toggleSessionPin(it); else editSession(it, action); }; actions.append(button);
         }
-        menu.append(summary, actions); row.append(div, menu); fragment.append(row);
+        menu.append(summary, actions); row.append(div, menu);
+        if (it.stages) {
+          const stages = document.createElement('button'); stages.type = 'button'; stages.className = 'session-stages-link';
+          stages.textContent = rt('接续记录', 'History') + ' · ' + it.stages.length + ' ›';
+          stages.onclick = () => showSessionStages(it); row.append(stages);
+        }
+        fragment.append(row);
       } else fragment.appendChild(div);
     });
   list.replaceChildren(fragment);
@@ -1276,6 +1287,53 @@ function renderList({ revealCurrent = false } = {}) {
   }
 }
 
+function showSessionStages(group) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'session-dialog session-stages';
+  dialog.setAttribute('aria-labelledby', 'stages-title');
+  dialog.innerHTML = `<header><h2 id="stages-title">${esc(rt('接续记录', 'Conversation history'))}</h2><button class="btn" type="button" data-dismiss>${esc(rt('关闭', 'Close'))}</button></header>
+    <select aria-label="${esc(rt('选择一段记录', 'Choose a stage'))}"></select>
+    <div class="stages-scroll"><button type="button" class="btn" data-older hidden>${esc(rt('更早的消息','Earlier messages'))}</button><div class="stages-messages"></div></div>`;
+  const select = dialog.querySelector('select'), box = dialog.querySelector('.stages-messages');
+  const older = dialog.querySelector('[data-older]'), scroll = dialog.querySelector('.stages-scroll');
+  for (const stage of group.stages) {
+    const label = [stage.key === group.key ? rt('当前', 'Current') : '', stage.gitBranch, stage.name, stage.machineId].filter(Boolean).join(' · ');
+    select.add(new Option(label, stage.key));
+  }
+  let controller, before;
+  async function load(append = false) {
+    controller?.abort();
+    const request = new AbortController(); controller = request;
+    const id = select.value, stage = group.stages.find(item => item.key === id);
+    if (!append) { box.textContent = rt('正在读取记录…', 'Loading history…'); before = null; older.hidden = true; }
+    older.disabled = true;
+    try {
+      const query = new URLSearchParams({ source: 'transcript', limit: '40' });
+      if (append) query.set('before', before);
+      const response = await fetch('/api/sessions/' + encodeURIComponent(id) + '/messages?' + query, { signal: request.signal });
+      if (!response.ok) throw await responseError(response);
+      const data = await response.json();
+      if (!dialog.open || request.signal.aborted) return;
+      const page = document.createElement('div'), height = scroll.scrollHeight, top = scroll.scrollTop;
+      for (const msg of data.messages) {
+        const body = appendChatMessage(page, msg.role, msg.text || '', msg, stage.engine);
+        paintChatImages(body, msg.images || []); paintChatReasoning(body, msg.reasoning || []);
+        for (const tool of msg.tools || []) paintChatTool(body, tool);
+      }
+      if (!append && !data.messages.length) page.textContent = rt('没有可显示的消息', 'No messages to show');
+      if (append) box.prepend(page); else box.replaceChildren(page);
+      before = data.historyBefore; older.hidden = !data.truncated || !before;
+      scroll.scrollTop = append ? top + scroll.scrollHeight - height : scroll.scrollHeight;
+    } catch (error) {
+      if (!request.signal.aborted) { if (append) toast(error.message, false); else box.textContent = error.message; }
+    } finally { if (request === controller) older.disabled = false; }
+  }
+  select.value = (group.stages.find(stage => stage.key === group.previousSessionId) || group).key;
+  select.onchange = () => load(); older.onclick = () => load(true);
+  dialog.querySelector('[data-dismiss]').onclick = () => dialog.close();
+  dialog.onclose = () => { controller?.abort(); dialog.remove(); };
+  document.body.append(dialog); dialog.showModal(); load();
+}
 function editSession(item, action) {
   const id = item.key;
   if (chatView.run?.activeId && (chatView.sessionId === id || chatView.liveId === id)) { toast(rt('请先停止生成，再管理此会话', 'Stop generation before editing this session'), false); return; }
@@ -1294,7 +1352,7 @@ function editSession(item, action) {
       if (removing) {state.items = state.items.filter(it => it.key !== id);chatPageCache.delete(id);if(sessionNavigation?.current===id)sessionNavigation.current='';}
       else { item.name = result.title; item.titleSource = 'manual'; const stored = state.items.find(it => it.key === id); if (stored) { stored.name = result.title; stored.titleSource = 'manual'; } }
       if (state.type === 'sessions') {
-        renderList(); document.querySelector('.tab[data-type="sessions"] .cnt').textContent = state.items.length;
+        renderList(); document.querySelector('.tab[data-type="sessions"] .cnt').textContent = ConversationState.sessionGroups(state.items).length;
         if (state.current === id) { if (removing) { chatAbort?.abort(); state.current = null; showEmpty(); } else $('#title').firstChild.textContent = result.title; }
       }
       close();
@@ -3031,7 +3089,7 @@ async function refreshSessionList() {
     if (state.type !== 'sessions' || epoch !== sessionListEpoch || document.querySelector('.session-menu[open], .session-dialog[open]')) return;
     if (chatView.optimisticItem && !items.some(item => item.key === chatView.sessionId)) items.unshift(chatView.optimisticItem);
     else if (items.some(item => item.key === chatView.sessionId)) chatView.optimisticItem = null;
-    const signature = rows => JSON.stringify(rows.map(item => [item.key, item.name, item.description, item.titleSource, item.pinnedAt, item.running]));
+    const signature = rows => JSON.stringify(rows.map(item => [item.key, item.name, item.description, item.titleSource, item.pinnedAt, item.running, item.previousSessionId, item.last]));
     if (pinsAtStart !== pinRevision || pendingPins.size || (!firstLoad && signature(items) === signature(state.items))) return;
     const list = $('#list'), scroll = list.scrollTop;
     const focusedId = list.contains(document.activeElement) ? document.activeElement.closest('.session-row')?.querySelector('[data-sid]')?.dataset.sid : '';
@@ -3039,7 +3097,7 @@ async function refreshSessionList() {
     const selected = items.find(item => item.key === state.current);
     if (selected && $('#chat-messages')) $('#title').firstChild.textContent = selected.name;
     if (focusedId) Array.from(list.querySelectorAll('[data-sid]')).find(item => item.dataset.sid === focusedId)?.focus({ preventScroll: true });
-    document.querySelector('.tab[data-type="sessions"] .cnt').textContent = items.length;
+    document.querySelector('.tab[data-type="sessions"] .cnt').textContent = ConversationState.sessionGroups(items).length;
   } catch (error) {
     const loading = $('#list [role="status"]');
     if (loading && state.type === 'sessions' && epoch === sessionListEpoch) loading.textContent = t('loadFail') + error.message;
@@ -3676,7 +3734,7 @@ function registerChatInSidebar(v, prompt) {
   }
   $('#title').firstChild.textContent = state.items.find(item => item.key === v.sessionId).name;
   state.current = v.sessionId; routeView = ''; writeRoute(); renderList();
-  document.querySelector('.tab[data-type="sessions"] .cnt').textContent = state.items.length;
+  document.querySelector('.tab[data-type="sessions"] .cnt').textContent = ConversationState.sessionGroups(state.items).length;
 }
 function createChatTurn(v, prompt, images, id = crypto.randomUUID()) {
   const box = $('#chat-messages');
@@ -4034,10 +4092,10 @@ function paintChatTiming(body, message) {
   }
   meta.hidden = !meta.childNodes.length;
 }
-function appendChatMessage(box, role, text, timing = {}) {
+function appendChatMessage(box, role, text, timing = {}, engine = chatView?.engine) {
   box.querySelector('.chat-welcome')?.remove();
   const article = document.createElement('article'); article.className = 'chat-message ' + role;
-  const label = document.createElement('div'); label.className = 'chat-message-label'; label.textContent = role === 'user' ? rt('你', 'You', 'あなた') : engineLabel(chatView?.engine || LEGACY_ENGINE);
+  const label = document.createElement('div'); label.className = 'chat-message-label'; label.textContent = role === 'user' ? rt('你', 'You', 'あなた') : engineLabel(engine || LEGACY_ENGINE);
   const body = document.createElement('div'); body.className = 'chat-message-body'; body.innerHTML = role === 'assistant' ? md(text) : messageLinks(timing.interrupted && !text && !timing.images?.length ? rt('未找到这条消息的原文', 'Original message unavailable', '元のメッセージが見つかりません') : ConversationState.messageText(text, timing.images)).replace(/\n/g, '<br>');
   article.append(label, body); box.append(article); paintChatTiming(body, { role, ...timing }); return body;
 }

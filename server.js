@@ -873,7 +873,7 @@ function collectSessionRows(isBusy, proxyRuns) {
     const native = idToFile.has(s.id) || s.native === true;
     const pendingInput = isBusy(s.id);
     const automatic = meta.autoTitle && (pendingInput || meta.autoTitleAt >= (s.promptAt || 0)) ? meta.autoTitle : s.promptAt ? s.title : meta.title || s.title;
-    return { ...s, ...labels, native, latestPrompt: s.title, project: labels.cwd || s.project, running: pendingInput || proxyRuns.has(s.id), ...(meta.worktree ? { worktree: meta.worktree } : {}), ...(meta.node ? { node: meta.node } : {}), machineId: meta.machineId || (meta.node && meta.node !== 'local' ? meta.node : machineId()), engine: s.engine || 'claude', title: manual ? meta.title : labels.sessionName || automatic || meta.title || s.id, titleSource: manual ? 'manual' : 'auto', last: Math.max(s.last, meta.lastAt || 0) };
+    return { ...s, ...labels, native, ...(meta.handoff?.previousSessionId ? { previousSessionId: meta.handoff.previousSessionId } : {}), latestPrompt: s.title, project: labels.cwd || s.project, running: pendingInput || proxyRuns.has(s.id), ...(meta.worktree ? { worktree: meta.worktree } : {}), ...(meta.node ? { node: meta.node } : {}), machineId: meta.machineId || (meta.node && meta.node !== 'local' ? meta.node : machineId()), engine: s.engine || 'claude', title: manual ? meta.title : labels.sessionName || automatic || meta.title || s.id, titleSource: manual ? 'manual' : 'auto', last: Math.max(s.last, meta.lastAt || 0) };
   }).sort((a, b) => b.last - a.last);
 }
 
@@ -2062,7 +2062,7 @@ const manager = createSessionManager({
     touch(id, { engine, node, machineId: executionMachine, cwd, worktree, workspaceId, handoff, prompt }) {
       const meta = sessionStore.read()[id] || {};
       const fp = transcriptPathFor(id);
-      const created = engine ? { engine, machineId: executionMachine || machineId(), ...(node && node !== 'local' ? { node } : {}), project: cwd, ...(worktree ? { worktree } : {}), workspaceId, handoff, initialPrompt: meta.initialPrompt || prompt, createdAt: meta.createdAt || Date.now() } : {};
+      const created = engine ? { engine, machineId: executionMachine || machineId(), ...(node && node !== 'local' ? { node } : {}), project: cwd, ...(worktree ? { worktree } : {}), workspaceId, ...(handoff ? { handoff } : {}), initialPrompt: meta.initialPrompt || prompt, createdAt: meta.createdAt || Date.now() } : {};
       sessionStore.update(id, { ...autoTitlePatch(meta, prompt, fp ? transcriptHead(fp).title : ''), ...created, lastAt: Date.now() });
       conversations.put(id, { ...created, ...(handoff ? { messages: conversations.get(handoff.previousSessionId)?.messages || [] } : {}), title: meta.title || String(prompt || '').slice(0,80), lastAt: Date.now() });
     },
@@ -2924,9 +2924,12 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('Cache-Control', 'no-store');
         const directory = await sessionDirectory.list({ query: url.searchParams.get('q') || '', cachedPeers: url.searchParams.get('cachedPeers') === '1' });
         const pins = sessionPins.read();
+        const checkpoints = conversations.read();
         const items = directory.sessions.map(s => ({
           name: (s.title || s.id).slice(0, 80),
-          key: s.id, pinnedAt: Object.hasOwn(pins, s.id) ? pins[s.id] : 0,
+          key: s.id, last: s.last,
+          previousSessionId: s.previousSessionId || checkpoints[s.id]?.handoff?.previousSessionId || runStore.previousSession(s.id),
+          pinnedAt: Object.hasOwn(pins, s.id) ? pins[s.id] : 0,
           description: `${s.machineId} · ${path.basename(s.repository || s.project || '') || '?'}${s.gitBranch ? ' · ' + s.gitBranch : ''}${s.workspaceLabel ? ' · ' + s.workspaceLabel : ''} · ${s.last ? new Date(s.last).toISOString().slice(0, 16).replace('T',' ') : '?'}${s.latestPrompt ? ' · ' + s.latestPrompt.slice(0, 100) : ''}`,
           machineId: s.machineId, cwd: s.project, repository: s.repository, running: s.running, gitBranch: s.gitBranch, sessionName: s.sessionName,
           origin: 'user',

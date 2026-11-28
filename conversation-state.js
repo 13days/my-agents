@@ -9,6 +9,35 @@
     return String(text || '').replace(/<\/?image\b[^>]*(?:>|$)/gi, ' ')
       .replace(/\[Image\s+#\d+\]/gi, ' ').replace(/\s+/g, ' ').trim();
   }
+  // Fold only explicit handoffs. Independent native conversations can share a directory, branch and title.
+  function sessionGroups(rows) {
+    const byId = new Map(rows.map(row => [row.key, row])), roots = new Map(), groups = new Map();
+    const parents = new Set(rows.map(row => row.previousSessionId).filter(Boolean));
+    for (const row of rows) {
+      let key = row.key;
+      const trail = new Set();
+      while (!roots.has(key) && !trail.has(key)) {
+        trail.add(key);
+        const parent = byId.get(key)?.previousSessionId;
+        if (!parent) break;
+        key = parent;
+      }
+      const root = roots.get(key) || key;
+      for (const member of trail) roots.set(member, root);
+      if (!groups.has(root)) groups.set(root, []);
+      groups.get(root).push(row);
+    }
+    return [...groups].map(([root, stages]) => {
+      if (stages.length === 1) return stages[0];
+      stages.sort((a, b) => (b.last || 0) - (a.last || 0));
+      const leaves = stages.filter(row => !parents.has(row.key));
+      const head = leaves.find(row => row.running) || leaves[0] || stages[0];
+      const generic = /^(继续|接着|接着做|继续执行|continue|go on)[。.!！]?$/i;
+      const title = head.titleSource !== 'manual' && generic.test(head.name.trim())
+        ? stages.find(row => row.name && !generic.test(row.name.trim()))?.name || head.name : head.name;
+      return { ...head, name: title, stages, pinKey: root, pinnedAt: Math.max(...stages.map(row => row.pinnedAt || 0)) };
+    });
+  }
   function codexNotice(message) {
     const value = String(message || '').trim().replace(/\x60/g, '');
     if (/^\[features\]\.[\w-]+\s+is deprecated\b/i.test(value)) return 'deprecated_config';
@@ -64,5 +93,5 @@
     return view;
   }
   const translations = { '等待后台任务': ['Waiting for background tasks','バックグラウンドタスク待ち'], '等待原会话汇总': ['Waiting for terminal summary','元のセッションの要約待ち'], '等待原窗口确认': ['Waiting for terminal approval','元のターミナルの承認待ち'], '投递待确认': ['Delivery awaiting confirmation','送信確認待ち'], '等待节点重连': ['Waiting for node reconnection','ノードの再接続待ち'], '结果待核对': ['Outcome needs review','結果の確認が必要'], '已连接原终端': ['Original terminal connected','元のターミナルに接続済み'], '等待原会话接续': ['Waiting to continue the original session','元のセッションの再開待ち'], '连接重试中': ['Retrying connection','接続を再試行中'] };
-  return { titleText, messageText, codexNotice, codexLoginHint, lastCodexLoginFailure, connectionRetry, create, apply, labels: phase => translations[phase] || [phase, phase] };
+  return { sessionGroups, titleText, messageText, codexNotice, codexLoginHint, lastCodexLoginFailure, connectionRetry, create, apply, labels: phase => translations[phase] || [phase, phase] };
 });

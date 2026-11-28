@@ -3,16 +3,22 @@ const ID = /^[\w-]{8,100}$/;
 const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'unknown']);
 function createRunStore({ dir, now = Date.now }) {
   const root = path.join(dir, 'runs'), records = new Map(), journals = new Map(), unreadable = [];
+  const previousSessions = new Map();
+  function indexHandoff(row) {
+    const previous = row.jobMeta?.handoff?.previousSessionId;
+    if (previous && row.sessionId && previous !== row.sessionId) previousSessions.set(row.sessionId, previous);
+  }
   const atomic = (file, value) => { fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); const tmp = file + '.' + crypto.randomUUID() + '.tmp'; const fd = fs.openSync(tmp, 'wx', 0o600); try { fs.writeFileSync(fd, JSON.stringify(value)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); } fs.renameSync(tmp, file); };
   let names = []; try { names = fs.readdirSync(root); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   for (const name of names.filter(name => ID.test(name))) {
     try { const row = JSON.parse(fs.readFileSync(path.join(root, name, 'meta.json'), 'utf8')); if (row.id === name) records.set(name, row); }
     catch (error) { if (error.code !== 'ENOENT') unreadable.push({ id: name, error: error.code || 'INVALID_JSON' }); }
   }
+  for (const row of records.values()) indexHandoff(row);
   function update(id, patch) {
     const old = records.get(id); if (!old) throw new Error('任务不存在');
     const row = { ...old, ...patch, id, updatedAt: now() };
-    atomic(path.join(root, id, 'meta.json'), row); records.set(id, row); return row;
+    atomic(path.join(root, id, 'meta.json'), row); records.set(id, row); indexHandoff(row); return row;
   }
   function journal(id) {
     if (journals.has(id)) return journals.get(id);
@@ -48,7 +54,7 @@ function createRunStore({ dir, now = Date.now }) {
       const id = crypto.randomUUID(), row = { ...meta, id, messageId: input.messageId, input, state: 'preparing', createdAt: now(), updatedAt: now() };
       atomic(path.join(root, id, 'meta.json'), row); records.set(id, row); return row;
     },
-    update, journal,
+    update, journal, previousSession: id => previousSessions.get(id),
     status: () => ({ records: records.size, unreadable: [...unreadable] }),
     acceptedInputs(sessionId, ids) {
       const inputs = new Map();

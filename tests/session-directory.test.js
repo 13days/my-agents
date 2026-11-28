@@ -81,3 +81,21 @@ test('web listing can return local rows while a peer refresh is in flight', asyn
   assert.equal((await refreshed).sessions.length, 2);
   assert.equal(dir.findCached('remote-row').machineId, 'remote');
 });
+
+test('only explicit handoffs collapse into a conversation, keeping every stage and the current leaf', () => {
+  const { sessionGroups } = require('../conversation-state');
+  const base = { cwd: '/same', gitBranch: 'same', engine: 'claude', running: false };
+  const old = { ...base, key: 'one', name: '原始问题', pinnedAt: 12, last: 200 };
+  const middle = { ...base, key: 'two', previousSessionId: 'one', name: '继续', last: 100 };
+  const head = { ...base, key: 'three', previousSessionId: 'two', name: '继续', running: true, last: 150 };
+  const other = { ...base, key: 'four', name: '原始问题' };
+  const grouped = sessionGroups([middle, other, head, old]);
+  assert.equal(grouped.length, 2);
+  assert.equal(grouped[0].key, 'three');
+  assert.equal(grouped[0].name, '原始问题');
+  assert.equal(grouped[0].pinKey, 'one');
+  assert.equal(grouped[0].pinnedAt, 12);
+  assert.equal(grouped[0].stages.length, 3);
+  assert.equal(grouped[1], other);
+  assert.equal(sessionGroups([{ ...head, titleSource: 'manual' }, middle, old])[0].name, '继续');
+});
