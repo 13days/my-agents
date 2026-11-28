@@ -19,7 +19,7 @@ function createHistoryWorker(serverPath, { env = process.env } = {}) {
     current.on('error', fail); current.on('exit', code => fail(new Error(`History worker exited (${code})`)));
     current.unref();
   }
-  const read = (type, input) => {
+  const read = (type, input, { cache: retain = true } = {}) => {
     const key = JSON.stringify([type, input]), hit = cache.get(key);
     if (hit && Date.now() - hit.at < 2000) return Promise.resolve(hit.value);
     if (reads.has(key)) return reads.get(key);
@@ -28,7 +28,7 @@ function createHistoryWorker(serverPath, { env = process.env } = {}) {
     const request = new Promise((resolve, reject) => {
       const timer = setTimeout(() => { pending.delete(id); if (!pending.size) worker?.unref(); reject(new Error('History processing timed out')); }, 60000);
       pending.set(id, { resolve, reject, timer }); worker.ref(); worker.postMessage({ id, type, input });
-    }).then(value => { cache.set(key, { at: Date.now(), value }); if (cache.size > 20) cache.delete(cache.keys().next().value); return value; }).finally(() => reads.delete(key));
+    }).then(value => { if (retain) cache.set(key, { at: Date.now(), value }); if (cache.size > 20) cache.delete(cache.keys().next().value); return value; }).finally(() => reads.delete(key));
     reads.set(key, request); return request;
   };
   return { read, close: () => worker?.terminate() };

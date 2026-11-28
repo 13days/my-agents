@@ -75,7 +75,7 @@ function openClaudeSession({ host, cli, env, cwd, sessionId, resume, model, sett
     if (msg.type === 'system' && msg.subtype === 'init' && msg.session_id) send('status', {kind:'model_session',routeSessionId:msg.session_id});
     if (msg.type === 'system' && msg.subtype === 'api_retry') {
       const status = msg.error?.status || msg.status_code || msg.error_status;
-      send('warning', { warning: `上游请求失败${status ? `（${status}）` : ''}，Claude 正在重试${msg.attempt ? `（第 ${msg.attempt} 次）` : ''}。可停止任务后用 /route 切换账号。` });
+      send('warning', { kind: 'upstream_retry', warning: `上游请求失败${status ? `（${status}）` : ''}，Claude 正在重试${msg.attempt ? `（第 ${msg.attempt} 次）` : ''}。可停止任务后用 /route 切换账号。` });
     }
     if (msg.type === 'system' && msg.subtype === 'task_started' && msg.task_id) backgroundTasks.add(msg.task_id);
     if (msg.type === 'system' && msg.subtype === 'task_notification' && msg.task_id) {

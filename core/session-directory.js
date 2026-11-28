@@ -15,7 +15,7 @@ function normalize(row, source, native = false) {
     repository: row.worktree?.repository || row.repository || split[0] || project,
     workspaceLabel: split.length > 1 ? split[1].split('/')[0] : row.workspaceLabel || '', native: native || row.native === true };
 }
-function createSessionDirectory({ local, selfId, peers, ttl = 3000, timeout = 8000, now = Date.now }) {
+function createSessionDirectory({ local, localList = local, selfId, peers, ttl = 3000, timeout = 8000, now = Date.now }) {
   let cache = [], unavailable = [], at = 0, pending;
   const remoteCache = new Map();
   let localCache = [];
@@ -28,7 +28,7 @@ function createSessionDirectory({ local, selfId, peers, ttl = 3000, timeout = 80
     return searchSessions([...all.values()]);
   }
   const snapshot = () => { localCache = local().map(row => normalize(row, selfId(), row.native)); return merge(localCache, cache); };
-  async function list({ refresh = false, query = '' } = {}) {
+  async function list({ refresh = false, query = '', cachedPeers = false } = {}) {
     if (!pending && (refresh || now() - at >= ttl || !at)) pending = (async () => {
       const connected = peers(), failed = [];
       await Promise.all(connected.map(async ({ id, peer }) => {
@@ -44,8 +44,9 @@ function createSessionDirectory({ local, selfId, peers, ttl = 3000, timeout = 80
       cache = [...remoteCache].flatMap(([id, rows]) => rows.map(row => ({ ...row, sourceUnavailable: unavailable.includes(id), running: !unavailable.includes(id) && row.running })));
       at = now();
     })().finally(() => { pending = null; });
-    if (pending) await pending;
-    return { sessions: searchSessions(snapshot(), query), unavailable };
+    const [rows] = await Promise.all([localList(), cachedPeers ? null : pending]);
+    localCache = rows.map(row => normalize(row, selfId(), row.native));
+    return { sessions: searchSessions(merge(localCache, cache), query), unavailable };
   }
   // Ownership checks used by manager.busy must not call snapshot(): the local
   // listing itself asks manager.busy and would recurse.

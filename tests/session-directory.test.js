@@ -66,3 +66,18 @@ test('legacy truncated image titles use the full native caption in the directory
   assert.equal(rows.find(r=>r.id==='manual').title,'自己的名称');
   assert.doesNotMatch(JSON.stringify(rows),/private\/local/);
 });
+
+test('web listing can return local rows while a peer refresh is in flight', async () => {
+  let finish;
+  const dir = createSessionDirectory({
+    selfId: () => 'local', local: () => { throw Error('synchronous scan'); },
+    localList: async () => [{ id: 'local-row' }],
+    peers: () => [{ id: 'remote', peer: { call: () => new Promise(resolve => { finish = resolve; }) } }],
+  });
+  const first = await dir.list({ cachedPeers: true });
+  assert.deepEqual(first.sessions.map(row => row.id), ['local-row']);
+  const refreshed = dir.list();
+  finish([{ id: 'remote-row', native: true }]);
+  assert.equal((await refreshed).sessions.length, 2);
+  assert.equal(dir.findCached('remote-row').machineId, 'remote');
+});

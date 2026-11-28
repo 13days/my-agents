@@ -21,7 +21,7 @@ function createSessionManager({ registry, history, stallMs = 90 * 1000, idleMs =
   }
   // Older Codex adapters silently forked occupied terminal threads. A durable
   // original remains canonical, even if an old run recorded a different id.
-  const resolveId = id => !handoffAliases.has(id) && history.isOriginal?.(id) ? id : aliases.get(id) || id;
+  const resolveId = id => !aliases.has(id) || (!handoffAliases.has(id) && history.isOriginal?.(id)) ? id : aliases.get(id);
   const live = run => run && !run.job.closed;
   // An engine that reports idle while a turn is still open, with no events for a while, lost
   // that turn (rejected input, crashed writer…). End it rather than let clients wait forever.
@@ -56,7 +56,8 @@ function createSessionManager({ registry, history, stallMs = 90 * 1000, idleMs =
     const run = { id: saved.sessionId, engine: saved.engine, node: saved.node, job, recovered: true };
     runs.set(run.id, run); return run;
   }
-  function busy(id) { const run = get(id); return !!(live(run) && (run.session.currentId || run.session.pendingCount)); }
+  function current(id) { return runs.get(resolveId(id)); }
+  function busy(id) { const run = current(id); return !!(live(run) && (run.session.currentId || run.session.pendingCount)); }
 
   // Starts (or resumes) a session and its first turn. Resolves once the engine
   // knows the real session id, which may differ from the requested one.
@@ -213,13 +214,13 @@ function createSessionManager({ registry, history, stallMs = 90 * 1000, idleMs =
   }
 
   // Delivers a warning into the active turn of a session (e.g. upstream errors seen by the proxy).
-  function warn(id, warning) {
-    const run = get(id);
-    if (live(run) && run.session.currentId) run.job.publish('warning', { messageId: run.session.currentId, warning });
+  function warn(id, warning, kind) {
+    const run = runs.get(resolveId(id));
+    if (live(run) && run.session.currentId) run.job.publish('warning', { messageId: run.session.currentId, warning, ...(kind ? { kind } : {}) });
   }
 
   return {
-    start, send, stop, respondPermission, pendingPermissions, watch, warn, get, busy, resolveId, sweepStalled,
+    start, send, stop, respondPermission, pendingPermissions, watch, warn, get, current, busy, resolveId, sweepStalled,
     tasks: () => runStore?.list() || [...preparations.values()],
     preparing: () => [...preparations.values()].map(({ controller, ...row }) => row),
     running: () => [...preparations.values()].map(item => item.conversationId).concat([...runs.values()].filter(run => live(run) && (run.session.currentId || run.session.pendingCount)).map(run => run.id)),

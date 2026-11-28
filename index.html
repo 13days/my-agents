@@ -485,6 +485,8 @@ async function renderIMAccess() {
 const $ = s => document.querySelector(s);
 
 const ICONS = {im: '<path d="M4 4h16v12H9l-5 4V4Z"/>', "terminal": "<path d=\"m5 6 6 6-6 6M13 18h6\"/>", "stats": "<path d=\"M4 19V5m0 14h16M8 15v-4m5 4V7m5 8v-6\"/>", "proxy": "<rect x=\"3\" y=\"4\" width=\"18\" height=\"6\" rx=\"2\"/><rect x=\"3\" y=\"14\" width=\"18\" height=\"6\" rx=\"2\"/><path d=\"M7 7h.01M7 17h.01M12 10v4\"/>", "inspector": "<path d=\"M3 12h4l3-7 4 14 3-7h4\"/>", "sessions": "<path d=\"M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z\"/>", "voyage": "<path d=\"m3 17 9 4 9-4M5 15l7-3 7 3M12 3v9M12 3l7 6h-7M5 15v3m14-3v3\"/>", "commands": "<path d=\"m5 6 6 6-6 6M13 18h6\"/>", "skills": "<path d=\"m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4L12 3Z\"/>", "agents": "<rect x=\"4\" y=\"7\" width=\"16\" height=\"14\" rx=\"3\"/><path d=\"M12 3v4M8 12h.01M16 12h.01M9 17h6M1 12v5m22-5v5\"/>", "plugins": "<path d=\"M9 3v4m6-4v4M7 7h10v5a5 5 0 0 1-10 0V7Zm5 10v4\"/>", "workflows": "<rect x=\"8\" y=\"2\" width=\"8\" height=\"5\" rx=\"1\"/><rect x=\"2\" y=\"17\" width=\"7\" height=\"5\" rx=\"1\"/><rect x=\"15\" y=\"17\" width=\"7\" height=\"5\" rx=\"1\"/><path d=\"M12 7v5M5.5 17v-5h13v5\"/>", "config": "<path d=\"M4 7h16M4 17h16M8 4v6m8 4v6\"/>", "chat": "<path d=\"M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z\"/>", "folder": "<path d=\"M3 8a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9H3V8Z\"/>", "arrow": "<path d=\"M5 12h14m-6-6 6 6-6 6\"/>"};
+ICONS.pin = '<path d="m15 3 6 6-3 1-4 4v3l-2 2-7-7 2-2h3l4-4 1-3ZM9 15l-6 6"/>';
+ICONS.web = '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/>';
 ICONS.plus = '<path d="M12 5v14M5 12h14"/>';
 ICONS.guide = '<path d="M12 5v16M12 5C9 3 5 3 3 4v15c3-1 6-1 9 2 3-3 6-3 9-2V4c-2-1-6-1-9 1Z"/>';
 function icon(type) { return `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[type] || ICONS.folder}</svg>`; }
@@ -500,6 +502,7 @@ function rt(zh, en, ja) { return ui(zh, en, ja); }
 const LEGACY_ENGINE = 'claude'; // sessions, captures and settings written before multi-engine support carry no engine id
 const FALLBACK_ENGINES = { default: LEGACY_ENGINE, nodes: [], engines: [{ id: LEGACY_ENGINE, label: 'Claude Code', short: 'Claude', emblem: '✳', color: '#d97757', aliases: [], cli: null, default: true, nodes: [],
   capabilities: { sessionId: 'assigned', steer: 'inject', streamingText: true, reasoning: true, permissions: 'auto', accounts: true, images: true, resources: ['commands', 'skills', 'agents', 'plugins', 'workflows', 'config'], usage: { cost: true }, search: true, wrapped: true, capture: true } }] };
+let initialEngineLoad;
 let ENGINES = [], ENGINE_DEFAULT = LEGACY_ENGINE, ENGINE_NODES = [], enginesLoaded = false;
 function setEngines(data) {
   const list = Array.isArray(data?.engines) && data.engines.length ? data.engines : FALLBACK_ENGINES.engines;
@@ -994,13 +997,13 @@ async function loadCounts() {
   const resourceEngine = state.resourceEngine, scope = state.scope;
   for (const type of Object.keys(CAPS)) {
     if (isResourceType(type) && !can(resourceEngine, 'resources', type)) continue;
-    if (CAPS[type].dashboard) continue; // 统计页无列表计数
+    if (CAPS[type].dashboard || type === state.type) continue; // 统计页无列表计数
     try {
       const { items, usagePending } = await api('GET', type);
       hydrateResourceUsage(items, type, resourceEngine, scope, usagePending);
       if (!Array.isArray(items) || ((SCOPED.includes(type) || type === 'plugins') && (resourceEngine !== state.resourceEngine || scope !== state.scope))) continue;
       document.querySelector(`.tab[data-type="${type}"] .cnt`).textContent = items.filter(it => matchOrigin(it, type)).length;
-      if (type === state.type) { state.items = items; renderList(); }
+
     } catch (e) {}
   }
 }
@@ -1027,6 +1030,7 @@ async function renderProductPage(type) {
 }
 
 async function switchType(type, updateRoute = true, initialKey = '') {
+  closeChatBrowser();
   if(updateRoute&&type==='sessions'&&state.type==='sessions'&&$('#chat-messages'))return;
   if (isResourceType(type) && !can(state.resourceEngine, 'resources', type)) {
     const compatible=resourceEngines().find(engine=>can(engine.id,'resources',type));
@@ -1037,7 +1041,7 @@ async function switchType(type, updateRoute = true, initialKey = '') {
   previewSidebar(false);
   if (state.editing && !confirm(t('unsaved'))) return;
   closeExpandedWindow();
-  if(state.type==='sessions'){rememberChatPage();sessionNavigation={items:state.items.slice(),current:chatView.sessionId||($('#chat-messages')?'__draft__':''),keyword:state.keyword,scroll:$('#list').scrollTop,page:{...listPage}};}
+  if(state.type==='sessions' && ($('#chat-messages') || state.items.length)){rememberChatPage();sessionNavigation={items:state.items.slice(),current:chatView.sessionId||($('#chat-messages')?'__draft__':''),keyword:state.keyword,scroll:$('#list').scrollTop,page:{...listPage}};}
   ++detailRevision;
   routeView = '';
   state.sessionDetail = false;
@@ -1066,7 +1070,12 @@ async function switchType(type, updateRoute = true, initialKey = '') {
   $('#filterbar').style.display = CAPS[type].filter ? 'flex' : 'none';
   $('#delBtn').textContent = type === 'plugins' ? t('uninstall') : t('del');
   localStorage.setItem('panel-section', type);
-  showEmpty(!initialKey && !(updateRoute && sessionNavigation?.current));
+  const draft = type === 'sessions' && !initialKey && !(updateRoute && sessionNavigation?.current);
+  if (draft && !enginesLoaded && initialEngineLoad) {
+    showEmpty(false);
+    const revision = detailRevision;
+    initialEngineLoad.then(() => { if (state.type === 'sessions' && detailRevision === revision && !state.current) startChatDraft(); });
+  } else showEmpty(!initialKey && !(updateRoute && sessionNavigation?.current));
   if (['connections','capabilities','settings'].includes(type)) { await renderProductPage(type); return; }
   if (type === 'guide') { renderUserGuide(); return; }
   if (type === 'proxy') { await renderProxyTab(); return; }
@@ -1081,6 +1090,7 @@ async function switchType(type, updateRoute = true, initialKey = '') {
       startRoutePoll();return;
     }
     startRoutePoll();
+    return;
   }
   try {
     const resourceEngine = state.resourceEngine, scope = state.scope;
@@ -1116,6 +1126,24 @@ function renderSessionEngines() {
     sessionEngine = button.dataset.sessionEngine; localStorage.setItem('panel-session-engine', sessionEngine); renderSessionEngines(); renderList();
   });
 }
+const pendingPins = new Set();
+let pinRevision = 0;
+async function toggleSessionPin(item) {
+  if (pendingPins.has(item.key)) return;
+  pendingPins.add(item.key);
+  try {
+    const { pinnedAt } = await api('PUT', `sessions/${encodeURIComponent(item.key)}/pin`, { pinned: !item.pinnedAt });
+    if (state.type !== 'sessions') return;
+    const current = state.items.find(row => row.key === item.key);
+    if (!current) return;
+    pinRevision++;
+    current.pinnedAt = pinnedAt;
+    if (pinnedAt) listPage.index = 0;
+    renderList();
+    if (pinnedAt) $('#list').scrollTop = 0;
+  } catch (error) { toast(error.message, false); }
+  finally { pendingPins.delete(item.key); }
+}
 let listPage = { key: '', index: 0 };
 const LIST_PAGE_SIZE = 80;
 function renderList({ revealCurrent = false } = {}) {
@@ -1130,6 +1158,7 @@ function renderList({ revealCurrent = false } = {}) {
     .filter(it => state.type !== 'sessions' || (matchesSessionEngine(it) && conversationSearch.matchesProject(it)))
     .filter(it => state.type !== 'inspector' || matchesCaptureFilters(it))
     .filter(it => !kw || (state.type === 'sessions' ? kw.trim().split(/\s+/).every(word => [it.name, it.description, it.key, it.cwd, it.gitBranch].filter(Boolean).join(' ').toLowerCase().includes(word)) : it.name.toLowerCase().includes(kw) || (it.description || '').toLowerCase().includes(kw)));
+  if (state.type === 'sessions') visibleItems.sort((a, b) => (b.pinnedAt || 0) - (a.pinnedAt || 0));
   const pageKey = JSON.stringify([state.type, state.resourceEngine, state.scope, state.origin, kw, sessionEngine, state.inspectorEngine, state.inspectorSession, state.inspectorPurpose]);
   const samePage = listPage.key === pageKey;
   if (!samePage) listPage = { key: pageKey, index: 0 };
@@ -1159,6 +1188,10 @@ function renderList({ revealCurrent = false } = {}) {
         div.querySelector('.nm').replaceChildren(sequence, name);
       }
       if (state.type === 'sessions') {
+        if (it.pinnedAt) {
+          const pin = document.createElement('span'); pin.className = 'session-pin'; pin.title = rt('已置顶', 'Pinned'); pin.setAttribute('aria-label', pin.title);
+          pin.innerHTML = icon('pin'); div.querySelector('.nm').prepend(pin);
+        }
         div.querySelector('.nm').appendChild(engineTag(it.engine || LEGACY_ENGINE));
       }
       if (state.type === 'skills' && state.resourceEngine !== defaultResourceEngine()) {
@@ -1191,10 +1224,10 @@ function renderList({ revealCurrent = false } = {}) {
         const menu = document.createElement('details'); menu.className = 'session-menu';
         const summary = document.createElement('summary'); summary.textContent = '···'; summary.setAttribute('aria-label', rt('会话操作', 'Session actions'));
         const actions = document.createElement('div'); actions.className = 'session-menu-actions';
-        for (const [action, label] of [['rename', rt('重命名', 'Rename')], ['delete', rt('删除会话', 'Delete session')]]) {
+        for (const [action, label] of [['pin', it.pinnedAt ? rt('取消置顶', 'Unpin') : rt('置顶', 'Pin')], ['rename', rt('重命名', 'Rename')], ['delete', rt('删除会话', 'Delete session')]]) {
           const button = document.createElement('button'); button.type = 'button'; button.textContent = label;
           if (action === 'delete') button.className = 'danger';
-          button.onclick = () => { menu.open = false; editSession(it, action); }; actions.append(button);
+          button.onclick = () => { menu.open = false; if (action === 'pin') toggleSessionPin(it); else editSession(it, action); }; actions.append(button);
         }
         menu.append(summary, actions); row.append(div, menu); fragment.append(row);
       } else fragment.appendChild(div);
@@ -1267,6 +1300,7 @@ function showEmpty(openDraft = true) {
 }
 
 async function openItem(key, displayName) {
+  closeChatBrowser();
   if (state.editing && !confirm(t('unsaved'))) return;
   state.editing = false;
   closeExpandedWindow();
@@ -1456,6 +1490,7 @@ $('#search').addEventListener('input', e => {
 
 // ---------- 会话回放 ----------
 async function loadReplay(id) {
+  closeChatBrowser();
   closeExpandedWindow();
   const revision = ++detailRevision;
   chatAbort?.abort();
@@ -2280,13 +2315,44 @@ _toBottom.onclick = () => _lastScrolled.scrollTo({ top: _lastScrolled.scrollHeig
 
 // ---------- 轻量 Markdown 渲染 ----------
 function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
-function inline(s) {
-  return esc(s)
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
-    .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<i>$2</i>')
-    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+function previewUrl(value, fromAddress = false) {
+  const raw = String(value || '').trim();
+  if (!raw || /[\s\\]/.test(raw)) return null;
+  try {
+    const absolute = /^https?:\/\//i.test(raw) ? raw : fromAddress && !raw.includes('://') ? 'https://' + raw : '';
+    const url = new URL(absolute);
+    return /^(https?:)$/.test(url.protocol) && !url.username && !url.password ? url : null;
+  } catch { return null; }
 }
+function messageLinks(source, markdown = false) {
+  const tokens = [];
+  const pattern = markdown ? /`([^`\n]+)`|\[([^\]\n]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>"'`，。；！？、（）【】]+)/gi : /(https?:\/\/[^\s<>"'`，。；！？、（）【】]+)/gi;
+  const text = String(source ?? '').replace(/\u0000/g, '\uFFFD').replace(pattern, (...match) => {
+    let html;
+    if (markdown && match[1] !== undefined) html = '<code>' + esc(match[1]) + '</code>';
+    else if (markdown && match[2] !== undefined) {
+      const label = esc(match[2]), href = match[3];
+      let allowed = false;
+      try { allowed = ['http:', 'https:', 'mailto:'].includes(new URL(href, location.href).protocol); } catch {}
+      html = allowed ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${label}</a>` : label;
+    } else {
+      const raw = match[0];
+      let href = raw.replace(/[.,!?:;\]]+$/, '');
+      const trailing = href.match(/\)+$/);
+      if (trailing) {
+        const extra = href.split(')').length - href.split('(').length;
+        if (extra > 0) href = href.slice(0, -Math.min(trailing[0].length, extra));
+      }
+      html = previewUrl(href) ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(href)}</a>${esc(raw.slice(href.length))}` : esc(raw);
+    }
+    tokens.push(html);
+    return '\u0000' + (tokens.length - 1) + '\u0000';
+  });
+  let html = esc(text);
+  if (markdown) html = html.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<i>$2</i>');
+  return html.replace(/\u0000(\d+)\u0000/g, (_, index) => tokens[index]);
+}
+function inline(s) { return messageLinks(s, true); }
 function md(src) {
   const lines = src.split(/\r?\n/);
   let html = '', i = 0;
@@ -2951,14 +3017,16 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && st
 async function refreshSessionList() {
   if (state.type !== 'sessions' || sessionListRefreshing) return;
   const epoch = sessionListEpoch;
+  const pinsAtStart = pinRevision;
   sessionListRefreshing = true;
   try {
-    const { items } = await api('GET', 'sessions');
+    const firstLoad = !!$('#list [role="status"]');
+    const { items } = await api('GET', firstLoad ? 'sessions?cachedPeers=1' : 'sessions');
     if (state.type !== 'sessions' || epoch !== sessionListEpoch || document.querySelector('.session-menu[open], .session-dialog[open]')) return;
     if (chatView.optimisticItem && !items.some(item => item.key === chatView.sessionId)) items.unshift(chatView.optimisticItem);
     else if (items.some(item => item.key === chatView.sessionId)) chatView.optimisticItem = null;
-    const signature = rows => JSON.stringify(rows.map(item => [item.key, item.name, item.description, item.titleSource]));
-    if (signature(items) === signature(state.items)) return;
+    const signature = rows => JSON.stringify(rows.map(item => [item.key, item.name, item.description, item.titleSource, item.pinnedAt, item.running]));
+    if (pinsAtStart !== pinRevision || pendingPins.size || (!firstLoad && signature(items) === signature(state.items))) return;
     const list = $('#list'), scroll = list.scrollTop;
     const focusedId = list.contains(document.activeElement) ? document.activeElement.closest('.session-row')?.querySelector('[data-sid]')?.dataset.sid : '';
     state.items = items; renderList(); list.scrollTop = scroll;
@@ -2966,7 +3034,10 @@ async function refreshSessionList() {
     if (selected && $('#chat-messages')) $('#title').firstChild.textContent = selected.name;
     if (focusedId) Array.from(list.querySelectorAll('[data-sid]')).find(item => item.dataset.sid === focusedId)?.focus({ preventScroll: true });
     document.querySelector('.tab[data-type="sessions"] .cnt').textContent = items.length;
-  } catch {} finally { sessionListRefreshing = false; }
+  } catch (error) {
+    const loading = $('#list [role="status"]');
+    if (loading && state.type === 'sessions' && epoch === sessionListEpoch) loading.textContent = t('loadFail') + error.message;
+  } finally { sessionListRefreshing = false; }
 }
 async function refreshOpenChat() {
   const v = chatView;
@@ -3186,6 +3257,51 @@ document.addEventListener('scroll', closePanelSelects, true);
 function syncChatPicker(select) { panelSelects.get(select)?.sync(); }
 function enhanceChatPicker(select) { enhancePanelSelect(select); }
 document.addEventListener('pointerdown', e => { document.querySelectorAll('.session-menu[open]').forEach(menu => { if (!menu.contains(e.target)) menu.open = false; }); });
+let chatBrowser = null;
+function closeChatBrowser() {
+  if (!chatBrowser) return;
+  const dialog = chatBrowser;
+  chatBrowser = null;
+  dialog.querySelector('iframe')?.remove();
+  dialog.close(); dialog.remove();
+}
+function openChatBrowser(url) {
+  if (!chatBrowser) {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'chat-browser'; dialog.setAttribute('aria-labelledby', 'chat-browser-title');
+    dialog.innerHTML = `<header><h2 id="chat-browser-title">${icon('web')}${esc(rt('网页预览', 'Web preview'))}</h2><button type="button" class="btn" data-close>${esc(rt('关闭', 'Close'))}</button></header>
+      <form><input name="address" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="${esc(rt('网址', 'Web address'))}" placeholder="https://example.com" required><button class="btn primary">${esc(rt('打开', 'Open'))}</button></form>
+      <div class="web-content"></div><footer><span role="status">${esc(rt('输入网址，或点击对话里的链接。', 'Enter an address or click a conversation link.'))}</span><a target="_blank" rel="noopener noreferrer" hidden>${esc(rt('打开原网页 ↗', 'Open original ↗'))}</a></footer>`;
+    dialog.querySelector('[data-close]').onclick = closeChatBrowser;
+    dialog.oncancel = event => { event.preventDefault(); closeChatBrowser(); };
+    dialog.querySelector('form').onsubmit = event => {
+      event.preventDefault();
+      const address = event.currentTarget.elements;
+      const next = previewUrl(address.namedItem('address').value, true);
+      if (next) openChatBrowser(next);
+      else { const field = address.namedItem('address'); field.setCustomValidity(rt('请输入有效的 HTTP 或 HTTPS 网址', 'Enter a valid HTTP or HTTPS address')); field.reportValidity(); }
+    };
+    dialog.querySelector('input').oninput = event => event.target.setCustomValidity('');
+    chatBrowser = dialog; document.body.append(dialog); dialog.showModal(); dialog.querySelector('input').focus();
+  }
+  if (!url) return;
+  const dialog = chatBrowser, field = dialog.querySelector('input');
+  field.value = url.href; field.setCustomValidity('');
+  const original = dialog.querySelector('footer a'); original.href = url.href; original.hidden = false;
+  dialog.querySelector('[role="status"]').textContent = rt('若网站限制嵌入，可打开原网页。', 'If this site restricts embedding, open the original page.');
+  const frame = document.createElement('iframe');
+  frame.title = url.host; frame.referrerPolicy = 'no-referrer';
+  frame.setAttribute('sandbox', 'allow-scripts allow-forms');
+  frame.src = url.href; dialog.querySelector('.web-content').replaceChildren(frame);
+}
+document.addEventListener('click', event => {
+  if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+  const link = event.target.closest('.chat-message-body a[href]');
+  if (!link) return;
+  const url = previewUrl(link.getAttribute('href'));
+  if (url) { event.preventDefault(); openChatBrowser(url); }
+});
+window.addEventListener('pagehide', closeChatBrowser);
 function chatChrome(title, path) {
   state.editing = false; setEditMode(false);
   $('#empty').style.display = 'none'; $('#metabar').style.display = 'none'; $('#render').classList.add('wide');
@@ -3199,6 +3315,7 @@ function startChatDraft() {
   renderChat();
 }
 function openNewChat() {
+  closeChatBrowser();
   if ($('.chat-launch')) {
     const location = conversationSearch.draftLocation();
     if (location) { Object.assign(chatView, location); loadChatExecution(chatView); }
@@ -3212,6 +3329,7 @@ function openNewChat() {
   startChatDraft();
 }
 async function openSessionChat(id, { fresh=false } = {}) {
+  closeChatBrowser();
   rememberChatPage();
   chatAbort?.abort();
   closeExpandedWindow();
@@ -3221,7 +3339,7 @@ async function openSessionChat(id, { fresh=false } = {}) {
   chatChrome(state.items.find(item => item.key === id)?.name || t('tabs').sessions, '');
   $('#render').innerHTML = `<p class="route-muted">${esc(rt('正在读取会话…', 'Loading session…'))}</p>`;
   try {
-    const d = await api('GET', `sessions/${encodeURIComponent(id)}/messages`);
+    const [d] = await Promise.all([api('GET', `sessions/${encodeURIComponent(id)}/messages`), initialEngineLoad]);
     if (state.type !== 'sessions' || state.current !== id || revision !== detailRevision) return;
     if (!Array.isArray(d.messages)) throw new Error(rt('会话数据暂未就绪，请稍后重试', 'Session data is not ready. Please try again.'));
     chatView = { sessionId: id, cwd: d.project || '', worktree: d.worktree, lastLoginFailure: d.lastLoginFailure, messages: d.messages, truncated: d.truncated, historyBefore: d.historyBefore, revision: d.revision, machineId: d.machineId, engine: d.engine || LEGACY_ENGINE };
@@ -3303,7 +3421,7 @@ function renderChat() {
     </div></header>
     <div class="chat-conversation"><div class="chat-messages" id="chat-messages"></div><div class="chat-scroll-controls" hidden><button type="button" id="chat-scroll-top" title="${esc(rt('会话顶部', 'Top of conversation'))}" aria-label="${esc(rt('会话顶部', 'Top of conversation'))}">↑</button><button type="button" id="chat-scroll-bottom" title="${esc(rt('会话底部', 'Bottom of conversation'))}" aria-label="${esc(rt('会话底部', 'Bottom of conversation'))}">↓</button></div></div>
     <form class="chat-compose" id="chat-form">${v.lastLoginFailure ? `<p class="chat-warning" id="chat-login-failure" role="status">${esc(v.lastLoginFailure.hint)}</p>` : ''}<div id="chat-attachments" class="chat-attachments" hidden></div><textarea autocomplete="off" autocorrect="off" spellcheck="false" id="chat-prompt" rows="3" placeholder="${esc(existing ? rt('在这个会话里继续… 可粘贴图片', 'Continue this session… Paste images here') : rt('描述你想完成的任务…', 'Describe what you’d like to get done…', '取り組みたいタスクを入力…'))}"></textarea>
-      <div class="chat-compose-footer"><button type="button" class="btn chat-attach" id="chat-attach"${can(v.engine, 'images') ? '' : ' hidden'}>${esc(rt('＋ 图片', '+ Image'))}</button><input type="file" id="chat-image-file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>${enginePicker}<span id="chat-status">${esc(rt('回车发送 · Shift + 回车换行', 'Enter to send · Shift + Enter for a new line'))}</span>${launch ? '<div class="launch-model"></div>' : ''}<button class="btn" type="button" id="chat-steer" title="${esc(rt('中断当前回复，立即处理这条消息', 'Interrupt the current reply and process this message', '進行中の応答を中断してこのメッセージを処理'))}" hidden>${esc(rt('中断并发送', 'Interrupt & send', '中断して送信'))}</button><button class="btn primary" type="submit" id="chat-send" aria-label="${esc(rt('发送', 'Send'))}">${launch ? '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m-7 7 7-7 7 7"/></svg>' : esc(rt('发送', 'Send'))}</button><button class="btn" type="button" id="chat-stop" hidden>${esc(rt('停止', 'Stop'))}</button></div>
+      <div class="chat-compose-footer"><button type="button" class="btn chat-web-open" id="chat-browser-open" title="${esc(rt('打开网页预览', 'Open web preview'))}" aria-label="${esc(rt('打开网页预览', 'Open web preview'))}">${icon('web')}</button><button type="button" class="btn chat-attach" id="chat-attach"${can(v.engine, 'images') ? '' : ' hidden'}>${esc(rt('＋ 图片', '+ Image'))}</button><input type="file" id="chat-image-file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>${enginePicker}<span id="chat-status">${esc(rt('回车发送 · Shift + 回车换行', 'Enter to send · Shift + Enter for a new line'))}</span>${launch ? '<div class="launch-model"></div>' : ''}<button class="btn" type="button" id="chat-steer" title="${esc(rt('中断当前回复，立即处理这条消息', 'Interrupt the current reply and process this message', '進行中の応答を中断してこのメッセージを処理'))}" hidden>${esc(rt('中断并发送', 'Interrupt & send', '中断して送信'))}</button><button class="btn primary" type="submit" id="chat-send" aria-label="${esc(rt('发送', 'Send'))}">${launch ? '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m-7 7 7-7 7 7"/></svg>' : esc(rt('发送', 'Send'))}</button><button class="btn" type="button" id="chat-stop" hidden>${esc(rt('停止', 'Stop'))}</button></div>
     </form>
   </section>`;
   const settingsPanel = $('#chat-settings-panel'), settingsToggle = $('#chat-settings-toggle');
@@ -3400,6 +3518,7 @@ function renderChat() {
     finally { v.readingImages = false; if (chatView === v && $('#chat-send')) { paintChatAttachments(v); updateChatSendState(v); } }
   };
   $('#chat-prompt').onpaste = e => { const files = Array.from(e.clipboardData?.items || []).filter(item => item.kind === 'file' && item.type.startsWith('image/')).map(item => item.getAsFile()).filter(Boolean); if (files.length) { e.preventDefault(); addImages(files); } };
+  $('#chat-browser-open').onclick = () => openChatBrowser();
   $('#chat-attach').onclick = () => $('#chat-image-file').click();
   $('#chat-image-file').onchange = e => { addImages(Array.from(e.target.files)); e.target.value = ''; };
   if (launch) {
@@ -3576,7 +3695,8 @@ function createChatTurn(v, prompt, images, id = crypto.randomUUID()) {
     paintChatTiming(node, answer);
     if (turn.finished) return;
     if (paintFrame) { cancelAnimationFrame(paintFrame); paintFrame = 0; }
-    if (article.querySelector('.chat-warning') && (timing.isError || timing.error)) article.querySelector('.chat-warning').remove();
+    article.querySelector('.chat-upstream-retry')?.remove();
+    if (timing.isError || timing.error) article.querySelector('.chat-warning')?.remove();
     turn.finished = true; article.classList.remove('is-streaming', 'is-waiting'); article.removeAttribute('aria-busy'); activity.remove();
     turn.transcriptText = answer.text; // Status/error notices below are not native assistant text.
     answer.tools.forEach(tool => { if (tool.state === 'running') { tool.state = 'interrupted'; paintChatTool(node, tool); } });
@@ -3712,8 +3832,9 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
       if (active && !active.finished) {
         active.phase = rt(run.taskState.phase, ...ConversationState.labels(run.taskState.phase));
         active.label.textContent = active.phase;
-        let detail = active.article.querySelector('.chat-warning');
-        if (!detail) { detail = document.createElement('small'); detail.className = 'chat-warning'; active.article.append(detail); }
+        const retry = payload.kind === 'upstream_retry' || /^(上游返回 \d{3}|上游请求失败|Codex 账号「.*」返回 HTTP \d{3})/.test(payload.warning || '');
+        let detail = active.article.querySelector(retry ? '.chat-upstream-retry' : '.chat-warning:not(.chat-upstream-retry)');
+        if (!detail) { detail = document.createElement('small'); detail.className = retry ? 'chat-warning chat-upstream-retry' : 'chat-warning'; active.article.append(detail); }
         detail.textContent = payload.warning;
       }
       updateChatSendState(v); updateStatus(); return;
@@ -3752,6 +3873,7 @@ async function streamChat(v, { turn, prompt, images, reconnect = false }) {
     }
     if (!current) { if (kind === 'done') { updateChatSendState(v); refreshSessionList(); } updateStatus(); return; }
     const answer = current.answer;
+    if (['text', 'reasoning', 'tool'].includes(kind)) current.article.querySelector('.chat-upstream-retry')?.remove();
     // Reasoning is engine-neutral: any engine that streams it gets the same collapsible summary.
     if (kind === 'reasoning') {
       answer.reasoning ||= [];
@@ -3910,7 +4032,7 @@ function appendChatMessage(box, role, text, timing = {}) {
   box.querySelector('.chat-welcome')?.remove();
   const article = document.createElement('article'); article.className = 'chat-message ' + role;
   const label = document.createElement('div'); label.className = 'chat-message-label'; label.textContent = role === 'user' ? rt('你', 'You', 'あなた') : engineLabel(chatView?.engine || LEGACY_ENGINE);
-  const body = document.createElement('div'); body.className = 'chat-message-body'; body.innerHTML = role === 'assistant' ? md(text) : esc(timing.interrupted && !text && !timing.images?.length ? rt('未找到这条消息的原文', 'Original message unavailable', '元のメッセージが見つかりません') : ConversationState.messageText(text, timing.images)).replace(/\n/g, '<br>');
+  const body = document.createElement('div'); body.className = 'chat-message-body'; body.innerHTML = role === 'assistant' ? md(text) : messageLinks(timing.interrupted && !text && !timing.images?.length ? rt('未找到这条消息的原文', 'Original message unavailable', '元のメッセージが見つかりません') : ConversationState.messageText(text, timing.images)).replace(/\n/g, '<br>');
   article.append(label, body); box.append(article); paintChatTiming(body, { role, ...timing }); return body;
 }
 
@@ -4647,9 +4769,11 @@ function addInlineExpansion(parent, content) {
   button.onclick = () => content.setExpanded(!content.classList.contains('show-full-content'));
   parent.append(button); update();
 }
-function installWindowControls() {
-  document.querySelectorAll('#render .mermaid-canvas, #render pre, #render .chart, #render .bubble, #render .chat-message, #render .capture-context, #render .chat-messages, #render .route-account, #render .card, #render .leg-sessions, #render .chat-tool, #render .route-empty, #render .account-usage-row, #render #river, #editor').forEach(node => {
-    if (node.classList.contains('is-expanded-window') || node.windowExpandButton?.isConnected) return;
+const expandableSelector = '.mermaid-canvas, pre, .chart, .bubble, .chat-message, .capture-context, .chat-messages, .route-account, .card, .leg-sessions, .chat-tool, .route-empty, .account-usage-row, #river, #editor';
+function installWindowControls(root) {
+  const candidates = root.querySelectorAll(expandableSelector);
+  for (const node of root.matches(expandableSelector) ? [root, ...candidates] : candidates) {
+    if (node.classList.contains('is-expanded-window') || node.windowExpandButton?.isConnected) continue;
     node.dataset.expandable = 'true';
     let host = node;
     if (node.matches('pre, textarea')) {
@@ -4663,11 +4787,16 @@ function installWindowControls() {
     host.append(button);
     if (node.matches('pre')) { const copy = codeCopyButton(node); copy.classList.add('window-copy'); host.append(copy); }
     node.windowExpandButton = button;
-  });
+  }
 }
-const windowObserver = new MutationObserver(installWindowControls);
+const windowObserver = new MutationObserver(records => {
+  for (const record of records) for (const root of record.addedNodes) {
+    if (root.nodeType === 1 && root.isConnected) installWindowControls(root);
+  }
+});
 windowObserver.observe($('#render'), { childList: true, subtree: true });
-installWindowControls();
+installWindowControls($('#render'));
+installWindowControls($('#editor'));
 document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
     const root = expandedWindow?.node || $('#render');
@@ -4678,17 +4807,22 @@ document.addEventListener('keydown', e => {
 });
 
 // ---------- 初始化 ----------
-// Engines load first so pickers, tabs and capability checks reflect what the server actually runs.
-(async () => {
-  await loadEngines();
+// Paint the navigation before any network request can hold up the first frame.
+installPanelSelects();
+new MutationObserver(updateBrowserTitle).observe($('#title').firstChild, { characterData: true });
+const firstSection = location.pathname.split('/')[1] || localStorage.getItem('panel-section') || 'sessions';
+state.type = Object.hasOwn(CAPS, firstSection) ? firstSection : 'sessions';
+applyLang();
+initialEngineLoad = loadEngines().then(() => {
   const savedResource = localStorage.getItem('panel-resource-engine');
   state.resourceEngine = hasEngine(savedResource) && can(savedResource, 'resources') ? savedResource : defaultResourceEngine();
   statsEngine = knownEngine(statsEngine);
-  if (sessionEngine !== 'all' && !hasEngine(sessionEngine)) sessionEngine = 'all';
-  installPanelSelects();
-  new MutationObserver(updateBrowserTitle).observe($('#title').firstChild, { characterData: true });
-  applyLang();
-  restoreRoute();
+  updateWorkspaceChrome();
+});
+(async () => {
+  if (firstSection !== 'sessions') await initialEngineLoad;
+  await restoreRoute();
+  await initialEngineLoad;
   loadCounts();
   loadProjects();
 })();

@@ -242,3 +242,14 @@ test('every turn ends explicitly: closing a job or a silent idle engine ends ope
   assert.deepEqual(run.job.openTurns(), []);
   manager.shutdown();
 });
+
+test('listing busy flags and forwarding warnings never recover archived runs', () => {
+  const manager = createSessionManager({
+    history: { isOriginal: () => { throw Error('unexpected disk lookup'); } },
+    runStore: { recover() {}, list: () => [], find: () => { throw Error('unexpected journal recovery'); } },
+  });
+  try {
+    assert.equal(manager.busy('archived-session'), false);
+    manager.warn('archived-session', 'upstream failed', 'upstream_retry');
+  } finally { manager.shutdown(); }
+});

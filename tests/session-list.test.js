@@ -32,3 +32,17 @@ test('external transcript updates move existing sessions ahead of stale CLI hist
   assert.equal(sessions[0].last, 500);
   assert.equal(sessions[0].title, 'Renamed older session');
 });
+
+test('only upstream inference failures reach the active turn, model discovery stays in diagnostics', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  const warnings = [];
+  const context = vm.createContext({ manager: { busy: () => true, current: () => ({ engine: 'claude' }), warn: (...args) => warnings.push(args) } });
+  vm.runInContext(source.slice(source.indexOf('function warnUpstream('), source.indexOf('function recordExchange(')), context);
+  const failed = { status: 502, sessionId: 'active', responseBody: '{"error":"上游连接失败或超时"}' };
+  context.warnUpstream({ ...failed, path: '/codex-subscription/v1/models' });
+  context.warnUpstream({ ...failed, path: '/v1/messages', observation: { purpose: 'title' } });
+  context.warnUpstream({ ...failed, path: '/v1/messages?beta=true' });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0][1], /连接失败或超时（HTTP 502）/);
+  assert.equal(warnings[0][2], 'upstream_retry');
+});

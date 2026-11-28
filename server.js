@@ -233,6 +233,7 @@ const DATA_DIR = require('./core/data-dir').resolveDataDir({ claudeDir: CLAUDE_D
 const BIND_HOST = process.env.MY_AGENTS_BIND || '127.0.0.1';
 const auth = HISTORY_WORKER ? null : require('./http/auth').createAuth({ port: PORT, bindHost: BIND_HOST, dir: DATA_DIR, publicHosts: (process.env.MY_AGENTS_PUBLIC_HOSTS || '').split(',').filter(Boolean) });
 const sessionStore = createSessionStore(DATA_DIR);
+const sessionPins = require('./core/session-pins').createSessionPins(DATA_DIR);
 
 const TYPES = {
   commands:  { dir: path.join(CLAUDE_DIR, 'commands'),  layout: 'flat', ext: '.md' },  // <name>.md
@@ -564,7 +565,7 @@ const encodeProject = p => p.replace(/[\/.]/g, '-');
 // ---------- 航程 Voyage：把散乱的会话织成一条时间线 + 故事线 ----------
 // 纯本地启发式，全部来自 history.jsonl（长期保留，比 transcript 完整）。
 function voyageData() {
-  const hasT = new Set([...transcriptFiles().sessionFiles].map(fp => path.basename(fp, '.jsonl')));
+  const hasT = new Set([...transcriptFiles(1).sessionFiles].map(fp => path.basename(fp, '.jsonl')));
   const map = new Map();
   for (const e of readHistory()) {
     if (!e.sessionId || !e.timestamp) continue;
@@ -628,15 +629,19 @@ function voyageData() {
 
 // 读 transcript 开头，取工作目录与第一条用户提问。
 // `claude -p`（含面板里发起的对话）不写 history.jsonl，只能从 transcript 本身补齐项目与标题。
+const transcriptHeadCache = new Map();
 function transcriptHead(fp) {
   const head = { cwd: '', title: '' };
-  let text = '';
+  let text = '', revision;
   try {
+    const stat = fs.statSync(fp); revision = stat.mtimeMs + ':' + stat.size;
+    const hit = transcriptHeadCache.get(fp);
+    if (hit?.revision === revision) return hit.head;
     const fd = fs.openSync(fp, 'r');
-    const buf = Buffer.alloc(256 * 1024);
-    const n = fs.readSync(fd, buf, 0, buf.length, 0);
-    fs.closeSync(fd);
-    text = buf.toString('utf8', 0, n);
+    try {
+      const buf = Buffer.alloc(Math.min(stat.size, 256 * 1024));
+      text = buf.toString('utf8', 0, fs.readSync(fd, buf, 0, buf.length, 0));
+    } finally { fs.closeSync(fd); }
   } catch { return head; }
   for (const line of text.split('\n')) {
     let d; try { d = JSON.parse(line); } catch { continue; }
@@ -647,6 +652,8 @@ function transcriptHead(fp) {
     }
     if (head.cwd && head.title) break;
   }
+  transcriptHeadCache.set(fp, { head, revision });
+  if (transcriptHeadCache.size > 1000) transcriptHeadCache.delete(transcriptHeadCache.keys().next().value);
   return head;
 }
 // 用户消息里真正由人输入的文本（排除工具返回、命令回显等系统注入内容）
@@ -814,12 +821,16 @@ function readSessionUserPage({ item, page }) {
   return require('./core/session-previews').userMessagePage(sessionMessages(item.id, { limit: 0 }), page, { ...item, historyAvailable: !!fp });
 }
 function listSessions() {
+  const proxyRuns = new Set(accountRouter.sessions().items.filter(row => row.running).map(row => row.id));
+  return collectSessionRows(id => manager.busy(id), proxyRuns);
+}
+function collectSessionRows(isBusy, proxyRuns) {
   const sessionMetadata = { ...(typeof conversations !== 'undefined' ? conversations.read() : {}), ...sessionStore.read() };
   // 只列磁盘上仍有 transcript 的会话——这些才能查看详情/回放/关联抓包。
   // Claude Code 约 30 天清理 transcript，但 history.jsonl 会长期保留，
   // 若按 history 列会出现大量点开就 404 的“幽灵会话”。
   const idToFile = new Map();
-  for (const fp of transcriptFiles().sessionFiles) idToFile.set(path.basename(fp, '.jsonl'), fp);
+  for (const fp of transcriptFiles(1).sessionFiles) idToFile.set(path.basename(fp, '.jsonl'), fp);
   const map = new Map();
   for (const e of readHistory()) {
     if (!e.sessionId || !idToFile.has(e.sessionId)) continue;
@@ -860,9 +871,9 @@ function listSessions() {
     const meta = sessionMetadata[s.id] || {}, manual = isManualTitle(meta, s.firstTitle);
     const labels = idToFile.has(s.id) ? require('./core/transcript-labels').transcriptLabels(idToFile.get(s.id)) : {};
     const native = idToFile.has(s.id) || s.native === true;
-    const pendingInput = manager.busy(s.id);
+    const pendingInput = isBusy(s.id);
     const automatic = meta.autoTitle && (pendingInput || meta.autoTitleAt >= (s.promptAt || 0)) ? meta.autoTitle : s.promptAt ? s.title : meta.title || s.title;
-    return { ...s, ...labels, native, latestPrompt: s.title, project: labels.cwd || s.project, running: manager.busy(s.id) || !!accountRouter.sessions().items.find(item => item.id === s.id)?.running, ...(meta.worktree ? { worktree: meta.worktree } : {}), ...(meta.node ? { node: meta.node } : {}), machineId: meta.machineId || (meta.node && meta.node !== 'local' ? meta.node : machineId()), engine: s.engine || 'claude', title: manual ? meta.title : labels.sessionName || automatic || meta.title || s.id, titleSource: manual ? 'manual' : 'auto', last: Math.max(s.last, meta.lastAt || 0) };
+    return { ...s, ...labels, native, latestPrompt: s.title, project: labels.cwd || s.project, running: pendingInput || proxyRuns.has(s.id), ...(meta.worktree ? { worktree: meta.worktree } : {}), ...(meta.node ? { node: meta.node } : {}), machineId: meta.machineId || (meta.node && meta.node !== 'local' ? meta.node : machineId()), engine: s.engine || 'claude', title: manual ? meta.title : labels.sessionName || automatic || meta.title || s.id, titleSource: manual ? 'manual' : 'auto', last: Math.max(s.last, meta.lastAt || 0) };
   }).sort((a, b) => b.last - a.last);
 }
 
@@ -876,7 +887,7 @@ function transcriptPathFor(id) {
   // Claude transcript must be discoverable immediately after its first turn.
   if (Date.now() - transcriptPathsAt < 2000 && codexSessions.pathFor(id)) return '';
   transcriptPaths.clear();
-  for (const fp of transcriptFiles().sessionFiles) {
+  for (const fp of transcriptFiles(1).sessionFiles) {
     transcriptPaths.set(path.basename(fp, '.jsonl'), fp);
   }
   transcriptPathsAt = Date.now();
@@ -1032,7 +1043,7 @@ const shortModel = m => m.replace(/^claude-/, '').replace(/-\d{8}$/, '');
 const fmtK = n => n >= 1e9 ? (n / 1e9).toFixed(1) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n);
 
 // 递归收集全部 .jsonl（会话目录下还有 subagent 子目录，ccusage 也会统计它们）
-function transcriptFiles() {
+function transcriptFiles(maxDepth = 4) {
   const projRoot = path.join(CLAUDE_DIR, 'projects');
   const files = [];
   const sessionFiles = new Set(); // 仅顶层会话文件用于会话计数
@@ -1042,7 +1053,7 @@ function transcriptFiles() {
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
       const fp = path.join(dir, e.name);
-      if (e.isDirectory()) { if (depth < 4) walk(fp, depth + 1); }
+      if (e.isDirectory()) { if (depth < maxDepth) walk(fp, depth + 1); }
       else if (e.name.endsWith('.jsonl')) {
         files.push(fp);
         if (depth === 1) sessionFiles.add(fp);
@@ -1162,7 +1173,7 @@ function extractText(content) {
 const { createTranscriptSearch, searchMachines } = require('./core/transcript-search');
 const searchTranscripts = createTranscriptSearch({
   files: () => [
-    ...Array.from(transcriptFiles().sessionFiles, fp => ({ session: path.basename(fp, '.jsonl'), engine: 'claude', path: fp })),
+    ...Array.from(transcriptFiles(1).sessionFiles, fp => ({ session: path.basename(fp, '.jsonl'), engine: 'claude', path: fp })),
     ...Array.from(codexSessions.files(), ([session, fp]) => ({ session, engine: 'codex', path: fp })),
   ],
   claudeUserText: transcriptUserText,
@@ -1634,7 +1645,7 @@ function linkCaptureSessions() {
 
 function captureOwners(ids) {
   const wanted = new Set(ids), owners = new Map();
-  for (const file of transcriptFiles().sessionFiles) {
+  for (const file of transcriptFiles(1).sessionFiles) {
     const sessionId = path.basename(file, '.jsonl').toLowerCase();
     for (const record of parsedFor(file)?.records || []) {
       const id = record.key.split('|')[0];
@@ -1713,15 +1724,16 @@ function summarizeMessage(m) {
 
 // Upstream failures seen by the proxies surface as warnings in the session's active turn.
 function warnUpstream(rec) {
-  if (rec.status < 400 || !rec.sessionId) return;
-  const run = manager.get(rec.sessionId);
-  if (!run) return;
-  const meta = registry.get(run.engine)?.meta || {};
-  if (run.engine === 'codex' && rec.upstreamId && rec.upstreamName) {
-    manager.warn(rec.sessionId, 'Codex 账号「' + rec.upstreamName + '」返回 HTTP ' + rec.status + '。本轮按账号路由策略处理。');
-    return;
-  }
-  manager.warn(rec.sessionId, `上游返回 ${rec.status}，${meta.short || run.engine} 可能正在重试。${meta.upstreamHint || ''}。`);
+  if (rec.status < 400 || !rec.sessionId || !manager.busy(rec.sessionId)) return;
+  const route = rec.path.split('?')[0];
+  if (!/\/(?:messages|responses|chat\/completions)$/.test(route)) return;
+  const purpose = rec.observation?.purpose;
+  if (purpose && !['model_request', 'compaction'].includes(purpose)) return;
+  const run = manager.current(rec.sessionId);
+  const source = run.engine === 'codex' && rec.upstreamName ? `Codex 账号「${rec.upstreamName}」` : '模型上游';
+  const networkError = /连接失败或超时|ETIMEDOUT|ECONNRESET|connection timed out/i.test((rec.responseBody || '').slice(0, 512));
+  const reason = networkError ? '连接失败或超时' : '请求失败';
+  manager.warn(rec.sessionId, `${source}${reason}（HTTP ${rec.status}），正在等待本轮后续响应。`, 'upstream_retry');
 }
 function recordExchange(reqPath, status, durationMs, reqBody, resBody, isStream, reqHeaders, resEncoding, upstreamId, upstreamName, requestInfo = {}) {
   resBody = decodeBody(resBody, resEncoding);
@@ -1949,9 +1961,15 @@ const executionMachines = () => {
 const workspaceStore = require('./core/workspaces').createWorkspaces({ dir: DATA_DIR, selfId: machineId, machines: executionMachines, hostFor: id => registry.node(id === machineId() ? 'local' : id)?.host, leaderId: () => cluster?.status().leader || '' });
 const conversations = require('./core/conversations').createConversations({ dir: DATA_DIR, publish: record => { const leader = cluster?.status().leader; if (leader && leader !== machineId()) return clusterNetwork?.call(leader, 'conversations.put', record, { timeout: 5000 }); } });
 const sessionDirectory = require('./core/session-directory').createSessionDirectory({
-  local: listSessions, selfId: machineId,
+  local: listSessions, localList: listPanelSessions, selfId: machineId,
   peers: () => registry.nodes().filter(node => node.id !== 'local' && node.peer).map(node => ({ id: node.id, peer: clusterNetwork?.peer(node.id) || node.peer })),
 });
+// Catalog scans can parse many native transcripts. Keep them off the HTTP and gateway event loop.
+function listPanelSessions() {
+  return historyWorker.read('sessionList', {
+    running: manager.running(), proxyRuns: accountRouter.sessions().items.filter(row => row.running).map(row => row.id),
+  });
+}
 const readHarnessHistory = require('./engines/deepseek/history').createHarnessHistory(DATA_DIR);
 function restoreInterruptedInputs(sessionId, messages) {
   const ids = new Set(messages.filter(m => m.interrupted && !m.text && !m.images?.length).map(m => m.id));
@@ -1967,7 +1985,7 @@ async function machineHistoryPage(id, page) {
   const native = await readHarnessHistory(id, page);
   if (native) return native.unchanged ? native : pageSessionMessages(native, page);
   const saved = conversations.get(id);
-  if (saved?.engine !== 'deepseek' || !saved.messages?.length) return sessionHistoryPage(id, page);
+  if (saved?.engine !== 'deepseek' || !saved.messages?.length) return historyWorker.read('messages', { id, page }, { cache: false });
   return checkpointPage(saved, page);
 }
 function checkpointPage(saved, page) {
@@ -2876,6 +2894,18 @@ const server = http.createServer(async (req, res) => {
 
     // ---- 会话历史 ----
     if (type === 'sessions') {
+      if (req.method === 'PUT' && parts.length === 4 && parts[3] === 'pin') {
+        try {
+          const { pinned } = JSON.parse(await readBody(req, 1024));
+          const input = { id: decodeURIComponent(parts[2]), pinned };
+          if (cluster?.status().enabled && !cluster.canStart()) {
+            const leader = cluster.status().leader;
+            if (!leader) return sendJSON(res, 409, { error: '主节点尚未就绪，请稍后重试' });
+            return sendJSON(res, 200, await clusterNetwork.call(leader, 'sessions.pin', input, { timeout: 5000 }));
+          }
+          return sendJSON(res, 200, sessionPins.set(input));
+        } catch (error) { return sendJSON(res, 400, { error: error.message }); }
+      }
       if ((req.method === 'PATCH' || req.method === 'DELETE') && parts.length === 3) {
         const id = decodeURIComponent(parts[2]);
         if (!listSessions().some(s => s.id === id)) return sendJSON(res, 404, { error: T(lang, 'errNotFound') });
@@ -2892,10 +2922,11 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'GET' && parts.length === 2) {
         res.setHeader('Cache-Control', 'no-store');
-        const directory = await sessionDirectory.list({ query: url.searchParams.get('q') || '' });
+        const directory = await sessionDirectory.list({ query: url.searchParams.get('q') || '', cachedPeers: url.searchParams.get('cachedPeers') === '1' });
+        const pins = sessionPins.read();
         const items = directory.sessions.map(s => ({
           name: (s.title || s.id).slice(0, 80),
-          key: s.id,
+          key: s.id, pinnedAt: Object.hasOwn(pins, s.id) ? pins[s.id] : 0,
           description: `${s.machineId} · ${path.basename(s.repository || s.project || '') || '?'}${s.gitBranch ? ' · ' + s.gitBranch : ''}${s.workspaceLabel ? ' · ' + s.workspaceLabel : ''} · ${s.last ? new Date(s.last).toISOString().slice(0, 16).replace('T',' ') : '?'}${s.latestPrompt ? ' · ' + s.latestPrompt.slice(0, 100) : ''}`,
           machineId: s.machineId, cwd: s.project, repository: s.repository, running: s.running, gitBranch: s.gitBranch, sessionName: s.sessionName,
           origin: 'user',
@@ -2906,23 +2937,29 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'GET' && parts.length === 4 && parts[3] === 'messages') {
         res.setHeader('Cache-Control', 'no-store');
-        const id = decodeURIComponent(parts[2]), following = url.searchParams.get('source') === 'transcript', running = following ? null : manager.get(id);
+        const id = decodeURIComponent(parts[2]), following = url.searchParams.get('source') === 'transcript', running = following ? null : manager.current(id);
         // Passive CLI followers read the current transcript, even while an idle
         // panel connection retains its launch-time baseHistory for SSE replay.
         if (running && !running.job.closed && Array.isArray(running.baseMessages) && !url.searchParams.has('before')) return sendJSON(res, 200, { ...running.baseHistory, id: running.id, engine: running.engine, project: running.job.meta.cwd, worktree: running.job.meta.worktree, messages: running.baseMessages, liveReplay: true, jobId: running.job.meta.jobId });
-        const directoryItem = following ? sessionDirectory.findCached(id) : sessionDirectory.find(id);
+        let directoryItem = sessionDirectory.findCached(id);
         const metadata = sessionStore.read()[id];
         const saved = conversations.get(id);
+        if (!following && !directoryItem && !metadata?.machineId && !metadata?.node && !saved?.machineId && !transcriptPathFor(id) && !codexSessions.pathFor(id)) {
+          directoryItem = (await sessionDirectory.list()).sessions.find(item => item.id === id);
+        }
         const owner = metadata?.machineId || metadata?.node || saved?.machineId || directoryItem?.machineId || machineId();
         const page = { since: url.searchParams.get('since'), before: url.searchParams.get('before') ?? undefined, limit: Math.max(1, Number(url.searchParams.get('limit')) || 80) };
         const r = await conversationHistory(id, owner, { cachedDirectory: true, ...page });
         if (r?.unchanged) return sendJSON(res, 200, r);
         if (!r) return sendJSON(res, 404, { error: T(lang, 'errNotFound') });
         let lastLoginFailure;
-        if (!page.before && running?.engine === 'codex' && running.job.closed) {
+        // Only replay an archived journal when a failed Codex turn may have login diagnostics.
+        const record = !following && !running && page.before === undefined ? runStore.find(id) : null;
+        const diagnosticRun = running || (record?.engine === 'codex' && record.state === 'failed' ? manager.get(id) : null);
+        if (page.before === undefined && diagnosticRun?.engine === 'codex' && diagnosticRun.job.closed) {
           const state = require('./conversation-state');
-          const failure = state.lastCodexLoginFailure(running.job.events, r.messages);
-          if (failure) lastLoginFailure = { at: failure.timestamp, hint: state.codexLoginHint(failure.error, codexLoginSource(running)) };
+          const failure = state.lastCodexLoginFailure(diagnosticRun.job.events, r.messages);
+          if (failure) lastLoginFailure = { at: failure.timestamp, hint: state.codexLoginHint(failure.error, codexLoginSource(diagnosticRun)) };
         }
         return sendJSON(res, 200, { ...r, engine: r.engine || metadata?.engine || saved?.engine || directoryItem?.engine, project: directoryItem?.project || r.project, machineId: owner, worktree: metadata?.worktree || null, lastLoginFailure });
       }
@@ -3196,7 +3233,7 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
     const self = clusterConfig.members.find(item => item.id === clusterConfig.nodeId);
     if (self?.witness) return;
     const oldRuntime = registry.node(id); if (oldRuntime?.info.transport === 'cluster' && oldRuntime.peer !== peer) { registry.removeNode(id); clusterRuntimePending.delete(id); }
-    require('./node/agent').serveNode({ peer, runtime: executionRuntime, ownerId: id, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listSessions, messages: machineHistoryPage, search: input => historyWorker.read('search', input), previews: items => historyWorker.read('sessionPreviews', items), userPage: input => historyWorker.read('sessionUserPage', input) }, beforeOpen: async (id, options) => { const native = id && await registry.adapter(options.engine, 'local')?.nativeSessionAvailable?.(id); if (id && manager.busy(id) && !native) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed && !manager.busy(id)) previous.session.close(); } });
+    require('./node/agent').serveNode({ peer, runtime: executionRuntime, ownerId: id, host: { ...registry.node('local').host, projects: () => knownProjects().filter(dir => fs.existsSync(dir)) }, engines: [...registry.node('local').engines.values()], id: clusterConfig.nodeId, label: self?.label, history: { list: listPanelSessions, messages: machineHistoryPage, search: input => historyWorker.read('search', input), previews: items => historyWorker.read('sessionPreviews', items), userPage: input => historyWorker.read('sessionUserPage', input) }, beforeOpen: async (id, options) => { const native = id && await registry.adapter(options.engine, 'local')?.nativeSessionAvailable?.(id); if (id && manager.busy(id) && !native) throw new Error('这条会话仍在执行，请等待当前任务结束'); const previous = id && manager.get(id); if (previous && !previous.job.closed && !manager.busy(id)) previous.session.close(); } });
     setImmediate(() => attachClusterRuntime(id, peer).catch(error => console.warn('集群执行连接：' + error.message)));
   } });
   cluster = require('./core/cluster').createCluster({ dir: DATA_DIR, config: clusterConfig, network: clusterNetwork, gateway: imGateways, canTransfer: () => manager.running().length === 0 && executionRuntime.running().length === 0 && !accountRouter.sessions().items.some(item => item.running) });
@@ -3208,6 +3245,10 @@ if (clusterConfig?.clusterId && clusterConfig?.nodeId && clusterConfig?.token &&
   clusterNetwork.handle('accounts.exchange', (source, packet) => { if (clusterConfig.members.find(item => item.id === source)?.witness) throw new Error('见证节点不参与凭证同步'); return accountPool.exchangeWire(packet); });
   clusterNetwork.handle('accounts.refresh', (_, input) => accountPool.refreshWire(input));
   clusterNetwork.handle('accounts.renew', (source, packet) => accountPool.renewWire(source, packet));
+  clusterNetwork.handle('sessions.pin', (_, input) => {
+    if (!cluster.canStart()) throw new Error('主节点已切换，请重试');
+    return sessionPins.set(input);
+  });
   clusterNetwork.handle('workspaces.save', async (_, input) => { if (!cluster.canStart()) throw new Error('当前节点没有主节点租约，请刷新后重试'); return workspaceStore.save(input); });
   clusterNetwork.handle('conversations.put', (_, record) => { if (!cluster.canStart()) throw new Error('当前节点没有共享状态写入租约'); conversations.merge(record); return { ok: true }; });
   clusterNetwork.handle('heartflow.review', async (_, {value,sender}) => {
@@ -3284,7 +3325,13 @@ process.once('SIGINT', stopPanel);
 
 if (HISTORY_WORKER) parentPort.on('message', async ({ id, type, input }) => {
   try {
-    const handlers = { stats: readStats, usage: usageCounts, wrapped: wrappedStats, live: liveSnapshot, search: searchTranscripts, captureOwners, sessionPreviews: readSessionPreviews, sessionUserPage: readSessionUserPage };
+    const handlers = {
+      sessionList: ({ running, proxyRuns }) => {
+        const active = new Set(running);
+        return collectSessionRows(id => active.has(id), new Set(proxyRuns));
+      },
+      messages: ({ id, page }) => sessionHistoryPage(id, page),
+      stats: readStats, usage: usageCounts, wrapped: wrappedStats, live: liveSnapshot, search: searchTranscripts, captureOwners, sessionPreviews: readSessionPreviews, sessionUserPage: readSessionUserPage };
     if (!Object.hasOwn(handlers, type)) throw new Error('Unknown history operation');
     parentPort.postMessage({ id, value: await handlers[type](input) });
   } catch (error) { parentPort.postMessage({ id, error: error.message }); }
